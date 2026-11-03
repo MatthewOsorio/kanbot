@@ -1,0 +1,7 @@
+{
+  "apiRetries": 5,
+  "stop": "api_error",
+  "apiError": "overloaded",
+  "error": "API overloaded",
+  "costUsd": 0
+}

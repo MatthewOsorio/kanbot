@@ -1,0 +1,47 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Reading the board component."
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t1",
+        "name": "Read",
+        "input": {
+          "file_path": "apps/web/components/board.tsx"
+        }
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t1",
+        "isError": false,
+        "content": "(file contents)"
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t2",
+        "name": "mcp__kanbot__report_result",
+        "input": {
+          "verdict": "success"
+        }
+      },
+      "delayMs": 0
+    }
+  ],
+  "report": {
+    "verdict": "maybe",
+    "summary": ""
+  },
+  "costUsd": 0.02
+}

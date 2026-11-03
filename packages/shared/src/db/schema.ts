@@ -1,18 +1,31 @@
-// M1 subset of requirements §11. Later milestones add their tables/columns in their own migrations
+// Subset of requirements §11 (M1 + M2). Later milestones add their tables/columns in their own migrations
 // (see "Deferred from M1" in docs/requirements.md §16).
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { uuidv7 } from "../ids";
-import { activityActions, criterionStatuses, priorities, ticketTypes } from "../schemas";
+import {
+  activityActions,
+  artifactKinds,
+  criterionSources,
+  criterionStatuses,
+  priorities,
+  runEventTypes,
+  runStates,
+  statusFlags,
+  ticketTypes,
+} from "../schemas";
 
 const id = () => uuid("id").primaryKey().$defaultFn(uuidv7);
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -21,12 +34,18 @@ export const ticketType = pgEnum("ticket_type", ticketTypes);
 export const ticketPriority = pgEnum("ticket_priority", priorities);
 export const criterionStatus = pgEnum("criterion_status", criterionStatuses);
 export const activityAction = pgEnum("activity_action", activityActions);
+export const criterionSource = pgEnum("criterion_source", criterionSources);
+export const statusFlag = pgEnum("ticket_status_flag", statusFlags);
+export const runState = pgEnum("run_state", runStates);
+export const runEventType = pgEnum("run_event_type", runEventTypes);
+export const artifactKind = pgEnum("artifact_kind", artifactKinds);
 
 export const projects = pgTable("projects", {
   id: id(),
   keyPrefix: text("key_prefix").notNull().unique(),
   name: text("name").notNull(),
   defaultBranch: text("default_branch").notNull().default("main"),
+  repoPath: text("repo_path"),
   ticketSeq: integer("ticket_seq").notNull().default(0),
   createdAt: createdAt(),
 });
@@ -64,6 +83,7 @@ export const tickets = pgTable(
       .references(() => columns.id),
     // fractional-indexing key; always ORDER BY it with COLLATE "C" (byte order), never the default collation
     position: text("position").notNull(),
+    statusFlag: statusFlag("status_flag").notNull().default("none"),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -80,6 +100,7 @@ export const acceptanceCriteria = pgTable(
     position: integer("position").notNull(),
     text: text("text").notNull(),
     status: criterionStatus("status").notNull().default("open"),
+    source: criterionSource("source").notNull().default("user"),
   },
   (t) => [index().on(t.ticketId)],
 );
@@ -111,4 +132,70 @@ export const activity = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index().on(t.ticketId)],
+);
+
+export const runs = pgTable(
+  "runs",
+  {
+    id: id(),
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    agentSlug: text("agent_slug").notNull(),
+    columnSlug: text("column_slug").notNull(),
+    state: runState("state").notNull().default("queued"),
+    verdict: text("verdict"),
+    summary: text("summary"),
+    // The owner's "Request changes" text this run answers (UC-3); null for runs started by a move.
+    requestMd: text("request_md"),
+    sessionId: text("session_id"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 4, mode: "number" }).notNull().default(0),
+    error: text("error"),
+    createdAt: createdAt(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [
+    // One active run per ticket (requirements §11); keep in sync with activeRunStates.
+    uniqueIndex("runs_one_active_per_ticket")
+      .on(t.ticketId)
+      .where(sql`${t.state} in ('queued', 'running', 'awaiting_input')`),
+    index().on(t.state, t.createdAt),
+    index().on(t.ticketId, t.createdAt),
+  ],
+);
+
+export const runEvents = pgTable(
+  "run_events",
+  {
+    id: id(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    type: runEventType("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [unique().on(t.runId, t.seq)],
+);
+
+export const artifacts = pgTable(
+  "artifacts",
+  {
+    id: id(),
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => runs.id, { onDelete: "set null" }),
+    kind: artifactKind("kind").notNull(),
+    title: text("title").notNull(),
+    version: integer("version").notNull(),
+    contentMd: text("content_md").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [unique().on(t.ticketId, t.kind, t.version)],
 );

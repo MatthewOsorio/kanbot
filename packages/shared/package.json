@@ -4,17 +4,22 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./db": "./src/db/index.ts"
+    "./db": "./src/db/index.ts",
+    "./db/testing": "./src/db/testing.ts",
+    "./agents": "./src/agents.ts"
   },
   "scripts": {
     "typecheck": "tsc -p . --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "lint": "eslint ."
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",
+    "fractional-indexing": "^4.0.0",
     "pg": "^8.23.1",
+    "yaml": "2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

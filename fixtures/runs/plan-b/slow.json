@@ -1,0 +1,447 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Thinking slowly…"
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 1"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 2"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 3"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 4"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 5"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 6"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 7"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 8"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 9"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 10"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 11"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 12"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 13"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 14"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 15"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 16"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 17"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 18"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 19"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 20"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 21"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 22"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 23"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 24"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 25"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 26"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 27"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 28"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 29"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 30"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 31"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 32"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 33"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 34"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 35"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 36"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 37"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 38"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 39"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 40"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 41"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 42"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 43"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 44"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 45"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 46"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 47"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 48"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 49"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 50"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 51"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 52"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 53"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 54"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 55"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 56"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 57"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 58"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 59"
+      },
+      "delayMs": 500
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still reading, step 60"
+      },
+      "delayMs": 500
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Plan ready: a title filter in the top bar.",
+    "artifacts": [
+      {
+        "kind": "plan",
+        "title": "Plan",
+        "markdown": "## Problem\nThe board has no way to filter cards.\n\n## Approach\n- Add a filter input to the top bar.\n\n## Implementation steps\n1. Add `filter` state in `apps/web/components/board.tsx`.\n2. Filter cards by title.\n\n## Files likely touched\n- `apps/web/components/board.tsx`\n\n## Tests\n- Playwright: typing filters the board.\n\n## Risks and open questions\n- None.\n\n## Size\nS"
+      }
+    ],
+    "acceptanceCriteria": [
+      "Typing in the filter hides cards whose title does not match",
+      "Clearing the filter shows every card again"
+    ]
+  },
+  "costUsd": 0.05
+}

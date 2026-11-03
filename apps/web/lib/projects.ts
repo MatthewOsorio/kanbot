@@ -1,4 +1,7 @@
+import { statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { DEFAULT_COLUMNS, createProjectBody } from "@kanbot/shared";
+import { loadAgent } from "@kanbot/shared/agents";
 import { columns, projects, tickets } from "@kanbot/shared/db";
 import { asc, eq, sql } from "drizzle-orm";
 import type { z } from "zod";
@@ -10,6 +13,20 @@ export function listProjects() {
 }
 
 export async function createProject(input: z.output<typeof createProjectBody>) {
+  if (input.repoPath !== undefined) {
+    let dir = false;
+    try {
+      dir = isAbsolute(input.repoPath) && statSync(input.repoPath).isDirectory();
+    } catch {
+      // missing path: reported below
+    }
+    if (!dir)
+      throw new HttpError(
+        400,
+        "invalid_repo_path",
+        "Repo path must be an absolute path to an existing folder",
+      );
+  }
   try {
     return await db.transaction(async (tx) => {
       const [project] = await tx.insert(projects).values(input).returning();
@@ -45,12 +62,35 @@ export async function getBoard(projectId: string) {
         labels: tickets.labels,
         columnId: tickets.columnId,
         position: tickets.position,
+        statusFlag: tickets.statusFlag,
       })
       .from(tickets)
       .where(eq(tickets.projectId, projectId))
       .orderBy(sql`${tickets.position} collate "C"`, asc(tickets.id)),
   ]);
-  return { project, columns: cols, tickets: cards };
+  return {
+    project,
+    columns: cols.map((c) => ({ ...c, agent: columnAgent(c.agentSlug) })),
+    tickets: cards,
+  };
+}
+
+/** What the board shows about a column's agent; null when its file hasn't shipped (the column is a gate). */
+function columnAgent(slug: string | null) {
+  if (!slug) return null;
+  try {
+    const a = loadAgent(slug);
+    return (
+      a && {
+        slug: a.slug,
+        name: a.name,
+        tagline: a.tagline,
+        startLine: a.statusLines.running ?? `${a.name} is on it.`,
+      }
+    );
+  } catch {
+    return null; // invalid file: the run itself reports the error
+  }
 }
 
 export type Board = Awaited<ReturnType<typeof getBoard>>;

@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Reading the board component."
+      },
+      "delayMs": 0
+    }
+  ],
+  "report": {
+    "verdict": "needs_input",
+    "summary": "Two readings of the ticket.",
+    "questions": ["1. Filter by title only, or by labels too?"]
+  },
+  "costUsd": 0.04
+}

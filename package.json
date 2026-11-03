@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --filter @kanbot/web dev",
+    "dev": "pnpm --parallel --filter @kanbot/web --filter @kanbot/worker dev",
     "build": "pnpm --filter @kanbot/web build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
@@ -14,10 +14,15 @@
     "test:e2e": "pnpm --filter @kanbot/web test:e2e",
     "db:generate": "pnpm --filter @kanbot/shared db:generate",
     "db:migrate": "pnpm --filter @kanbot/shared db:migrate",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "dev:web": "pnpm --filter @kanbot/web dev",
+    "dev:worker": "pnpm --filter @kanbot/worker dev"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "^9.39.5",
     "prettier": "^3.9.10",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "typescript-eslint": "8.72.0"
   }
 }
