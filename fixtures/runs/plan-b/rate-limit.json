@@ -1,0 +1,59 @@
+{
+  "apiRetries": 2,
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Reading the board component."
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t1",
+        "name": "Read",
+        "input": {
+          "file_path": "apps/web/components/board.tsx"
+        }
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t1",
+        "isError": false,
+        "content": "(file contents)"
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t2",
+        "name": "mcp__kanbot__report_result",
+        "input": {
+          "verdict": "success"
+        }
+      },
+      "delayMs": 0
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Plan ready: a title filter in the top bar.",
+    "artifacts": [
+      {
+        "kind": "plan",
+        "title": "Plan",
+        "markdown": "## Problem\nThe board has no way to filter cards.\n\n## Approach\n- Add a filter input to the top bar.\n\n## Implementation steps\n1. Add `filter` state in `apps/web/components/board.tsx`.\n2. Filter cards by title.\n\n## Files likely touched\n- `apps/web/components/board.tsx`\n\n## Tests\n- Playwright: typing filters the board.\n\n## Risks and open questions\n- None.\n\n## Size\nS"
+      }
+    ],
+    "acceptanceCriteria": [
+      "Typing in the filter hides cards whose title does not match",
+      "Clearing the filter shows every card again"
+    ]
+  },
+  "costUsd": 0.12
+}

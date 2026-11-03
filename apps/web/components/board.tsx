@@ -20,17 +20,23 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { BoardEvent } from "@kanbot/shared";
+import type { BoardEvent, StatusFlag } from "@kanbot/shared";
+import { AlertTriangle, Hand, Loader2 } from "lucide-react";
 import { generateKeyBetween } from "fractional-indexing";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TicketDrawer } from "@/components/ticket-drawer";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/client";
+import { api, ApiError } from "@/lib/client";
 import type { Board as BoardData, Card } from "@/lib/projects";
 
 type Project = { id: string; name: string };
+type ColumnData = BoardData["columns"][number];
+type Health = Record<"database" | "worker" | "anthropic" | "github", string>;
+
+/** Flags that mean the owner has to act (the top bar's "Needs me" count). */
+const NEEDS_ME: StatusFlag[] = ["needs_input", "plan_ready", "awaiting_approval", "failed"];
 
 // Fractional keys compare by code unit (Postgres COLLATE "C"), so never use localeCompare here.
 const byPosition = (a: Card, b: Card) =>
@@ -44,6 +50,8 @@ export function Board({ projectId }: { projectId: string }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [lastEvent, setLastEvent] = useState<BoardEvent | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [health, setHealth] = useState<Health | null>(null);
   const loadSeq = useRef(0);
   const closeDrawer = useCallback(() => setOpenId(null), []);
 
@@ -63,11 +71,25 @@ export function Board({ projectId }: { projectId: string }) {
     const es = new EventSource(`/api/events?projectId=${projectId}`);
     es.onopen = () => void load();
     es.onmessage = (m) => {
-      setLastEvent(JSON.parse(m.data) as BoardEvent);
-      void load();
+      const event = JSON.parse(m.data) as BoardEvent;
+      setLastEvent(event);
+      if (event.type !== "run.event") void load(); // log lines don't change the board
     };
     return () => es.close();
   }, [projectId, load]);
+
+  useEffect(() => {
+    const check = () => api<Health>("/api/health").then(setHealth, () => setHealth(null));
+    void check();
+    const t = setInterval(check, 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 4_000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -128,8 +150,20 @@ export function Board({ projectId }: { projectId: string }) {
 
     const moved = { ...card, columnId: toColumnId, position };
     setBoard({ ...board, tickets: board.tickets.map((t) => (t.id === card.id ? moved : t)) });
+    const target = board.columns.find((c) => c.id === toColumnId);
+    const move = (confirmCancel?: boolean) =>
+      api(`/api/tickets/${card.id}/move`, { body: { toColumnId, position, confirmCancel } });
     try {
-      await api(`/api/tickets/${card.id}/move`, { body: { toColumnId, position } });
+      try {
+        await move();
+      } catch (e) {
+        // FR-24: moving a ticket whose agent is working cancels that run, so ask first.
+        if (!(e instanceof ApiError && e.code === "run_active")) throw e;
+        if (!confirm(`${e.message}. Cancel the run and move ${key(card)} to ${target?.name}?`))
+          return void load();
+        await move(true);
+      }
+      if (target?.agent && card.columnId !== toColumnId) setNotice(target.agent.startLine);
     } catch (e) {
       setError((e as Error).message);
       void load(); // roll back the optimistic move
@@ -175,11 +209,20 @@ export function Board({ projectId }: { projectId: string }) {
             className="max-w-md"
           />
         </form>
+        {/* aria-live without role="status": dnd-kit's live region is the page's one status role. */}
+        <p aria-live="polite" aria-label="Agent notice" className="text-sm text-muted-foreground">
+          {notice}
+        </p>
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}
+        <span className="text-sm" aria-label="Tickets that need you">
+          Needs me:{" "}
+          <strong>{board.tickets.filter((t) => NEEDS_ME.includes(t.statusFlag)).length}</strong>
+        </span>
+        <HealthDot health={health} />
       </header>
 
       <DndContext
@@ -194,7 +237,7 @@ export function Board({ projectId }: { projectId: string }) {
           {board.columns.map((col) => {
             const cards = cardsIn(col.id);
             return (
-              <Column key={col.id} id={col.id} name={col.name} count={cards.length}>
+              <Column key={col.id} column={col} count={cards.length}>
                 <SortableContext
                   items={cards.map((c) => c.id)}
                   strategy={verticalListSortingStrategy}
@@ -222,16 +265,42 @@ export function Board({ projectId }: { projectId: string }) {
   );
 }
 
-function Column(props: { id: string; name: string; count: number; children: React.ReactNode }) {
-  const { setNodeRef } = useDroppable({ id: props.id });
+function HealthDot({ health }: { health: Health | null }) {
+  // Text, not just color (§15 accessibility): "All systems ok" or the parts that aren't.
+  const bad = health
+    ? Object.entries(health).filter(([k, v]) => v !== "ok" && !(k === "github" && v === "unknown"))
+    : [["web", "unreachable"]];
+  return (
+    <span className="flex items-center gap-1 text-sm" title={health ? JSON.stringify(health) : ""}>
+      <span
+        aria-hidden
+        className={`inline-block size-2 rounded-full ${bad.length ? "bg-amber-500" : "bg-green-600"}`}
+      />
+      {bad.length ? bad.map(([k, v]) => `${k} ${v}`).join(", ") : "All systems ok"}
+    </span>
+  );
+}
+
+function Column(props: { column: ColumnData; count: number; children: React.ReactNode }) {
+  const { column } = props;
+  const { setNodeRef } = useDroppable({ id: column.id });
   return (
     <section
       ref={setNodeRef}
-      aria-label={props.name}
+      aria-label={column.name}
       className="flex w-64 shrink-0 flex-col rounded-lg bg-muted/60 p-2"
     >
-      <h2 className="mb-2 flex justify-between px-1 text-sm font-medium">
-        {props.name}
+      <h2 className="mb-2 flex items-center gap-2 px-1 text-sm font-medium">
+        {column.agent && (
+          // eslint-disable-next-line @next/next/no-img-element -- tiny local SVG, no optimisation needed
+          <img
+            src={`/api/agents/${column.agent.slug}/avatar`}
+            alt={column.agent.name}
+            title={`${column.agent.name}: ${column.agent.tagline}`}
+            className="size-5 rounded-full"
+          />
+        )}
+        <span className="flex-1">{column.name}</span>
         <span className="text-muted-foreground" aria-label={`${props.count} tickets`}>
           {props.count}
         </span>
@@ -284,6 +353,47 @@ function CardBody({ card, cardKey }: { card: Card; cardKey: string }) {
       {card.labels.length > 0 && (
         <p className="mt-1 text-xs text-muted-foreground">{card.labels.join(", ")}</p>
       )}
+      <StatusPill flag={card.statusFlag} />
     </article>
+  );
+}
+
+/** Card status pill (requirements §13): always an icon plus text, never color alone. */
+function StatusPill({ flag }: { flag: StatusFlag }) {
+  const pill = {
+    running: {
+      icon: <Loader2 className="size-3 animate-spin" />,
+      text: "Working",
+      cls: "bg-blue-100 text-blue-900",
+    },
+    plan_ready: {
+      icon: <Hand className="size-3" />,
+      text: "Plan ready · needs you",
+      cls: "bg-amber-100 text-amber-900",
+    },
+    needs_input: {
+      icon: <Hand className="size-3" />,
+      text: "Needs you",
+      cls: "bg-amber-100 text-amber-900",
+    },
+    awaiting_approval: {
+      icon: <Hand className="size-3" />,
+      text: "Needs you",
+      cls: "bg-amber-100 text-amber-900",
+    },
+    failed: {
+      icon: <AlertTriangle className="size-3" />,
+      text: "Failed",
+      cls: "bg-red-100 text-red-900",
+    },
+  }[flag as string];
+  if (!pill) return null;
+  return (
+    <span
+      className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${pill.cls}`}
+    >
+      {pill.icon}
+      {pill.text}
+    </span>
   );
 }

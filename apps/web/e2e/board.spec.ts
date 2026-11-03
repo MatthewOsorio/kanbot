@@ -30,6 +30,7 @@ test("create and move a ticket; a second tab updates live", async ({ browser }) 
   await a.getByLabel("New criterion").fill("It moves");
   await a.getByLabel("New criterion").press("Enter");
   await expect(a.getByLabel("Criterion", { exact: true })).toHaveValue("It moves");
+  await a.getByRole("tab", { name: /Comments/ }).click();
   await a.getByLabel("New comment").fill("Looks good");
   await a.getByRole("button", { name: "Comment", exact: true }).click();
   await expect(a.getByText("Looks good")).toBeVisible();
@@ -52,6 +53,9 @@ test("create and move a ticket; a second tab updates live", async ({ browser }) 
   await expect(column(b, "Backlog").getByText("Live ticket")).toHaveCount(0);
   await b.reload();
   await expect(column(b, "Planning").getByText("Live ticket")).toBeVisible();
+
+  // Planning starts Plan B (replay runtime); wait for its plan so the next move needs no cancel.
+  await expect(column(b, "Planning").getByText("Plan ready · needs you")).toBeVisible();
 
   // Pointer drag in tab B to Ready shows up live in tab A.
   const from = (await column(b, "Planning").getByText("Live ticket").boundingBox())!;

@@ -2,20 +2,25 @@ import {
   createCommentBody,
   createCriterionBody,
   createTicketBody,
+  activeRunStates,
   moveTicketBody,
   patchCriterionBody,
   patchTicketBody,
-  type ActivityAction,
 } from "@kanbot/shared";
 import {
   acceptanceCriteria,
   activity,
+  artifacts,
+  cancelActiveRun,
   columns,
   comments,
+  logActivity,
   projects,
+  runs,
+  startColumnAgent,
   tickets,
 } from "@kanbot/shared/db";
-import { and, asc, desc, eq, max, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, max, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";
@@ -23,10 +28,6 @@ import { db } from "./db";
 import { publish, type Tx } from "./events";
 
 type In<T extends z.ZodType> = z.output<T>;
-
-function logActivity(tx: Tx, ticketId: string, action: ActivityAction, data: object = {}) {
-  return tx.insert(activity).values({ ticketId, action, data: data as Record<string, unknown> });
-}
 
 async function projectOf(tx: Tx, ticketId: string): Promise<string> {
   const [t] = await tx
@@ -74,22 +75,39 @@ export function createTicket(projectId: string, input: In<typeof createTicketBod
 
 export async function getTicket(id: string) {
   const [row] = await db
-    .select({ ticket: tickets, keyPrefix: projects.keyPrefix, columnName: columns.name })
+    .select({
+      ticket: tickets,
+      keyPrefix: projects.keyPrefix,
+      columnName: columns.name,
+      columnSlug: columns.slug,
+    })
     .from(tickets)
     .innerJoin(projects, eq(projects.id, tickets.projectId))
     .innerJoin(columns, eq(columns.id, tickets.columnId))
     .where(eq(tickets.id, id));
   if (!row) throw notFound("Ticket not found");
-  const criteria = await db
-    .select()
-    .from(acceptanceCriteria)
-    .where(eq(acceptanceCriteria.ticketId, id))
-    .orderBy(asc(acceptanceCriteria.position));
+  const [criteria, runList, artifactList] = await Promise.all([
+    db
+      .select()
+      .from(acceptanceCriteria)
+      .where(eq(acceptanceCriteria.ticketId, id))
+      .orderBy(asc(acceptanceCriteria.position)),
+    db.select().from(runs).where(eq(runs.ticketId, id)).orderBy(desc(runs.createdAt)).limit(20),
+    // Every version, newest first; the drawer shows the latest and lists the rest (versions are kept).
+    db
+      .select()
+      .from(artifacts)
+      .where(eq(artifacts.ticketId, id))
+      .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
+  ]);
   return {
     ...row.ticket,
     key: `${row.keyPrefix}-${row.ticket.number}`,
     columnName: row.columnName,
+    columnSlug: row.columnSlug,
     criteria,
+    runs: runList,
+    artifacts: artifactList,
   };
 }
 
@@ -111,6 +129,8 @@ export function patchTicket(id: string, input: In<typeof patchTicketBody>) {
 
 export function deleteTicket(id: string) {
   return db.transaction(async (tx) => {
+    const projectId = await projectOf(tx, id);
+    await cancelActiveRun(tx, projectId, id); // tells the worker to stop the agent before the run row goes
     const [t] = await tx
       .delete(tickets)
       .where(eq(tickets.id, id))
@@ -120,8 +140,16 @@ export function deleteTicket(id: string) {
   });
 }
 
-/** M1: any column to any column. The transition table and manual-move rules arrive with agents (M2/M3). */
-export function moveTicket(id: string, { toColumnId, position }: In<typeof moveTicketBody>) {
+/**
+ * Manual move (requirements §3 "Manual moves"): any column to any column. Moving to another column
+ * cancels the active run (only with confirmCancel, FR-24), clears the status flag (dropping on Ready
+ * is the plan approval) and starts the target column's agent. Reordering within a column changes nothing else.
+ * M3 adds the Ship/Done confirmations and bounce-count reset.
+ */
+export function moveTicket(
+  id: string,
+  { toColumnId, position, confirmCancel }: In<typeof moveTicketBody>,
+) {
   try {
     generateKeyBetween(position, null); // throws on a malformed fractional-index key
   } catch {
@@ -134,20 +162,32 @@ export function moveTicket(id: string, { toColumnId, position }: In<typeof moveT
       .where(eq(tickets.id, id))
       .for("update");
     if (!t) throw notFound("Ticket not found");
-    const cols = await tx
-      .select({ id: columns.id, name: columns.name })
-      .from(columns)
-      .where(eq(columns.projectId, t.projectId));
+    const cols = await tx.select().from(columns).where(eq(columns.projectId, t.projectId));
     const from = cols.find((c) => c.id === t.columnId)!;
     const to = cols.find((c) => c.id === toColumnId);
     if (!to) throw new HttpError(400, "invalid_column", "Column is not on this ticket's board");
+    const changesColumn = from.id !== to.id;
 
+    if (changesColumn) {
+      const [active] = await tx
+        .select({ agentSlug: runs.agentSlug })
+        .from(runs)
+        .where(and(eq(runs.ticketId, id), inArray(runs.state, [...activeRunStates])));
+      if (active && !confirmCancel)
+        throw new HttpError(409, "run_active", `${active.agentSlug} is working on this ticket`);
+      await cancelActiveRun(tx, t.projectId, id);
+    }
     await tx
       .update(tickets)
-      .set({ columnId: to.id, position, updatedAt: new Date() })
+      .set({
+        columnId: to.id,
+        position,
+        updatedAt: new Date(),
+        ...(changesColumn && { statusFlag: "none" as const }),
+      })
       .where(eq(tickets.id, id));
     // Reordering within a column is not worth a timeline entry.
-    if (from.id !== to.id) await logActivity(tx, id, "moved", { from: from.name, to: to.name });
+    if (changesColumn) await logActivity(tx, id, "moved", { from: from.name, to: to.name });
     await publish(tx, t.projectId, {
       type: "ticket.moved",
       ticketId: id,
@@ -156,6 +196,7 @@ export function moveTicket(id: string, { toColumnId, position }: In<typeof moveT
       position,
       actor: "owner",
     });
+    if (changesColumn) await startColumnAgent(tx, t.projectId, id, to);
   });
 }
 

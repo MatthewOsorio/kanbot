@@ -1,4 +1,6 @@
-/** Postgres NOTIFY channel shared by web and (from M2) worker. */
+import type { RunEventType, RunState } from "./schemas";
+
+/** Postgres NOTIFY channel shared by web and worker. */
 export const EVENTS_CHANNEL = "kanbot_events";
 
 /** Board events streamed over SSE (requirements §12). */
@@ -14,7 +16,19 @@ export type BoardEvent =
     }
   | { type: "ticket.updated"; ticketId: string; fields: string[] }
   | { type: "ticket.deleted"; ticketId: string }
-  | { type: "comment.created"; ticketId: string; commentId: string };
+  | { type: "comment.created"; ticketId: string; commentId: string }
+  | { type: "artifact.created"; ticketId: string; artifactId: string }
+  | {
+      type: "run.started" | "run.finished";
+      runId: string;
+      ticketId: string;
+      agentSlug: string;
+      state: RunState;
+      verdict?: string;
+      costUsd?: number;
+    }
+  // Ids only: NOTIFY payloads are capped at 8 KB, so clients page GET /api/runs/:id/events?after=seq.
+  | { type: "run.event"; runId: string; ticketId: string; seq: number; eventType: RunEventType };
 
 /** Payload sent on EVENTS_CHANNEL; projectId routes it to the right SSE subscribers. */
 export type EventEnvelope = { id: string; projectId: string; event: BoardEvent };

@@ -1,15 +1,8 @@
-import { EVENTS_CHANNEL, uuidv7, type BoardEvent, type EventEnvelope } from "@kanbot/shared";
-import { sql } from "drizzle-orm";
+import { EVENTS_CHANNEL, type EventEnvelope } from "@kanbot/shared";
 import { Client } from "pg";
-import type { db } from "./db";
 
-export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/** Publishes inside the caller's transaction, so listeners only hear about committed changes. */
-export async function publish(tx: Tx, projectId: string, event: BoardEvent) {
-  const envelope: EventEnvelope = { id: uuidv7(), projectId, event };
-  await tx.execute(sql`select pg_notify(${EVENTS_CHANNEL}, ${JSON.stringify(envelope)})`);
-}
+// publish() lives in shared so the worker writes events the same way.
+export { publish, type Tx } from "@kanbot/shared/db";
 
 type Listener = (e: EventEnvelope) => void;
 const g = globalThis as { kanbotListeners?: Set<Listener>; kanbotListen?: Promise<void> };

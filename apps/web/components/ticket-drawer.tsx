@@ -1,7 +1,8 @@
 "use client";
 
-import { priorities, ticketTypes, type BoardEvent } from "@kanbot/shared";
+import { activeRunStates, priorities, ticketTypes, type BoardEvent } from "@kanbot/shared";
 import { useEffect, useState } from "react";
+import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,6 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/client";
 import type { TicketDetail } from "@/lib/tickets";
@@ -23,8 +25,13 @@ type Activity = {
   data: Record<string, unknown>;
   createdAt: string;
 };
+type Run = TicketDetail["runs"][number];
+type RunEvent = { seq: number; type: string; payload: Record<string, unknown>; createdAt: string };
 
 const statusMark = { open: "○ open", pass: "✓ pass", fail: "✗ fail" } as const;
+const isActive = (r: Run | undefined) =>
+  !!r && (activeRunStates as readonly string[]).includes(r.state);
+const RETRYABLE = ["failed", "interrupted", "timed_out", "budget_exceeded", "cancelled"];
 
 export function TicketDrawer(props: {
   ticketId: string | null;
@@ -40,7 +47,10 @@ export function TicketDrawer(props: {
   const [error, setError] = useState("");
   const { ticket, comments, activity } = data ?? { ticket: null, comments: [], activity: [] };
   // Live: refetch whenever this ticket changes in any tab. The board remounts us per ticket (key).
-  const change = lastEvent?.ticketId === ticketId ? lastEvent : null;
+  // Log lines (run.event) are fetched by the Live tab alone.
+  const forUs = lastEvent && "ticketId" in lastEvent && lastEvent.ticketId === ticketId;
+  const change = forUs && lastEvent.type !== "run.event" ? lastEvent : null;
+  const runEvent = forUs && lastEvent.type === "run.event" ? lastEvent : null;
 
   useEffect(() => {
     if (!ticketId) return;
@@ -70,6 +80,7 @@ export function TicketDrawer(props: {
 
   const patch = (body: Record<string, unknown>) =>
     run(() => api(`/api/tickets/${ticketId}`, { method: "PATCH", body }));
+  const latest = ticket?.runs[0];
 
   return (
     <Sheet open={!!ticketId} onOpenChange={(open) => !open && onClose()}>
@@ -94,6 +105,14 @@ export function TicketDrawer(props: {
                 onBlur={(e) => e.target.value !== ticket.title && patch({ title: e.target.value })}
               />
             </SheetHeader>
+
+            {latest && (
+              <RunBar
+                run={latest}
+                onCancel={() => run(() => api(`/api/runs/${latest.id}/cancel`, { method: "POST" }))}
+                onRetry={() => run(() => api(`/api/runs/${latest.id}/retry`, { method: "POST" }))}
+              />
+            )}
 
             <div className="flex flex-wrap gap-3 text-sm">
               <label className="flex items-center gap-1">
@@ -149,6 +168,12 @@ export function TicketDrawer(props: {
                 }
               />
             </label>
+            {ticket.descriptionMd && (
+              <details className="text-sm">
+                <summary className="cursor-pointer text-muted-foreground">Preview</summary>
+                <Markdown>{ticket.descriptionMd}</Markdown>
+              </details>
+            )}
 
             <section aria-labelledby="ac-h" className="space-y-2">
               <h3 id="ac-h" className="text-sm font-medium">
@@ -173,6 +198,9 @@ export function TicketDrawer(props: {
                         )
                       }
                     />
+                    {c.source === "agent" && (
+                      <span className="shrink-0 text-xs text-muted-foreground">from plan</span>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -206,53 +234,122 @@ export function TicketDrawer(props: {
               </p>
             )}
 
-            {/* Tabs (Activity, Live, Artifacts, Diff, Comments) arrive with M2; M1 stacks the two it has. */}
-            <section aria-labelledby="comments-h" className="space-y-2">
-              <h3 id="comments-h" className="text-sm font-medium">
-                Comments
-              </h3>
-              <ul className="space-y-2">
-                {comments.map((c) => (
-                  <li key={c.id} className="rounded-md border p-2 text-sm">
-                    <p className="whitespace-pre-wrap">{c.bodyMd}</p>
-                    <time className="text-xs text-muted-foreground">
-                      {new Date(c.createdAt).toLocaleString()}
-                    </time>
-                  </li>
-                ))}
-              </ul>
-              <form
-                className="space-y-2"
-                action={(f) =>
-                  run(() =>
-                    api(`/api/tickets/${ticket.id}/comments`, {
-                      body: { bodyMd: f.get("bodyMd") },
-                    }),
-                  )
-                }
-              >
-                <Textarea name="bodyMd" required aria-label="New comment" rows={2} />
-                <Button type="submit" size="sm">
-                  Comment
-                </Button>
-              </form>
-            </section>
+            {/* Diff tab arrives with branches in M3. */}
+            <Tabs defaultValue={isActive(latest) ? "live" : "activity"}>
+              <TabsList>
+                <TabsTrigger value="activity">Activity</TabsTrigger>
+                <TabsTrigger value="live">Live</TabsTrigger>
+                <TabsTrigger value="artifacts">Artifacts ({ticket.artifacts.length})</TabsTrigger>
+                <TabsTrigger value="comments">Comments ({comments.length})</TabsTrigger>
+              </TabsList>
 
-            <section aria-labelledby="activity-h" className="space-y-2">
-              <h3 id="activity-h" className="text-sm font-medium">
-                Activity
-              </h3>
-              <ol className="space-y-1 text-sm">
-                {activity.map((a) => (
-                  <li key={a.id}>
-                    <span className="text-muted-foreground">
-                      {new Date(a.createdAt).toLocaleString()}
-                    </span>{" "}
-                    {a.actor} {describe(a)}
-                  </li>
-                ))}
-              </ol>
-            </section>
+              <TabsContent value="activity">
+                <ol className="space-y-1 text-sm">
+                  {activity.map((a) => (
+                    <li key={a.id}>
+                      <span className="text-muted-foreground">
+                        {new Date(a.createdAt).toLocaleString()}
+                      </span>{" "}
+                      {a.actor} {describe(a)}
+                    </li>
+                  ))}
+                </ol>
+              </TabsContent>
+
+              <TabsContent value="live">
+                {latest ? (
+                  <LiveLog
+                    key={latest.id}
+                    runId={latest.id}
+                    lastSeq={runEvent?.runId === latest.id ? runEvent.seq : 0}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">No agent has run on this ticket.</p>
+                )}
+              </TabsContent>
+
+              <TabsContent value="artifacts" className="space-y-4">
+                {ticket.artifacts.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No artifacts yet.</p>
+                )}
+                {ticket.columnSlug === "planning" &&
+                  ticket.artifacts.some((a) => a.kind === "plan") && (
+                    // Separate from comments: this re-runs Plan B at once with the request (UC-3).
+                    <form
+                      className="space-y-2"
+                      action={(f) =>
+                        run(() =>
+                          api(`/api/tickets/${ticket.id}/revise-plan`, {
+                            body: { requestMd: f.get("requestMd") },
+                          }),
+                        )
+                      }
+                    >
+                      <Textarea
+                        name="requestMd"
+                        required
+                        aria-label="Requested plan changes"
+                        placeholder="What should change in the plan?"
+                        rows={2}
+                        disabled={isActive(latest)}
+                      />
+                      <Button type="submit" size="sm" disabled={isActive(latest)}>
+                        Revise plan
+                      </Button>
+                    </form>
+                  )}
+                {ticket.artifacts.map((a, i) =>
+                  i === ticket.artifacts.findIndex((b) => b.kind === a.kind) ? (
+                    <article
+                      key={a.id}
+                      aria-label={`${a.title} v${a.version}`}
+                      className="rounded-md border p-3"
+                    >
+                      <h3 className="text-sm font-semibold">
+                        {a.title} <span className="text-muted-foreground">v{a.version}</span>
+                      </h3>
+                      <Markdown>{a.contentMd}</Markdown>
+                    </article>
+                  ) : (
+                    // Older versions are kept (UC-3); collapsed under the latest.
+                    <details key={a.id} className="rounded-md border p-3 text-sm">
+                      <summary className="cursor-pointer">
+                        {a.title} v{a.version} · {new Date(a.createdAt).toLocaleString()}
+                      </summary>
+                      <Markdown>{a.contentMd}</Markdown>
+                    </details>
+                  ),
+                )}
+              </TabsContent>
+
+              <TabsContent value="comments" className="space-y-2">
+                <ul className="space-y-2">
+                  {comments.map((c) => (
+                    <li key={c.id} className="rounded-md border p-2 text-sm">
+                      <Markdown>{c.bodyMd}</Markdown>
+                      <time className="text-xs text-muted-foreground">
+                        {new Date(c.createdAt).toLocaleString()}
+                      </time>
+                    </li>
+                  ))}
+                </ul>
+                <form
+                  className="space-y-2"
+                  action={(f) =>
+                    run(() =>
+                      api(`/api/tickets/${ticket.id}/comments`, {
+                        body: { bodyMd: f.get("bodyMd") },
+                      }),
+                    )
+                  }
+                >
+                  <Textarea name="bodyMd" required aria-label="New comment" rows={2} />
+                  <Button type="submit" size="sm">
+                    Comment
+                  </Button>
+                </form>
+              </TabsContent>
+            </Tabs>
 
             <Button
               variant="destructive"
@@ -274,6 +371,111 @@ export function TicketDrawer(props: {
   );
 }
 
+/** Latest run: agent, state, elapsed time, cost, and the Cancel / Retry actions (FR-35). */
+function RunBar({
+  run,
+  onCancel,
+  onRetry,
+}: {
+  run: Run;
+  onCancel: () => void;
+  onRetry: () => void;
+}) {
+  const active = isActive(run);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(t);
+  }, [active]);
+  const start = run.startedAt ? new Date(run.startedAt).getTime() : null;
+  const end = run.endedAt ? new Date(run.endedAt).getTime() : now;
+  const secs = start ? Math.max(0, Math.round((end - start) / 1000)) : 0;
+  return (
+    <section aria-label="Latest run" className="space-y-1 rounded-md border p-2 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="flex-1">
+          <strong>{run.agentSlug}</strong> · {run.state.replace("_", " ")}
+          {start && ` · ${Math.floor(secs / 60)}m ${secs % 60}s`}
+          {/* shortcut: the SDK reports cost only when a run ends, so a running run shows none; M4 cost tracking can sum per-turn usage. */}
+          {!active && ` · $${run.costUsd.toFixed(2)}`}
+        </span>
+        {active && (
+          <Button size="sm" variant="outline" onClick={onCancel}>
+            Cancel run
+          </Button>
+        )}
+        {RETRYABLE.includes(run.state) && (
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            Retry
+          </Button>
+        )}
+      </div>
+      {run.summary && <p>{run.summary}</p>}
+      {run.error && <p className="text-destructive">{run.error}</p>}
+    </section>
+  );
+}
+
+/** Live tab (UC-8): pages the stored log, then fetches what's new on each run.event. */
+function LiveLog({ runId, lastSeq }: { runId: string; lastSeq: number }) {
+  const [events, setEvents] = useState<RunEvent[]>([]);
+  const have = events.at(-1)?.seq ?? 0;
+  useEffect(() => {
+    if (lastSeq && lastSeq <= have) return;
+    let stale = false;
+    api<RunEvent[]>(`/api/runs/${runId}/events?after=${have}`).then(
+      (more) =>
+        !stale &&
+        more.length &&
+        setEvents((e) => [...e, ...more.filter((m) => m.seq > (e.at(-1)?.seq ?? 0))]),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [runId, lastSeq, have]);
+  if (!events.length)
+    return <p className="text-sm text-muted-foreground">Waiting for the agent…</p>;
+  return (
+    <ol aria-label="Run log" className="space-y-1 font-mono text-xs">
+      {events.map((e) => (
+        <li key={e.seq}>
+          <LogLine event={e} />
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function LogLine({ event: { type, payload } }: { event: RunEvent }) {
+  if (type === "assistant")
+    return <p className="whitespace-pre-wrap font-sans text-sm">{String(payload.text)}</p>;
+  if (type === "tool_call" || type === "tool_result")
+    return (
+      <details>
+        <summary className="cursor-pointer text-muted-foreground">
+          {type === "tool_call"
+            ? `→ ${String(payload.name)}`
+            : `← result${payload.isError ? " (error)" : ""}`}
+        </summary>
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-muted p-2">
+          {type === "tool_call" ? JSON.stringify(payload.input, null, 2) : String(payload.content)}
+        </pre>
+      </details>
+    );
+  const p = payload as Record<string, string | number>;
+  const text =
+    p.subtype === "api_retry"
+      ? `waiting on API (${p.error}), retry ${p.attempt}/${p.max_retries}`
+      : p.subtype === "result"
+        ? `finished: ${p.result}, ${p.turns ?? "?"} turns`
+        : p.subtype === "init"
+          ? `started on ${p.model}`
+          : JSON.stringify(payload);
+  return <p className="text-muted-foreground">· {text}</p>;
+}
+
 function describe(a: Activity): string {
   const d = a.data;
   switch (a.action) {
@@ -284,9 +486,16 @@ function describe(a: Activity): string {
     case "commented":
       return "commented";
     case "edited":
+      if (d.change === "replaced by plan") return `wrote ${String(d.count)} acceptance criteria`;
       return d.change
         ? `${String(d.change)} criterion "${String(d.text)}"`
         : `edited ${(d.fields as string[]).join(", ")}`;
+    case "run_started":
+      return d.request
+        ? `requested plan changes: "${String(d.request)}"`
+        : `started ${String(d.agent)}`;
+    case "run_finished":
+      return `finished ${String(d.agent)}: ${String(d.state).replace("_", " ")}${d.error ? ` (${String(d.error)})` : ""}`;
     default:
       return a.action;
   }

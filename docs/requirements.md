@@ -54,7 +54,7 @@ Work snakes from Backlog to Done; Code Review, QA, CI and your PR review can all
 
 ### Transition table
 
-The orchestrator applies these rules after every verdict; the human can still drag any ticket to any column, which cancels an active run and starts the target column's agent.
+The orchestrator applies these rules after every verdict; the human can still drag any ticket to any column, which cancels an active run and starts the target column's agent. The rules are data in `packages/shared/src/transitions.ts`; each milestone wires the rows for the agents it ships. A column whose agent file isn't in `agents/` yet behaves as a gate: no run starts there.
 
 | From | Event | To | Automatic? |
 | --- | --- | --- | --- |
@@ -84,7 +84,7 @@ Dragging a ticket yourself always works and always triggers the target column's 
 | You move a ticket to | What happens |
 | --- | --- |
 | Backlog | Any active run is cancelled; worktree and branch are kept; no agent runs. |
-| Planning | Plan B runs. If a plan exists, it revises it using the current branch diff and your comments. Bounce count resets. |
+| Planning | Plan B runs. If a plan exists, it revises it using the current branch diff, your comments (as background) and, when started from Revise plan, your change request. Bounce count resets. |
 | Ready | No agent; counts as approving the plan. |
 | In Progress | Sir Codes-a-Lot runs; a worktree is created if missing. |
 | Code Review | Nitpick Nancy reviews the branch as it stands, including commits you made yourself. |
@@ -162,7 +162,7 @@ Fourteen use cases define v1; UC-1 through UC-9 are the happy path and its loops
 | --- | --- | --- | --- |
 | UC-1 | Capture an idea | User types a one-line idea in a quick-add box (or via CLI/API). | Ticket created in Backlog with type and priority defaults. No agent runs. |
 | UC-2 | Plan a feature | User drags a ticket from Backlog to Planning. | Plan B writes a plan and acceptance criteria. Ticket shows "Plan ready — awaiting approval". |
-| UC-3 | Revise a plan | User comments on the plan ("use SQLite, not Postgres") and clicks Re-run. | Plan B re-runs with the comment as input and produces plan v2; v1 is kept in history. |
+| UC-3 | Revise a plan | User types what to change under the plan ("use SQLite, not Postgres") and clicks Revise plan. | Plan B re-runs at once with that request as its instruction and produces plan v2; v1 is kept in history. Comments are separate: general notes (later @mentions) that Plan B reads as background, and they never start a run. |
 | UC-4 | Approve and build | User drags the planned ticket to Ready, then In Progress (or enables auto-pull from Ready). | Worktree and branch created; Sir Codes-a-Lot implements and commits; on success the ticket auto-moves to Code Review. |
 | UC-5 | Review requests changes | Nitpick Nancy returns `changes_requested`. | Ticket bounces to In Progress with review comments attached; Sir Codes-a-Lot runs again with them as input. |
 | UC-6 | QA finds a bug | Testy McTestface returns `failed` with a bug report. | Ticket bounces to In Progress with the bug report; after the fix it goes through Code Review and QA again. |
@@ -215,7 +215,7 @@ Requirements marked MVP must ship in the first usable version; Later items are d
 
 | ID | Requirement | Phase |
 | --- | --- | --- |
-| FR-30 | Agents defined as markdown files with YAML frontmatter (section 8), including bundled plugins and skills such as Ponytail, loaded at startup and hot-reloaded on change. | MVP |
+| FR-30 | Agents defined as markdown files with YAML frontmatter (section 8), including bundled plugins and skills such as Ponytail, read from disk at the start of every run, so an edit applies to the next run without a restart. | MVP |
 | FR-31 | Agents page lists the roster with avatar, tagline, column, model and recent stats; config editable in the UI. | Later |
 | FR-32 | Each run gets a context bundle: ticket, acceptance criteria, latest plan, prior run summaries, open review comments or bug reports, and the project's CLAUDE.md. Nitpick Nancy also gets the plans and capped diffs of other in-flight tickets. | MVP |
 | FR-33 | Each run must finish by calling a `report_result` tool with a structured verdict; a run that ends without one is treated as `failed`. | MVP |
@@ -270,7 +270,7 @@ The web app and worker never call each other directly: the web app writes jobs t
 | Web app | Next.js (App Router), React, Tailwind CSS, shadcn/ui | Board UI plus API route handlers in one app. |
 | Drag and drop | dnd-kit | Accessible, keyboard-capable sortable lists. |
 | Database | PostgreSQL 16 with Drizzle ORM and drizzle-kit migrations | Typed queries; Postgres also backs the queue. |
-| Job queue | pg-boss | Durable jobs in Postgres; no Redis to run. |
+| Job queue | The `runs` table itself: the worker claims `queued` rows with `FOR UPDATE SKIP LOCKED`, woken by `NOTIFY` (5 s poll as backup) | Durable, no Redis and no second job record to keep in sync with the run; the concurrency limits are one SQL condition. (pg-boss was the original choice; dropped in M2.) |
 | Agent runtime | Claude Agent SDK (TypeScript), behind an `AgentRuntime` adapter | Same agent loop and tools as Claude Code; adapter keeps other backends possible. |
 | Git | `git` CLI via a thin wrapper (simple-git or `execa`) | Worktrees, branches, diffs, commits. |
 | GitHub | Octokit | Push status, PR creation, merge detection. |
@@ -283,7 +283,7 @@ The web app and worker never call each other directly: the web app writes jobs t
 
 - **Web (`apps/web`)**: renders the board, serves the REST API, validates transitions, writes ticket moves, enqueues run jobs, streams events to the browser over SSE.
 - **Worker (`apps/worker`)**: consumes run jobs, manages worktrees, assembles context, runs agents through the runtime adapter, persists run events, applies verdicts (moves tickets), enforces budgets and concurrency.
-- **Database**: source of truth for projects, tickets, runs, events, artifacts and costs; pg-boss queue tables; `NOTIFY` channel `kanbot_events` for live updates.
+- **Database**: source of truth for projects, tickets, runs, events, artifacts and costs; the `runs` table doubles as the job queue; `NOTIFY` channel `kanbot_events` carries live updates and wakes the worker.
 - **`agents/` folder**: one markdown file per agent, checked into the Kanbot repo and overridable per project at `<repo>/.kanbot/agents/`.
 
 ### Deployment on DigitalOcean
@@ -302,11 +302,11 @@ Production runs on one DigitalOcean Droplet with Docker Compose, reachable at an
 
 ## 8. Agent orchestration and runtime
 
-Every ticket move that lands in an agent column becomes a pg-boss job; the worker runs the agent in the ticket's worktree, streams its events, and acts on the verdict the agent reports through a required tool call.
+Every ticket move that lands in an agent column becomes a queued `runs` row; the worker runs the agent in the ticket's worktree, streams its events, and acts on the verdict the agent reports through a required tool call.
 
 ### Agent definition file
 
-Each agent is `agents/<slug>.md`: YAML frontmatter for config, markdown body for the system prompt. Frontmatter is validated with zod at load time; an invalid file disables that agent and shows an error on the Agents page.
+Each agent is `agents/<slug>.md`: YAML frontmatter for config, markdown body for the system prompt. Frontmatter is validated with zod each time a run starts; a run whose agent file is invalid fails with the validation error (the Agents page shows it once that page exists, M5). A missing file means the column is a gate.
 
 ```markdown
 ---
@@ -378,10 +378,10 @@ Four more plugins ship in the worker image, each enabled only for the agents tha
 
 ### Run lifecycle
 
-1. **Enqueue.** The web app writes the move, creates a `run` row in state `queued`, and sends a pg-boss job `run-agent` with `{runId}`. Only one active run per ticket; a new move cancels the old one first.
-2. **Prepare.** The worker claims the job when a concurrency slot is free (global default 2, per-project default 1). It creates or reuses the worktree, runs the project's install command if the lockfile changed, and sets state `running`.
+1. **Enqueue.** The web app writes the move and creates a `run` row in state `queued` in the same transaction; its `NOTIFY` wakes the worker. Only one active run per ticket (partial unique index); a new move cancels the old one first.
+2. **Prepare.** The worker claims the oldest queued run that fits the concurrency limits (global default 2, per-project default 1) in one `UPDATE … WHERE id = (SELECT … FOR UPDATE SKIP LOCKED)` under an advisory lock. It creates or reuses the worktree, runs the project's install command if the lockfile changed, and sets state `running`.
 3. **Assemble context.** The worker builds the prompt from: ticket fields, acceptance criteria, latest plan artifact, summaries of the last 3 runs, unresolved review comments or bug reports, user comments since the last run, the project CLAUDE.md, and the git diff stat. Large items are truncated with a pointer to the file in the worktree.
-4. **Execute.** The runtime adapter starts the agent with `cwd` = worktree, the agent's tool allowlist, its system prompt, and a custom `report_result` tool. Every SDK message is saved as a `run_event` and published on `NOTIFY`.
+4. **Execute.** The runtime adapter starts the agent with `cwd` = worktree (before a worktree exists, as for Plan B: the project checkout, read-only), only the agent's built-in tools, its system prompt, and a custom `report_result` tool that is always loaded. A `PreToolUse` hook refuses any call outside the frontmatter `tools`, and the agent gets no user or project Claude settings (`settingSources: []`) and no `DATABASE_URL`. Every SDK message is saved as a `run_event` (API key redacted) and announced on `NOTIFY` by id only, because `NOTIFY` payloads are capped at 8 KB.
 5. **Report.** The agent calls `report_result` with the verdict payload below. The worker validates it with zod, stores artifacts and comments, records final tokens and cost, and sets the run state.
 6. **Transition.** The worker applies the transition table (section 3) inside a database transaction, records it in the activity log, and enqueues the next column's agent if the move is automatic.
 
@@ -400,6 +400,7 @@ Run states: `queued`, `running`, `awaiting_input`, `succeeded`, `changes_request
     { "file": "apps/web/app/api/tickets/route.ts", "line": 42, "body": "Validate body with zod." }
   ],
   "questions": [],
+  "acceptanceCriteria": ["POST /tickets returns 400 for an empty title"],
   "criteriaResults": [
     { "criterionId": "ac_3", "status": "fail", "note": "WIP limit not enforced on drag" }
   ],
@@ -409,6 +410,8 @@ Run states: `queued`, `running`, `awaiting_input`, `succeeded`, `changes_request
   ]
 }
 ```
+
+`acceptanceCriteria` is Plan B's checklist. On `success` it replaces the previous agent-written criteria; the owner's own criteria are never touched. Each milestone adds the fields its agents use to the `report_result` schema (`packages/shared/src/verdict.ts`): M2 has `verdict`, `summary`, `artifacts`, `acceptanceCriteria` and `questions`.
 
 ### Rules the orchestrator enforces
 
@@ -437,8 +440,8 @@ Outside services fail routinely, so the worker sorts every error into transient 
 
 | Failure | Behavior |
 | --- | --- |
-| Anthropic rate limit (429) or overloaded / 5xx | Retry with exponential backoff and jitter, up to 5 attempts; the card shows "waiting on API". Retries don't count against the run's turn limit. |
-| Anthropic unavailable for more than 10 minutes | Run becomes `interrupted` and a banner appears; runs resume automatically once a health probe (every minute) succeeds. |
+| Anthropic rate limit (429) or overloaded / 5xx | The Agent SDK's built-in retry with backoff handles it; each retry is logged as a "waiting on API" line in the Live tab and turns the health indicator amber. Retries don't count against the run's turn limit. If the SDK gives up, the run becomes `interrupted`, the ticket stays put with Retry. |
+| Anthropic unavailable for more than 10 minutes | Run becomes `interrupted` and a banner appears; runs resume automatically once a health probe (every minute) succeeds. (M2 stops at `interrupted` + Retry; the banner and automatic resume arrive with Pause all in M4.) |
 | Anthropic auth or billing error (invalid key, no credit) | All agents pause immediately, with a banner and a notification; nothing retries until it's fixed. |
 | GitHub rate limit | Wait until the reset time GitHub reports; GitHub calls queue instead of failing runs. |
 | GitHub push or PR creation fails | Retry 3 times, then move the ticket to Blocked with the error. PR creation checks for an existing PR first, so retries never open duplicates. |
@@ -447,15 +450,15 @@ Outside services fail routinely, so the worker sorts every error into transient 
 | Database unavailable | The web app shows an error page; the worker stops claiming jobs until it reconnects. |
 | Disk over 90% full | No new runs start and a banner appears. A nightly cleanup job prunes worktrees of finished tickets, package caches and run logs past retention, so this should be rare. |
 
-`GET /api/health` reports database, queue, Anthropic and GitHub status; the board's top bar shows it as a single indicator.
+`GET /api/health` reports database, worker, Anthropic and GitHub status; the board's top bar shows it as a single indicator. The worker counts as up while it holds a Postgres connection named `kanbot-worker` (`pg_stat_activity`), so no heartbeat table is needed. Anthropic is judged from the latest runs: an API retry in a running run is `degraded`, an API error on the last finished run is `down`. GitHub reports `unknown` until M4.
 
 ### Testing without real agents
 
 The orchestrator is tested against a replay runtime, so automated tests are fast, repeatable and never spend tokens.
 
-- `ReplayRuntime` implements the same `AgentRuntime` interface as the SDK adapter and is selected with `KANBOT_RUNTIME=replay`.
+- `ReplayRuntime` implements the same `AgentRuntime` interface as the SDK adapter and is selected with `KANBOT_RUNTIME=replay`. It plays `fixtures/runs/<agent>/<scenario>.json`, where the scenario is a ticket label `replay:<name>` (else `default`), so an e2e test picks a script by labelling a ticket.
 - **Scripted runs.** A test declares each agent's events and final verdict (e.g. Nancy returns `changes_requested` twice, then `success`) to exercise bounce limits, Blocked, budgets and cancellation. A scripted run can include a patch that the replay applies to the worktree, so the diff, CI and PR paths have real changes to work with.
-- **Recorded runs.** With `KANBOT_RECORD=1`, a real run's events are saved to `fixtures/runs/<name>.jsonl`, secrets redacted, for later replay.
+- **Recorded runs** (M3). With `KANBOT_RECORD=1`, a real run's events are saved to `fixtures/runs/<name>.jsonl`, secrets redacted, for later replay.
 - **Simulated failures.** Replays can inject API 429s, timeouts, crashes mid-run and malformed verdicts to test the failure handling above.
 - Vitest and Playwright suites use only the replay runtime; CI never calls the real Anthropic API. A small manual smoke suite runs real agents against a sample repo before releases.
 
@@ -619,13 +622,13 @@ Ten tables cover v1; all IDs are UUIDv7, all timestamps `timestamptz`, and JSON 
 | `tickets` | id, project\_id, number, title, description\_md, type, priority, labels\[\], column\_id, position, parent\_id, branch\_name, worktree\_path, bounce\_count, status\_flag (`none`, `running`, `needs_input`, `plan_ready`, `awaiting_approval`, `waiting_on_ticket`, `pr_open`, `failed`), touch\_paths\[\], pr\_number, pr\_url, head\_sha, ci\_state, review\_state, created\_at, updated\_at | `(project_id, number)` unique; `position` is a fractional index for ordering in a column. |
 | `acceptance_criteria` | id, ticket\_id, position, text, status (`open`, `pass`, `fail`), source (`user`, `agent`) | QA updates status. |
 | `ticket_links` | from\_ticket\_id, to\_ticket\_id, kind (`blocks`, `relates`) | Epics use `tickets.parent_id`, not this table. |
-| `runs` | id, ticket\_id, agent\_slug, agent\_config\_hash, column\_slug, state, verdict, summary, session\_id, input\_tokens, output\_tokens, cost\_usd, started\_at, ended\_at, error | One active run per ticket enforced with a partial unique index on non-terminal states. |
+| `runs` | id, ticket\_id, agent\_slug, agent\_config\_hash, column\_slug, state, verdict, summary, request\_md, session\_id, input\_tokens, output\_tokens, cost\_usd, started\_at, ended\_at, error | One active run per ticket enforced with a partial unique index on non-terminal states (`queued`, `running`, `awaiting_input`). Also the job queue (§7). Token counts include cache reads and writes. `request_md` is the owner's Revise plan text the run answers (UC-3); null otherwise. |
 | `run_events` | id, run\_id, seq, type (`assistant`, `tool_call`, `tool_result`, `stdout`, `system`), payload (jsonb), created\_at | Append-only; `(run_id, seq)` unique; pruned after 90 days except the last run per ticket. |
 | `artifacts` | id, ticket\_id, run\_id, kind (`plan`, `research`, `review`, `test_report`, `blocker`, `retro`, `diff_snapshot`), title, version, content\_md, data (jsonb), created\_at | New versions never overwrite old ones. |
 | `comments` | id, ticket\_id, author\_kind (`user`, `agent`), agent\_slug, body\_md, file, line, resolved, created\_at | Review line comments use `file` and `line`. |
 | `activity` | id, ticket\_id, actor\_kind, actor, action (`created`, `moved`, `run_started`, `run_finished`, `commented`, `edited`), data (jsonb), created\_at | Drives the ticket timeline and the audit trail. Criteria changes are `edited` with `fields: ["criteria"]`. |
 
-Global settings (daily budget, global concurrency, serious mode, pause-all flag, encrypted GitHub App credentials) live in a single-row `settings` table.
+Global settings (daily budget, global concurrency, serious mode, pause-all flag, encrypted GitHub App credentials) live in a single-row `settings` table, added in M4 with its first user (Pause all). Until then the concurrency limits are constants in the worker. `projects.repo_path` exists from M2: an optional absolute path to a local checkout that Plan B reads; onboarding fills it with the clone path from M4.
 
 ## 12. API and real-time events
 
@@ -649,7 +652,10 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | GET | `/api/tickets/:id/runs` | Run history. |
 | GET | `/api/runs/:id/events?after=seq` | Paged run log (for catching up before streaming). |
 | POST | `/api/runs/:id/cancel` | Cancel a run. |
-| POST | `/api/runs/:id/retry` | Start a fresh run of the same agent. |
+| POST | `/api/tickets/:id/revise-plan` | Body `{requestMd}`. Starts Plan B with the request (UC-3). 409 unless the ticket is in Planning, has a plan, and has no active run. |
+| POST | `/api/runs/:id/retry` | Start a fresh run of the same agent. If the failure moved the ticket (e.g. to Blocked), it goes back to the run's column first. |
+| GET | `/api/health` | Database, worker, Anthropic and GitHub status (section 8). |
+| GET | `/api/agents/:slug/avatar` | The agent's avatar SVG from `agents/`. |
 | POST | `/api/runs/:id/resume` | Body `{answer}`. Resume a `needs_input` run with the user's answer. |
 | GET / PUT | `/api/agents`, `/api/agents/:slug` | List agents; read or save an agent definition file. |
 | GET | `/api/costs?groupBy=day\|agent\|ticket&from&to` | Cost reports. |
@@ -666,8 +672,8 @@ GitHub endpoints: `POST /api/webhooks/github` receives signature-verified webhoo
 - `ticket.updated` — `{ticketId, fields}` (`fields` names the changed fields; `criteria` for checklist changes)
 - `ticket.deleted` — `{ticketId}`
 - `run.started` / `run.finished` — `{runId, ticketId, agentSlug, state, verdict?, costUsd?}`
-- `run.event` — `{runId, seq, type, payload}` (sent only to clients subscribed to that run via `&runId=`)
-- `comment.created`, `artifact.created`
+- `run.event` — `{runId, ticketId, seq, eventType}`: ids only, because `NOTIFY` payloads are capped at 8 KB; the Live tab fetches the new lines from `GET /api/runs/:id/events?after=seq`. Sent to every client of the project (no `&runId=` filter; the board ignores them).
+- `comment.created` — `{ticketId, commentId}`; `artifact.created` — `{ticketId, artifactId}`
 - `notification` — `{kind, ticketId, message}`
 
 The app is publicly reachable on the DigitalOcean server, so every route except the GitHub webhook requires login: Sign in with GitHub through the Kanbot GitHub App, restricted to the owner's account, with a secure, HTTP-only session cookie. The webhook endpoint is authenticated by its HMAC signature instead.
@@ -715,7 +721,7 @@ Agents run real commands on the server, so every agent is boxed in by its worktr
 
 ### Code and repo safety
 
-- Agents run only inside the ticket's worktree; the main checkout is never their working directory.
+- Agents run only inside the ticket's worktree; the main checkout is never their working directory. The one exception is a read-only agent that runs before a worktree exists (Plan B): its `cwd` is the project checkout, and its tools are read-only (`Read`, `Grep`, `Glob`), enforced by the permission hook.
 - No agent may commit or push to the default branch. Captain Ship-It pushes only the ticket branch and opens a PR; merging always needs the human's approval, enforced by GitHub branch protection (section 10).
 - Destructive git commands (`push --force`, `reset --hard` on shared refs, `branch -D` on non-Kanbot branches) are denied in every agent's allowlist. The only force-push is the worker's own `--force-with-lease` after a rebase, on `kanbot/*` branches.
 - Shell access uses an allowlist per agent (e.g. `pnpm test`, `pnpm lint`, `git diff`), configured in frontmatter. Anything else is refused by the runtime's permission hook.
@@ -762,7 +768,7 @@ Kanbot is a single-user, self-hosted tool, so the targets favor responsiveness, 
 Build in five milestones, each ending in something usable, so agents are added onto a board that already works rather than all at once.
 
 1. **M1 — Board without agents.** *(Done; see "Deferred from M1" below for what it left to later milestones.)* Monorepo scaffold, Docker Compose, Postgres + Drizzle schema and migrations, project creation, tickets with criteria and comments, drag-and-drop board with the default columns, activity log, SSE for moves. *Done when:* tickets can be created and moved and the board updates live in two browser tabs.
-2. **M2 — Orchestrator and Plan B.** *(Also owns its rows in "Deferred from M1" below.)* pg-boss queue, worker process, `AgentRuntime` adapter on the Claude Agent SDK, agent file loader, context assembly, `report_result` tool, run events streamed to the Live tab, cancel and retry, per-run budget, the replay runtime for tests, API retry with backoff, and the health indicator. *Done when:* moving a ticket to Planning produces a plan artifact and a "Plan ready" flag.
+2. **M2 — Orchestrator and Plan B.** *(Done; see "Deferred from M2" below for what it left to later milestones. What it built is in `docs/m2-report.md`.)* Runs-table queue (was pg-boss), worker process, `AgentRuntime` adapter on the Claude Agent SDK, agent file loader, context assembly, `report_result` tool, run events streamed to the Live tab, cancel and retry, per-run budget, the replay runtime for tests, API retry with backoff, and the health indicator. *Done when:* moving a ticket to Planning produces a plan artifact and a "Plan ready" flag.
 3. **M3 — Build loop.** *(Also owns its rows in "Deferred from M1" below.)* Worktree manager, Sir Codes-a-Lot, Nitpick Nancy, Testy McTestface, transition table with auto-moves and bounce-backs, bounce limit, diff viewer, post-run path checks, touch sets, hotspot groups, the serialize overlap check, Nancy's cross-ticket review, stall detection, Playwright-based QA, the bundled plugins (Ponytail, TypeScript LSP, Context7, Security Guidance, Playwright), and the golden-ticket quality check. *Done when:* a small feature goes Ready → In Progress → Review → QA on its own, including at least one bounce-back.
 4. **M4 — Unblock and ship.** *(Also owns its rows in "Deferred from M1" below.)* DigitalOcean deployment (section 7) with Sign in with GitHub and the nightly disk cleanup, Blocked column with Rubber Duckworth, resume with answer, the onboarding walkthrough (section 10) with GitHub App connection and branch-protection check, Captain Ship-It with PR creation, CI status tracking, the PR Review gate with review-comment bounce-backs, merge detection, auto-rebase when main moves, Archie's retro and worktree cleanup, notifications, cost tracking and daily cap, Pause all. *Done when:* a ticket goes from Backlog to a human-approved, merged PR, and a `needs_input` run can be answered and resumed.
 5. **M5 — Polish (Later items).** Dr. Rabbit Hole and spikes, epics with child tickets, auto-pull from Ready, Marge Conflict, stacked branches, Agents and Costs pages, editable workflow columns, webhooks, container mode, approving from a phone (plans, ship, Blocked answers, pause all), and the kanbot CLI.
@@ -775,33 +781,52 @@ M1 shipped the smallest board that meets its done criterion. Everything below wa
 
 | Item | Spec | Goes to | Notes |
 | --- | --- | --- | --- |
-| `apps/worker` process | §7 | M2 | Created along with pg-boss; nothing for it to do in M1. |
+| `apps/worker` process | §7 | M2 ✓ | Done in M2. |
 | Compose `web`, `worker`, `caddy` services and Dockerfiles | §7 | M4 | M1 compose has only `db`, bound to 127.0.0.1. |
-| Tables `runs`, `run_events`, `artifacts`, `settings` | §11 | M2 | Each added by the milestone that first uses it, as its own migration. |
+| Tables `runs`, `run_events`, `artifacts`, `settings` | §11 | M2 ✓ / M4 | `runs`, `run_events`, `artifacts` done in M2 (migration `0001_runs`). `settings` moved to M4: its first user is Pause all. |
 | Table `ticket_links` and "blocked by" rules | §11, FR-14 | M3 | Needed by the overlap check and Ready gating. |
-| `projects`: repo\_path, commands, test\_globs, hotspots, settings | §11, FR-2 | M3 | Repo path and commands are needed by worktrees and agents; settings UI comes with them. |
+| `projects`: repo\_path, commands, test\_globs, hotspots, settings | §11, FR-2 | M2 ✓ / M3 | `repo_path` pulled into M2 (optional, set when creating a project) so Plan B has code to read; the rest stays M3. | Repo path and commands are needed by worktrees and agents; settings UI comes with them. |
 | `projects`: github\_owner, github\_repo, baseline; clone and default-branch validation | FR-1, FR-3 | M4 | Needs the GitHub App and onboarding. M1 projects are name + key prefix + default branch. |
 | `columns`: wip\_limit, auto\_advance; WIP display and enforcement | FR-20, FR-22 | M3 | Columns show only a card count in M1. |
-| `tickets`: status\_flag | §11 | M2 | Drives card status pills ("Plan ready", "Needs you"). |
+| `tickets`: status\_flag | §11 | M2 ✓ | Done in M2. |
 | `tickets`: branch\_name, worktree\_path, bounce\_count, touch\_paths | §11 | M3 | |
 | `tickets`: pr\_number, pr\_url, head\_sha, ci\_state, review\_state | §11 | M4 | |
 | `tickets`: parent\_id (epics) | §11, UC-11 | M5 | |
-| `acceptance_criteria.source`; `comments.author_kind`, `agent_slug` | §11, FR-12 | M2 | M1 criteria and comments are always the user's; activity actor is always `owner`. |
+| `acceptance_criteria.source`; `comments.author_kind`, `agent_slug` | §11, FR-12 | M2 ✓ / M3 | `source` done in M2 (Plan B writes criteria); activity rows carry the agent as actor. `comments.author_kind`, `agent_slug` moved to M3: no M2 agent posts comments, Nancy is the first. |
 | `comments`: file, line, resolved (review line comments) | §11 | M3 | |
-| Transition table and manual-move rules (cancel confirmation, Ship/Done confirmations) | §3, FR-22, FR-24 | M2 / M3 | M1 allows any move. |
-| Agent files in `agents/`, avatars, column-header avatar, "Plan B is on it" toast, card status pills | §4, §13, §17 | M2 | `columns.agent_slug` is already seeded from the default workflow. |
-| Markdown rendering of descriptions and comments | §13 | M2 | Plain textarea / pre-wrapped text in M1; one renderer later for descriptions, comments and plan artifacts. |
-| Drawer tabs (Activity, Live, Artifacts, Diff, Comments) | §13 | M2 | M1 stacks Comments and Activity in the drawer. |
-| SSE `Last-Event-ID` replay | §12 | M2, if needed | Clients refetch the board on every event and reconnect instead. Marked with a `shortcut:` comment. |
-| Top bar: "Needs me" count, health indicator | §13 | M2 | |
+| Transition table and manual-move rules (cancel confirmation, Ship/Done confirmations) | §3, FR-22, FR-24 | M2 ✓ / M3 | M2: the table as data with the Planning and Blocked rows, cancel confirmation (409 `run_active`), Ready = plan approval. M3: build-loop rows, bounce-backs, Ship/Done confirmations, bounce-count reset on Planning. |
+| Agent files in `agents/`, avatars, column-header avatar, "Plan B is on it" toast, card status pills | §4, §13, §17 | M2 ✓ | Done for Plan B. The other agents' files ship with their milestones (see "Deferred from M2"). |
+| Markdown rendering of descriptions and comments | §13 | M2 ✓ | `components/markdown.tsx` (react-markdown, no raw HTML) for comments, artifacts and a description preview. |
+| Drawer tabs (Activity, Live, Artifacts, Diff, Comments) | §13 | M2 ✓ / M3 | Activity, Live, Artifacts, Comments done in M2. Diff moved to M3 with branches. |
+| SSE `Last-Event-ID` replay | §12 | M4, if needed | Still not needed: the board refetches on reconnect and the Live tab pages `/api/runs/:id/events?after=seq`. Revisit when running over real networks. Marked with a `shortcut:` comment. |
+| Top bar: "Needs me" count, health indicator | §13 | M2 ✓ | Done in M2. |
 | Top bar: spend vs cap, Pause all | §13, FR-62, FR-63 | M4 | |
 | Sign in with GitHub; auth on every route | §12 | M4 | M1 has no auth and the dev server binds to 127.0.0.1 only. |
 | Settings, Agents and Costs pages | §13 | M3 / M5 | |
 | Dark theme | §13 | M4 | shadcn dark tokens exist in `globals.css` but nothing switches to them yet. |
 | GitHub Actions CI for the Kanbot repo | §15 | When the repo gets a GitHub remote | `pnpm typecheck lint test test:e2e` is what it should run. |
-| ESLint for `packages/shared` | §15 | M2 | It has only `tsc` checks until it holds real logic. |
+| ESLint for `packages/shared` | §15 | M2 ✓ | Root `eslint.config.mjs` (typescript-eslint) covers `packages/shared` and `apps/worker`. |
 
-Known M1 shortcuts are also marked in code with `shortcut:` comments (list them with `/ponytail-debt` or `grep -rn "shortcut:"`).
+### Deferred from M2
+
+M2 shipped the orchestrator and Plan B. Everything below was deliberately left out and belongs to the milestone named.
+
+| Item | Spec | Goes to | Notes |
+| --- | --- | --- | --- |
+| Agent files for the other eight agents | §4, §17 | Each agent's milestone: Sir Codes-a-Lot, Nancy, Testy (M3); Duckworth, Ship-It, Archie (M4); Dr. Rabbit Hole, Marge (M5) | A prompt written before its tools and context exist would be a guess. Until a file ships, its column is a gate. |
+| `Bash(cmd:*)` patterns in the tool allowlist | §8, §14 | M3 | The M2 permission hook matches exact tool names; Plan B needs no shell. Marked with a `shortcut:` comment. |
+| Scrubbed environment for agent shell commands | §7, §14 | M3 | M2 only drops `DATABASE_URL` from the agent's environment; the SDK itself needs the API key. Agent shells arrive in M3. |
+| Context items that need branches: diff stat, open review comments or bug reports, other in-flight tickets' plans | §8, FR-32 | M3 | M2's context bundle: ticket, criteria, latest plan, last 3 runs, owner comments since the last run (background), project CLAUDE.md, and the revision request on Revise plan runs. |
+| Plugins in frontmatter (Ponytail lite for Plan B, TypeScript LSP, Context7) | §8 | M3 | With the other bundled plugins. |
+| Verdict fields `comments`, `criteriaResults`, `crossTicketRisks` | §8 | M3 | Added with the agents that fill them. `proposedTickets`: M5 with epics. |
+| Recorded runs (`KANBOT_RECORD=1`), the sample repo and golden tickets | §8, §17 | M3 | Hand-written replay scripts cover M2. M2's real-agent smoke ran Plan B on the Kanbot repo itself. |
+| Running cost while a run works | UC-8, §13 | M4 | The SDK reports cost when a run ends; the drawer shows elapsed time live and cost at the end. Cost tracking (M4) can sum per-turn usage. Marked with a `shortcut:` comment. |
+| Banner and automatic resume after an Anthropic outage; auth/billing errors pausing all agents | §8 | M4 | Need Pause all and the `settings` table. M2 marks such runs `interrupted` or `failed` with Retry. |
+| `needs_input` vs Rubber Duckworth: a `needs_input` run stays `awaiting_input` (active), and the partial unique index allows one active run per ticket, so Duckworth can't run on Blocked tickets as specced | §3, §8, §11 | M4 | Decide when Duckworth and resume are built, e.g. exclude `awaiting_input` from the index or run Duckworth outside `runs`. |
+| Agent config hash on runs | FR-37 | M5 | With the Agents page. |
+| Per-project concurrency settings | FR-2, §14 | M3 | Constants in the worker (`LIMITS`) until project settings exist. |
+
+Known M1 and M2 shortcuts are also marked in code with `shortcut:` comments (list them with `/ponytail-debt` or `grep -rn "shortcut:"`).
 
 ## 17. Open questions and notes for Claude Code
 
@@ -834,6 +859,6 @@ Nearly everything is decided; Claude Code builds to the Decided list below unles
 - Write a `CLAUDE.md` at the repo root in M1 describing layout, commands and conventions, and keep it current.
 - Keep this document in the repo as `docs/requirements.md` and update it in the same PR whenever a decision or behavior changes.
 - Do not introduce Python in any part of the project, including scripts and tooling.
-- Ship agent files for all nine agents in `agents/`, with placeholder SVG avatars. Draft each system prompt carefully and flag them for the owner's review before M2 and M3 close; prompt quality decides agent quality.
+- Ship each agent's file in `agents/`, with a placeholder SVG avatar, in the milestone that wires that agent up (Plan B in M2; see "Deferred from M2"). Draft each system prompt carefully and flag it for the owner's review before its milestone closes; prompt quality decides agent quality.
 - Keep a `.env.example` listing every variable; never commit secrets, and never use real credentials in tests.
 - Create a small sample repo (a tiny web app with tests) for the real-agent smoke suite and for demos.

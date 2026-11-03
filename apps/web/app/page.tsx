@@ -26,6 +26,7 @@ export default function Home() {
           name: form.get("name"),
           keyPrefix: String(form.get("keyPrefix")).toUpperCase(),
           defaultBranch: form.get("defaultBranch") || undefined,
+          repoPath: form.get("repoPath") || undefined,
         },
       });
       router.push(`/p/${p.id}`);
@@ -67,6 +68,13 @@ export default function Home() {
         <label className="block space-y-1">
           <span className="text-sm">Default branch</span>
           <Input name="defaultBranch" placeholder="main" />
+        </label>
+        <label className="block space-y-1">
+          <span className="text-sm">Local repo path (optional)</span>
+          <Input name="repoPath" placeholder="/home/you/code/my-app" />
+          <span className="block text-xs text-muted-foreground">
+            Plan B reads this checkout. Without one it plans from the ticket alone.
+          </span>
         </label>
         {error && (
           <p role="alert" className="text-sm text-destructive">
