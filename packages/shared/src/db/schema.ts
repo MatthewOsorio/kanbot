@@ -1,5 +1,5 @@
 // Subset of requirements §11 (M1–M3). Later milestones add their tables/columns in their own migrations
-// (see "Deferred from M1" in docs/requirements.md §16).
+// (see "Still to build" in docs/requirements.md §16).
 import { sql } from "drizzle-orm";
 import {
   boolean,

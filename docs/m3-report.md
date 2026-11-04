@@ -1,6 +1,7 @@
 # M3 report: build loop
 
-Status: **done, awaiting review.** Built 2026-11-03. Nothing is committed yet.
+Status: **done.** Built 2026-11-03, merged in PR #2. The post-M3 audit fixes were merged in PR #3.
+This report is a snapshot from the time of the merge. Open items now live in `requirements.md` §16, "Still to build".
 
 M3 in the spec (`requirements.md` §16): worktree manager, Sir Codes-a-Lot, Nitpick Nancy, Testy McTestface, transition table with auto-moves and bounce-backs, bounce limit, diff viewer, post-run path checks, touch sets, hotspot groups, the serialize overlap check, Nancy's cross-ticket review, stall detection, plugins, and the golden-ticket quality check. M3 also owned its rows in "Deferred from M1" and "Deferred from M2".
 **Done when:** a small feature goes Ready → In Progress → Review → QA on its own, including at least one bounce-back. That is covered without API calls by a worker test and a Playwright test on a real git repo (replay runtime), and was run once with real agents (smoke test below).
