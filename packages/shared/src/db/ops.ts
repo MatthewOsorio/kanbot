@@ -9,6 +9,15 @@ import { logActivity, OWNER, publish, type Actor, type Tx } from "./write";
 
 type Column = { id: string; slug: string; name: string; agentSlug: string | null };
 
+/** The ticket's active run, if any (at most one: partial unique index on runs). */
+export async function activeRun(tx: Tx, ticketId: string) {
+  const [r] = await tx
+    .select()
+    .from(runs)
+    .where(and(eq(runs.ticketId, ticketId), inArray(runs.state, [...activeRunStates])));
+  return r ?? null;
+}
+
 /** Cancels the ticket's active run, if any. The worker hears run.finished and aborts it. */
 export async function cancelActiveRun(tx: Tx, projectId: string, ticketId: string, actor = OWNER) {
   const [r] = await tx

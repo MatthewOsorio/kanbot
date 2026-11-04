@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Trying again."
+      }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Tried again."
+  },
+  "costUsd": 0.1,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

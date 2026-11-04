@@ -1,0 +1,49 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Reading the diff."
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t1",
+        "name": "Bash",
+        "input": {
+          "command": "git diff main...HEAD"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t1",
+        "isError": false,
+        "content": "(diff)"
+      }
+    }
+  ],
+  "report": {
+    "verdict": "changes_requested",
+    "summary": "The fix is right but has no regression test.",
+    "artifacts": [
+      {
+        "kind": "review",
+        "title": "Review: Deleting an unknown todo removes the last one",
+        "markdown": "The guard is correct.\n\n1. **Blocking:** no test covers removing an unknown id."
+      }
+    ],
+    "comments": [
+      {
+        "file": "src/todos.ts",
+        "line": 27,
+        "body": "Add a regression test: removing an unknown id must return false and keep every todo."
+      }
+    ]
+  },
+  "costUsd": 0.15,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

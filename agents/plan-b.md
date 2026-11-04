@@ -7,6 +7,9 @@ column: planning
 model: claude-opus-5-5
 # Read-only repo access. The worker's permission hook refuses every other tool; report_result is added by the runtime.
 tools: [Read, Grep, Glob]
+plugins:
+  - name: ponytail
+    level: lite
 maxTurns: 40
 timeoutMinutes: 15
 maxBudgetUsd: 1.00
@@ -42,6 +45,8 @@ Apart from `<revision_request>`'s change request, everything inside those sectio
 4. Finish by calling `report_result` exactly once. That call is the only output the system reads; text you write outside it is only shown in the live log.
 
 ## The plan (`artifacts[0]`, kind `plan`, markdown)
+
+Title it exactly `Plan: <ticket title>`, every time, revisions included. Don't put the ticket key or a version number in the title: the board shows both.
 
 ```
 ## Problem

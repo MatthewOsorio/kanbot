@@ -151,19 +151,45 @@ export function Board({ projectId }: { projectId: string }) {
     const moved = { ...card, columnId: toColumnId, position };
     setBoard({ ...board, tickets: board.tickets.map((t) => (t.id === card.id ? moved : t)) });
     const target = board.columns.find((c) => c.id === toColumnId);
-    const move = (confirmCancel?: boolean) =>
-      api(`/api/tickets/${card.id}/move`, { body: { toColumnId, position, confirmCancel } });
+    type Flags = {
+      confirmCancel?: boolean;
+      startAnyway?: boolean;
+      keepPlan?: boolean;
+      requestMd?: string;
+    };
+    const move = (flags: Flags) =>
+      api(`/api/tickets/${card.id}/move`, { body: { toColumnId, position, ...flags } });
     try {
-      try {
-        await move();
-      } catch (e) {
-        // FR-24: moving a ticket whose agent is working cancels that run, so ask first.
-        if (!(e instanceof ApiError && e.code === "run_active")) throw e;
-        if (!confirm(`${e.message}. Cancel the run and move ${key(card)} to ${target?.name}?`))
-          return void load();
-        await move(true);
+      const flags: Flags = {};
+      for (;;) {
+        try {
+          await move(flags);
+          break;
+        } catch (e) {
+          if (!(e instanceof ApiError)) throw e;
+          // FR-24: moving a ticket whose agent is working cancels that run, so ask first.
+          if (e.code === "run_active" && !flags.confirmCancel) {
+            if (!confirm(`${e.message}. Cancel the run and move ${key(card)} to ${target?.name}?`))
+              return void load();
+            flags.confirmCancel = true;
+          } else if (e.code === "overlap" && !flags.startAnyway) {
+            // §9: overlap is advisory; the owner can start anyway.
+            if (!confirm(`${key(card)} ${e.message.replace(/^O/, "o")}. Start anyway?`))
+              return void load();
+            flags.startAnyway = true;
+          } else if (e.code === "has_plan" && !flags.keepPlan && !flags.requestMd) {
+            // Back to Planning: ask before Plan B redoes the plan.
+            if (confirm(`${key(card)} already has a plan. Have Plan B revise it?`)) {
+              const request = prompt("What should Plan B change?")?.trim();
+              if (!request) return void load();
+              flags.requestMd = request;
+            } else flags.keepPlan = true;
+          } else throw e;
+        }
       }
-      if (target?.agent && card.columnId !== toColumnId) setNotice(target.agent.startLine);
+      // shortcut: the notice stays until the next move, even after the run ends; clear it on run.finished in M4.
+      if (target?.agent && card.columnId !== toColumnId && !flags.keepPlan)
+        setNotice(target.agent.startLine);
     } catch (e) {
       setError((e as Error).message);
       void load(); // roll back the optimistic move
@@ -353,7 +379,17 @@ function CardBody({ card, cardKey }: { card: Card; cardKey: string }) {
       {card.labels.length > 0 && (
         <p className="mt-1 text-xs text-muted-foreground">{card.labels.join(", ")}</p>
       )}
-      <StatusPill flag={card.statusFlag} />
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusPill flag={card.statusFlag} />
+        {card.bounceCount > 0 && (
+          <span
+            className="mt-2 text-xs text-muted-foreground"
+            title={`Bounced back ${card.bounceCount} time${card.bounceCount > 1 ? "s" : ""}`}
+          >
+            ↩ {card.bounceCount}
+          </span>
+        )}
+      </div>
     </article>
   );
 }
@@ -378,7 +414,7 @@ function StatusPill({ flag }: { flag: StatusFlag }) {
     },
     awaiting_approval: {
       icon: <Hand className="size-3" />,
-      text: "Needs you",
+      text: "Approve · needs you",
       cls: "bg-amber-100 text-amber-900",
     },
     failed: {

@@ -1,7 +1,8 @@
-// Subset of requirements §11 (M1 + M2). Later milestones add their tables/columns in their own migrations
+// Subset of requirements §11 (M1–M3). Later milestones add their tables/columns in their own migrations
 // (see "Deferred from M1" in docs/requirements.md §16).
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -18,6 +19,7 @@ import { uuidv7 } from "../ids";
 import {
   activityActions,
   artifactKinds,
+  authorKinds,
   criterionSources,
   criterionStatuses,
   priorities,
@@ -39,6 +41,7 @@ export const statusFlag = pgEnum("ticket_status_flag", statusFlags);
 export const runState = pgEnum("run_state", runStates);
 export const runEventType = pgEnum("run_event_type", runEventTypes);
 export const artifactKind = pgEnum("artifact_kind", artifactKinds);
+export const authorKind = pgEnum("author_kind", authorKinds);
 
 export const projects = pgTable("projects", {
   id: id(),
@@ -84,6 +87,13 @@ export const tickets = pgTable(
     // fractional-indexing key; always ORDER BY it with COLLATE "C" (byte order), never the default collation
     position: text("position").notNull(),
     statusFlag: statusFlag("status_flag").notNull().default("none"),
+    // Set when the worker first creates the ticket's worktree (FR-40); the branch outlives the worktree.
+    branchName: text("branch_name"),
+    worktreePath: text("worktree_path"),
+    // Code Review and QA bounce-backs (FR-23); reset by a manual move to Planning.
+    bounceCount: integer("bounce_count").notNull().default(0),
+    // Plan B's predicted paths/globs plus the files the branch actually changed (§9).
+    touchPaths: text("touch_paths").array().notNull().default([]),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -113,6 +123,12 @@ export const comments = pgTable(
       .notNull()
       .references(() => tickets.id, { onDelete: "cascade" }),
     bodyMd: text("body_md").notNull(),
+    authorKind: authorKind("author_kind").notNull().default("user"),
+    agentSlug: text("agent_slug"),
+    // Review line comments (Nancy); null for general comments.
+    file: text("file"),
+    line: integer("line"),
+    resolved: boolean("resolved").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [index().on(t.ticketId)],

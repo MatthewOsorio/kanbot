@@ -1,5 +1,6 @@
 import { activeRunStates } from "@kanbot/shared";
 import {
+  activeRun,
   artifacts,
   cancelActiveRun,
   columns,
@@ -10,9 +11,10 @@ import {
   startColumnAgent,
   tickets,
 } from "@kanbot/shared/db";
-import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { HttpError, notFound } from "./api";
 import { db } from "./db";
+import type { Tx } from "./events";
 
 export function listRuns(ticketId: string) {
   return db.select().from(runs).where(eq(runs.ticketId, ticketId)).orderBy(desc(runs.createdAt));
@@ -30,10 +32,7 @@ export async function listRunEvents(runId: string, after: number) {
     .limit(500);
 }
 
-async function runWithTicket(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  runId: string,
-) {
+async function runWithTicket(tx: Tx, runId: string) {
   const [row] = await tx
     .select({ run: runs, ticket: tickets })
     .from(runs)
@@ -59,31 +58,47 @@ export function cancelRun(runId: string) {
  */
 export function revisePlan(ticketId: string, requestMd: string) {
   return db.transaction(async (tx) => {
-    const [row] = await tx
-      .select({ ticket: tickets, column: columns })
-      .from(tickets)
-      .innerJoin(columns, eq(columns.id, tickets.columnId))
-      .where(eq(tickets.id, ticketId))
-      .for("update", { of: tickets });
-    if (!row) throw notFound("Ticket not found");
-    const { ticket, column } = row;
-    if (column.slug !== "planning")
-      throw new HttpError(409, "not_in_planning", "Plans can only be revised in Planning");
-    const [plan] = await tx
-      .select({ id: artifacts.id })
-      .from(artifacts)
-      .where(and(eq(artifacts.ticketId, ticketId), eq(artifacts.kind, "plan")))
-      .limit(1);
-    if (!plan) throw new HttpError(409, "no_plan", "This ticket has no plan to revise yet");
-    const [busy] = await tx
-      .select({ id: runs.id })
-      .from(runs)
-      .where(and(eq(runs.ticketId, ticketId), inArray(runs.state, [...activeRunStates])));
-    if (busy) throw new HttpError(409, "run_active", "This ticket already has an active run");
+    const { ticket, column } = await plannedTicket(tx, ticketId, "revised");
     const next = await startColumnAgent(tx, ticket.projectId, ticketId, column, OWNER, requestMd);
     if (!next) throw new HttpError(409, "no_agent", "Planning has no agent file");
     return next;
   });
+}
+
+/** "Approve plan" in the drawer: the same as dropping the ticket at the bottom of Ready. */
+export function approvePlan(ticketId: string) {
+  return db.transaction(async (tx) => {
+    const { ticket, column } = await plannedTicket(tx, ticketId, "approved");
+    const [ready] = await tx
+      .select()
+      .from(columns)
+      .where(and(eq(columns.projectId, ticket.projectId), eq(columns.slug, "ready")));
+    if (!ready) throw new HttpError(409, "column_gone", "This board has no Ready column");
+    await tx.update(tickets).set({ statusFlag: "none" }).where(eq(tickets.id, ticketId));
+    await moveToColumnEnd(tx, ticket, column, ready, OWNER);
+  });
+}
+
+/** Locks a ticket that is in Planning with a plan and no active run, or throws 409. */
+async function plannedTicket(tx: Tx, ticketId: string, verb: string) {
+  const [row] = await tx
+    .select({ ticket: tickets, column: columns })
+    .from(tickets)
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .where(eq(tickets.id, ticketId))
+    .for("update", { of: tickets });
+  if (!row) throw notFound("Ticket not found");
+  if (row.column.slug !== "planning")
+    throw new HttpError(409, "not_in_planning", `Plans can only be ${verb} in Planning`);
+  const [plan] = await tx
+    .select({ id: artifacts.id })
+    .from(artifacts)
+    .where(and(eq(artifacts.ticketId, ticketId), eq(artifacts.kind, "plan")))
+    .limit(1);
+  if (!plan) throw new HttpError(409, "no_plan", `This ticket has no plan to be ${verb} yet`);
+  if (await activeRun(tx, ticketId))
+    throw new HttpError(409, "run_active", "This ticket already has an active run");
+  return row;
 }
 
 /**
@@ -93,11 +108,8 @@ export function revisePlan(ticketId: string, requestMd: string) {
 export function retryRun(runId: string) {
   return db.transaction(async (tx) => {
     const { run, ticket } = await runWithTicket(tx, runId);
-    const [busy] = await tx
-      .select({ id: runs.id })
-      .from(runs)
-      .where(and(eq(runs.ticketId, ticket.id), inArray(runs.state, [...activeRunStates])));
-    if (busy) throw new HttpError(409, "run_active", "This ticket already has an active run");
+    if (await activeRun(tx, ticket.id))
+      throw new HttpError(409, "run_active", "This ticket already has an active run");
     const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
     const from = cols.find((c) => c.id === ticket.columnId)!;
     const to = cols.find((c) => c.slug === run.columnSlug);

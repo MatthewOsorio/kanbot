@@ -1,0 +1,56 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Running the suite."
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t1",
+        "name": "Bash",
+        "input": {
+          "command": "node --test"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t1",
+        "isError": false,
+        "content": "pass 8"
+      }
+    }
+  ],
+  "patch": "diff --git a/test/remove-api.test.ts b/test/remove-api.test.ts\nnew file mode 100644\nindex 0000000..7856701\n--- /dev/null\n+++ b/test/remove-api.test.ts\n@@ -0,0 +1,16 @@\n+import assert from \"node:assert/strict\";\n+import { createServer } from \"node:http\";\n+import type { AddressInfo } from \"node:net\";\n+import { after, test } from \"node:test\";\n+import { handle } from \"../src/server.ts\";\n+\n+const server = createServer(handle).listen(0);\n+const base = `http://localhost:${(server.address() as AddressInfo).port}`;\n+after(() => server.close());\n+\n+test(\"DELETE of an unknown todo is a 404 and deletes nothing\", async () => {\n+  await fetch(`${base}/api/todos`, { method: \"POST\", body: JSON.stringify({ title: \"Stay\" }) });\n+  const before = await (await fetch(`${base}/api/todos`)).json();\n+  assert.equal((await fetch(`${base}/api/todos/999`, { method: \"DELETE\" })).status, 404);\n+  assert.deepEqual(await (await fetch(`${base}/api/todos`)).json(), before);\n+});\n",
+  "commitMessage": "Tests for DELETE of an unknown todo",
+  "report": {
+    "verdict": "success",
+    "summary": "Both criteria pass; the suite is green.",
+    "artifacts": [
+      {
+        "kind": "test_report",
+        "title": "Test report: Deleting an unknown todo removes the last one",
+        "markdown": "`node --test`: 8 passed.\n\n| Criterion | Result | Test |\n| --- | --- | --- |\n| 1 | pass | remove of an unknown id keeps every todo |\n| 2 | pass | DELETE of an unknown todo is a 404 |"
+      }
+    ],
+    "criteriaResults": [
+      {
+        "criterionId": "$criterion1",
+        "status": "pass",
+        "note": "test/todos.test.ts"
+      },
+      {
+        "criterionId": "$criterion2",
+        "status": "pass",
+        "note": "test/remove-api.test.ts"
+      }
+    ]
+  },
+  "costUsd": 0.25,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

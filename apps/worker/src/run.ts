@@ -1,8 +1,9 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, matchesGlob, resolve } from "node:path";
 import {
   afterRun,
+  BOUNCE_LIMIT,
   stateForVerdict,
   verdictPayload,
   type RunOutcome,
@@ -13,6 +14,7 @@ import {
   acceptanceCriteria,
   artifacts,
   columns,
+  comments,
   logActivity,
   moveToColumnEnd,
   projects,
@@ -24,14 +26,31 @@ import {
   type Db,
   type Tx,
 } from "@kanbot/shared/db";
-import { and, eq, max, sql } from "drizzle-orm";
+import { git, loadProjectConfig, projectConfig, type ProjectConfig } from "@kanbot/shared/repo";
+import { and, count, eq, max, sql } from "drizzle-orm";
 import { buildContext } from "./context";
+import { EDIT_TOOLS } from "./runtime/fence";
+import { record } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
+import {
+  changedSince,
+  checkAfterRun,
+  ensureWorktree,
+  snapshot,
+  WORKTREE_COLUMNS,
+} from "./worktree";
 
 export type Run = typeof runs.$inferSelect;
 
-/** Requirements §14 concurrency defaults; per-project settings arrive with project settings in M3. */
+/** Requirements §14 concurrency defaults; per-project settings arrive with the settings table in M4. */
 export const LIMITS = { global: 2, perProject: 1 };
+
+/** Stall detection (§8): this many identical tool calls stop a run. */
+const STALL_REPEATS = 3;
+/** KANBOT_RECORD=1 saves each real run as a replay script (§8 recorded runs). */
+const RECORD = process.env.KANBOT_RECORD === "1";
+/** Bundled plugins (§8); the worker runs with apps/worker as cwd, like agentsDir(). */
+const pluginsDir = () => resolve(process.env.KANBOT_PLUGINS_DIR ?? "../../plugins");
 
 /**
  * Claims the oldest queued run that fits the concurrency limits (requirements §8 step 2).
@@ -60,6 +79,21 @@ export async function claimNext(db: Db): Promise<Run | null> {
   });
 }
 
+const byTicket = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs `fn` once the ticket's previous run in this process has fully stopped. A cancel marks the row
+ * `cancelled` at once, but the aborted agent can still be writing to the worktree for a moment, and the
+ * next column's run is already queued: started early, its snapshot would blame it for those writes.
+ */
+export function afterPrevious<T>(ticketId: string, fn: () => Promise<T>): Promise<T> {
+  const p = (byTicket.get(ticketId) ?? Promise.resolve()).then(fn);
+  const settled = p.catch(() => {});
+  byTicket.set(ticketId, settled);
+  void settled.then(() => byTicket.get(ticketId) === settled && byTicket.delete(ticketId));
+  return p;
+}
+
 /** Crash recovery (requirements §8): runs left `running` by a dead worker become `interrupted`. */
 export async function recoverInterrupted(db: Db) {
   const stale = await db.select({ id: runs.id }).from(runs).where(eq(runs.state, "running"));
@@ -84,12 +118,13 @@ const redact = (payload: Record<string, unknown>): Record<string, unknown> =>
 /** Executes a claimed run end to end. `cancel` aborts when the owner cancels or moves the ticket. */
 export async function executeRun(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSignal) {
   const [row] = await db
-    .select({ ticket: tickets, keyPrefix: projects.keyPrefix, repoPath: projects.repoPath })
+    .select({ ticket: tickets, project: projects })
     .from(tickets)
     .innerJoin(projects, eq(projects.id, tickets.projectId))
     .where(eq(tickets.id, run.ticketId));
   if (!row) return; // ticket deleted; the run row went with it (cascade)
-  const { ticket } = row;
+  const { ticket, project } = row;
+  const key = `${project.keyPrefix}-${ticket.number}`;
 
   let agent: AgentConfig | null;
   try {
@@ -102,9 +137,13 @@ export async function executeRun(db: Db, runtime: AgentRuntime, run: Run, cancel
     });
   }
 
+  const recorded: RuntimeEvent[] = [];
+  const calls = new Map<string, number>();
+  const stall = new AbortController();
   let seq = 0;
   const emit = async (e: RuntimeEvent) => {
     const n = ++seq;
+    if (RECORD) recorded.push(e);
     await db.transaction(async (tx) => {
       await tx
         .insert(runEvents)
@@ -117,25 +156,90 @@ export async function executeRun(db: Db, runtime: AgentRuntime, run: Run, cancel
         eventType: e.type,
       });
     });
+    // Stall detection (§8): the same tool call with the same arguments a third time stops the run.
+    // shortcut: only the repetition rule; "no progress" and "repeated feedback" arrive with Duckworth (M4).
+    // An edit is progress: rerunning the tests after one is not a loop (refused Testy in the M3 golden run).
+    if (e.type === "tool_call" && EDIT_TOOLS.has(String(e.payload.name))) calls.clear();
+    else if (e.type === "tool_call") {
+      const k = JSON.stringify([e.payload.name, e.payload.input]);
+      const count = (calls.get(k) ?? 0) + 1;
+      calls.set(k, count);
+      if (count >= STALL_REPEATS)
+        stall.abort(
+          `Stopped: the agent made the same ${String(e.payload.name)} call ${count} times`,
+        );
+    }
   };
 
   const timeout = AbortSignal.timeout(agent.timeoutMinutes * 60_000);
-  const signal = AbortSignal.any([cancel, timeout]);
+  const signal = AbortSignal.any([cancel, timeout, stall.signal]);
   // Without a linked repo the agent gets an empty folder rather than the worker's own directory.
-  const scratch = row.repoPath ? null : await mkdtemp(join(tmpdir(), "kanbot-norepo-"));
+  const scratch = project.repoPath ? null : await mkdtemp(join(tmpdir(), "kanbot-norepo-"));
   let result: RuntimeResult;
+  let wt: { path: string; branch: string } | null = null;
+  let before: Awaited<ReturnType<typeof snapshot>> | null = null;
+  let canEdit: ((rel: string) => boolean) | undefined;
   try {
-    const prompt = await buildContext(
-      db,
-      { ...ticket, key: `${row.keyPrefix}-${ticket.number}` },
-      run,
-      row.repoPath,
-    );
+    const config = project.repoPath
+      ? await loadProjectConfig(project.repoPath, project.defaultBranch)
+      : projectConfig.parse({});
+    if (WORKTREE_COLUMNS.has(run.columnSlug)) {
+      if (!project.repoPath) throw new Error("Link a local repo to this project before building");
+      wt = await ensureWorktree(
+        project.repoPath,
+        project.defaultBranch,
+        { ...ticket, key },
+        config,
+      );
+      if (ticket.worktreePath !== wt.path || ticket.branchName !== wt.branch)
+        await db
+          .update(tickets)
+          .set({ worktreePath: wt.path, branchName: wt.branch })
+          .where(eq(tickets.id, ticket.id));
+      before = await snapshot(wt.path, project.defaultBranch);
+    }
+    canEdit = editScope(agent.editScope, config);
+    const cwd = wt?.path ?? project.repoPath ?? scratch!;
+    const prompt = await buildContext(db, { ...ticket, key }, run, {
+      cwd: project.repoPath ? cwd : null,
+      defaultBranch: project.defaultBranch,
+      hotspots: config.hotspots,
+    });
     const scenario = ticket.labels.find((l) => l.startsWith("replay:"))?.slice(7) ?? "default";
+    const [{ attempt } = { attempt: 1 }] = await db
+      .select({ attempt: count() })
+      .from(runs)
+      .where(and(eq(runs.ticketId, ticket.id), eq(runs.agentSlug, run.agentSlug)));
     result = await runtime.run(
-      { agent, prompt, cwd: row.repoPath ?? scratch!, signal, scenario },
+      {
+        agent,
+        tools: expandTools(agent.tools, config.commands),
+        canEdit,
+        plugins: agent.plugins.map((p) => resolve(pluginsDir(), p.name)),
+        env: Object.fromEntries(
+          agent.plugins
+            .filter((p) => p.name === "ponytail" && p.level)
+            .map((p) => ["PONYTAIL_DEFAULT_MODE", p.level!]),
+        ),
+        prompt,
+        cwd,
+        signal,
+        scenario,
+        attempt,
+      },
       emit,
     );
+    if (RECORD && scenario !== "default")
+      await record(
+        agent.slug,
+        scenario,
+        attempt,
+        recorded,
+        result,
+        wt && before ? { path: wt.path, base: before.head } : null,
+        prompt,
+        cwd,
+      );
   } catch (e) {
     if (cancel.aborted) return finish(db, run.id, { state: "cancelled" }); // already cancelled by the web app
     if (timeout.aborted)
@@ -143,14 +247,35 @@ export async function executeRun(db: Db, runtime: AgentRuntime, run: Run, cancel
         state: "timed_out",
         error: `Timed out after ${agent.timeoutMinutes} min`,
       });
+    if (stall.signal.aborted)
+      return finish(db, run.id, { state: "awaiting_input", error: String(stall.signal.reason) });
     return finish(db, run.id, { state: "failed", error: (e as Error).message });
   } finally {
     if (scratch) await rm(scratch, { recursive: true, force: true });
   }
-  return finish(db, run.id, outcomeOf(result), result);
+
+  const outcome = outcomeOf(result);
+  if (wt && before) {
+    const broken = await checkAfterRun(wt, project.defaultBranch, before, canEdit).catch(
+      (e: Error) => `Post-run check failed: ${e.message}`,
+    );
+    if (broken) return finish(db, run.id, { state: "failed", error: broken }, result);
+    // The touch set grows with what the branch really changed (§9).
+    if (run.columnSlug === "in_progress") {
+      const base = await git(wt.path, ["merge-base", project.defaultBranch, "HEAD"]);
+      outcome.touched = await changedSince(wt.path, base.trim());
+    }
+  }
+  return finish(db, run.id, outcome, result);
 }
 
-type Outcome = { state: RunOutcome; error?: string; verdict?: VerdictPayload };
+type Outcome = {
+  state: RunOutcome;
+  error?: string;
+  verdict?: VerdictPayload;
+  /** Files the branch changed (In Progress runs), added to the ticket's touch set. */
+  touched?: string[];
+};
 
 /** Maps the runtime's result to a run state (requirements §8 report step and failure handling). */
 export function outcomeOf(r: RuntimeResult): Outcome {
@@ -171,7 +296,11 @@ export function outcomeOf(r: RuntimeResult): Outcome {
   const parsed = verdictPayload.safeParse(r.report);
   if (!parsed.success)
     return { state: "failed", error: `Invalid report_result payload: ${parsed.error.message}` };
-  return { state: stateForVerdict[parsed.data.verdict] as RunOutcome, verdict: parsed.data };
+  const v = parsed.data;
+  // A blocking cross-ticket risk is a change request, whatever the reviewer concluded (§9).
+  if (v.verdict === "success" && v.crossTicketRisks.some((x) => x.severity === "blocking"))
+    v.verdict = "changes_requested";
+  return { state: stateForVerdict[v.verdict] as RunOutcome, verdict: v };
 }
 
 const agentActor = (slug: string) => ({ kind: "agent" as const, name: slug });
@@ -217,8 +346,23 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
 
     const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
     const from = cols.find((c) => c.id === ticket.columnId)!;
-    const rule = afterRun(run.columnSlug, o.state);
-    await tx.update(tickets).set({ statusFlag: rule.flag }).where(eq(tickets.id, ticket.id));
+    const rule = afterRun(run.columnSlug, o.state, {
+      verdict: o.verdict?.verdict,
+      bounces: ticket.bounceCount,
+    });
+    // Re-read: storeResults may have replaced the touch set (Plan B).
+    const [{ touchPaths }] = (await tx
+      .select({ touchPaths: tickets.touchPaths })
+      .from(tickets)
+      .where(eq(tickets.id, ticket.id))) as [{ touchPaths: string[] }];
+    await tx
+      .update(tickets)
+      .set({
+        statusFlag: rule.flag,
+        bounceCount: ticket.bounceCount + (rule.bounce ? 1 : 0),
+        ...(o.touched && { touchPaths: [...new Set([...touchPaths, ...o.touched])] }),
+      })
+      .where(eq(tickets.id, ticket.id));
     await logActivity(
       tx,
       ticket.id,
@@ -231,6 +375,8 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         summary: run.summary,
         error: o.error,
         costUsd: run.costUsd,
+        ...(rule.bounce && { bounce: ticket.bounceCount + 1 }),
+        ...(rule.reason && { reason: `Bounce limit (${BOUNCE_LIMIT}) reached` }),
       },
       actor,
     );
@@ -251,13 +397,35 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
   });
 }
 
-/** Stores the verdict's artifacts (new versions, never overwriting) and agent-written criteria. */
-async function storeResults(
+type TicketRef = { id: string; projectId: string };
+
+/** Adds an agent comment, logs it and announces it. */
+async function agentComment(
   tx: Tx,
-  ticket: { id: string; projectId: string },
-  run: Run,
-  v: VerdictPayload,
+  ticket: TicketRef,
+  slug: string,
+  c: { bodyMd: string; file?: string; line?: number },
 ) {
+  const [row] = await tx
+    .insert(comments)
+    .values({ ticketId: ticket.id, authorKind: "agent", agentSlug: slug, ...c })
+    .returning({ id: comments.id });
+  await logActivity(tx, ticket.id, "commented", { commentId: row!.id }, agentActor(slug));
+  await publish(tx, ticket.projectId, {
+    type: "comment.created",
+    ticketId: ticket.id,
+    commentId: row!.id,
+  });
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Stores what the verdict carries: artifacts (new versions, never overwriting), Plan B's criteria and
+ * touch set, Nancy's line comments and cross-ticket risks, Testy's per-criterion results.
+ */
+async function storeResults(tx: Tx, ticket: TicketRef, run: Run, v: VerdictPayload) {
+  const actor = agentActor(run.agentSlug);
   for (const a of v.artifacts) {
     const [{ last } = { last: null }] = await tx
       .select({ last: max(artifacts.version) })
@@ -280,6 +448,10 @@ async function storeResults(
       artifactId: row!.id,
     });
   }
+
+  if (v.verdict === "success" && v.touchPaths)
+    await tx.update(tickets).set({ touchPaths: v.touchPaths }).where(eq(tickets.id, ticket.id));
+
   if (v.verdict === "success" && v.acceptanceCriteria) {
     // A new plan's checklist replaces the previous agent-written one; the owner's items stay.
     await tx
@@ -305,7 +477,7 @@ async function storeResults(
       ticket.id,
       "edited",
       { fields: ["criteria"], change: "replaced by plan", count: v.acceptanceCriteria.length },
-      agentActor(run.agentSlug),
+      actor,
     );
     await publish(tx, ticket.projectId, {
       type: "ticket.updated",
@@ -313,4 +485,85 @@ async function storeResults(
       fields: ["criteria"],
     });
   }
+
+  // Each review supersedes the reviewer's earlier comments, so "unresolved" means the latest review.
+  if (run.columnSlug === "code_review")
+    await tx
+      .update(comments)
+      .set({ resolved: true })
+      .where(
+        and(
+          eq(comments.ticketId, ticket.id),
+          eq(comments.agentSlug, run.agentSlug),
+          eq(comments.resolved, false),
+        ),
+      );
+  for (const c of v.comments)
+    await agentComment(tx, ticket, run.agentSlug, { bodyMd: c.body, file: c.file, line: c.line });
+
+  if (v.crossTicketRisks.length) {
+    const [me] = await tx
+      .select({ number: tickets.number, keyPrefix: projects.keyPrefix })
+      .from(tickets)
+      .innerJoin(projects, eq(projects.id, tickets.projectId))
+      .where(eq(tickets.id, ticket.id));
+    const myKey = `${me!.keyPrefix}-${me!.number}`;
+    for (const r of v.crossTicketRisks) {
+      const note = `**Cross-ticket risk (${r.severity}, ${r.kind})**: ${r.description}`;
+      await agentComment(tx, ticket, run.agentSlug, { bodyMd: `${r.ticket}: ${note}` });
+      // The note goes on the other ticket too (§9); a key from another project is ignored.
+      const n = r.ticket.startsWith(`${me!.keyPrefix}-`) ? Number(r.ticket.split("-").pop()) : NaN;
+      const [other] = Number.isInteger(n)
+        ? await tx
+            .select({ id: tickets.id, projectId: tickets.projectId })
+            .from(tickets)
+            .where(and(eq(tickets.projectId, ticket.projectId), eq(tickets.number, n)))
+        : [];
+      if (other && other.id !== ticket.id)
+        await agentComment(tx, other, run.agentSlug, { bodyMd: `${myKey}: ${note}` });
+    }
+  }
+
+  const results = v.criteriaResults.filter((c) => UUID.test(c.criterionId));
+  if (results.length) {
+    for (const c of results)
+      await tx
+        .update(acceptanceCriteria)
+        .set({ status: c.status })
+        .where(
+          and(eq(acceptanceCriteria.id, c.criterionId), eq(acceptanceCriteria.ticketId, ticket.id)),
+        );
+    await logActivity(
+      tx,
+      ticket.id,
+      "edited",
+      { fields: ["criteria"], change: "checked by QA", results },
+      actor,
+    );
+    await publish(tx, ticket.projectId, {
+      type: "ticket.updated",
+      ticketId: ticket.id,
+      fields: ["criteria"],
+    });
+  }
+}
+
+/** `{test}`-style placeholders → the project's commands; an entry naming a missing command is dropped. */
+export function expandTools(tools: readonly string[], commands: ProjectConfig["commands"]) {
+  return tools.flatMap((t) => {
+    let missing = false;
+    const out = t.replace(/\{(install|build|test|lint)\}/g, (_, k: keyof typeof commands) => {
+      const c = commands[k];
+      if (!c) missing = true;
+      return c ?? "";
+    });
+    return missing ? [] : [out];
+  });
+}
+
+/** The agent's edit scope (§14) as a path predicate; undefined = anywhere in the worktree. */
+function editScope(scope: AgentConfig["editScope"], config: ProjectConfig) {
+  if (scope === "worktree") return undefined;
+  if (scope === "none") return () => false;
+  return (rel: string) => config.testGlobs.some((g) => matchesGlob(rel, g));
 }

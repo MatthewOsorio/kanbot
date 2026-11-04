@@ -1,0 +1,42 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Re-reviewing."
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t1",
+        "name": "Bash",
+        "input": {
+          "command": "git diff main...HEAD"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t1",
+        "isError": false,
+        "content": "(diff)"
+      }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "The regression test is in. Approved.",
+    "artifacts": [
+      {
+        "kind": "review",
+        "title": "Review: Deleting an unknown todo removes the last one",
+        "markdown": "Approved. The earlier comment is addressed."
+      }
+    ]
+  },
+  "costUsd": 0.12,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

@@ -2,33 +2,39 @@
 
 Self-hosted Kanban board where AI agents work the columns. The spec is `docs/requirements.md`: build to it, and update it in the same change whenever a decision or behavior changes. Work milestone by milestone (§16) and stop at the end of each for review.
 
-**Status: M2 (orchestrator and Plan B) is done; M1 (board) before it.** What each milestone deliberately left out, and which milestone picks each item up, is listed under "Deferred from M1" and "Deferred from M2" in `docs/requirements.md` §16. Read those lists before starting a milestone. Anything you defer goes on them too, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` and `docs/m2-report.md`.
+**Status: M3 (build loop) is done; M1 (board) and M2 (orchestrator, Plan B) before it.** What each milestone deliberately left out, and which milestone picks each item up, is listed under "Deferred from M1", "Deferred from M2" and "Deferred from M3" in `docs/requirements.md` §16. Read those lists before starting a milestone. Anything you defer goes on them too, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md`, `docs/m2-report.md` and `docs/m3-report.md`.
 
 ## Layout
 
 ```
 apps/web/            Next.js 16 App Router: board UI + REST API + SSE
   app/api/**/route.ts  thin handlers: parse with zod, call lib/, wrap with route() for {error:{code,message}}
-  lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations
+  lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations, overlap check, diff
   lib/runs.ts          run history, run log paging, cancel, retry, revise plan
   lib/events.ts        one LISTEN client per process fans out to SSE (publish() itself is in shared)
-  components/          board.tsx (dnd-kit), ticket-drawer.tsx (tabs, Live log), markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
+  components/          board.tsx (dnd-kit), ticket-drawer.tsx (tabs, Live log, Diff), markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
   e2e/                 Playwright; starts its own dev server on :3100 and a replay worker, against database kanbot_test
 apps/worker/         Node process (tsx): claims queued runs, runs agents, applies verdicts
   src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery
   src/run.ts           claimNext (SKIP LOCKED queue), executeRun, outcomeOf, finish (verdict → transition, one tx)
-  src/context.ts       the context bundle (prompt) for a run
-  src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK), replay.ts (fixtures, for tests)
+  src/context.ts       the context bundle (prompt) for a run (branch context, in-flight tickets)
+  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks)
+  src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
+  src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK), replay.ts (fixtures + record()), fence.ts (permission hook logic)
   test/                Vitest against kanbot_test with the replay runtime
 packages/shared/     shared by web and worker
   src/schemas.ts       zod API bodies + enums;  src/events.ts  SSE event union + NOTIFY channel
   src/transitions.ts   the transition table as data (afterRun);  src/verdict.ts  report_result schema
   src/agents.ts        agent file loader (server-only export "@kanbot/shared/agents")
+  src/repo.ts          git(), .kanbot/project.yml loader, overlap(), branchName() (server-only "@kanbot/shared/repo")
   src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd
-  src/db/testing.ts    prepareTestDatabase() for e2e and worker tests
+  src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
   drizzle/             generated SQL migrations (commit them)
-agents/              one <slug>.md per agent (YAML frontmatter + system prompt) and avatars/. Only plan-b.md so far.
-fixtures/runs/       replay scripts: <agent>/<scenario>.json; a ticket label `replay:<scenario>` picks one
+agents/              one <slug>.md per agent (YAML frontmatter + system prompt) and avatars/: plan-b, sir-codes-a-lot, nitpick-nancy, testy-mctestface
+plugins/ponytail/    vendored, pinned Ponytail (see VENDORED.md); agents list plugins in frontmatter
+fixtures/runs/       replay scripts: <agent>/<scenario>[.<n>].json; a ticket label `replay:<scenario>` picks one, n = the agent's nth run
+fixtures/sample-repo/ zero-dependency todo app (with .kanbot/project.yml) copied into fresh git repos by prepareSampleRepo()
+fixtures/golden/     the golden tickets for `pnpm eval:agents`
 docs/requirements.md the spec
 ```
 
@@ -39,9 +45,12 @@ docker compose up -d db     Postgres 16 on 127.0.0.1:5432 (cp .env.example .env 
 pnpm db:migrate             apply migrations;  pnpm db:generate --name <x>  after editing db/schema.ts
 pnpm dev                    web on http://127.0.0.1:3000 + worker (dev:web / dev:worker run one)
 pnpm typecheck | lint | test | test:e2e | build | format
+pnpm eval:agents            golden tickets with REAL agents (costs money; ask first). --baseline saves evals/baseline.json
 ```
 
-The worker uses the real Claude Agent SDK unless `KANBOT_RUNTIME=replay` (needs `ANTHROPIC_API_KEY` in `.env`). Tests and CI only ever use replay. A real run costs money: Plan B was about $0.15–0.45 per plan in the M2 smoke test.
+The worker uses the real Claude Agent SDK unless `KANBOT_RUNTIME=replay` (needs `ANTHROPIC_API_KEY` in `.env`). Tests and CI only ever use replay. A real run costs money: Plan B was about $0.15–0.45 per plan in the M2 smoke test. `KANBOT_RECORD=1` saves real runs as replay scripts (see `.env.example`); `KANBOT_RUNTIME=replay pnpm eval:agents` checks the eval script for free.
+
+Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs and hotspots come from `.kanbot/project.yml` on its default branch (until M4's Settings). The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
 
 `pnpm test:e2e` can run while `pnpm dev` is running: it uses `NEXT_DIST_DIR=.next-e2e`, its own database and its own replay worker. Worker tests (`pnpm test`) share `kanbot_test` and cancel any leftover active runs there first.
 
@@ -55,7 +64,9 @@ If `pnpm dev` returns 500 with a Turbopack panic about `globals.css` / exit code
 - Every ticket or run mutation writes an `activity` row and calls `publish()` in the same transaction (agents are the actor for worker writes). Clients refetch on every event (no client-side patching), except `run.event`, which carries ids only (NOTIFY's 8 KB cap); the Live tab pages `/api/runs/:id/events?after=seq`.
 - Web and worker never call each other: the web app inserts `queued` runs, the worker claims them; cancels travel as a `run.finished` event.
 - Validate every API body and `[id]` param at the boundary (`parseBody`, `idParam`). Errors are `{error: {code, message}}`.
-- New agent behavior goes in `transitions.ts` (data) and gets a unit test; worker paths get a replay scenario in `fixtures/runs` and a test in `apps/worker/test`.
+- New agent behavior goes in `transitions.ts` (data) and gets a unit test; worker paths get a replay scenario in `fixtures/runs` and a test in `apps/worker/test`. Replay patches apply to `fixtures/sample-repo`, which is kept LF (`.gitattributes`).
+- Each agent prompt change is checked with `pnpm eval:agents` before merging (§8), with the owner's OK for the spend.
+- Any change the owner can see in the UI is checked in a real browser before it's called done. Write a throwaway Playwright script (scratchpad, not `e2e/`) against `pnpm dev:web` on its own port and database plus a `KANBOT_RUNTIME=replay` worker. Screenshot each step and look at the screenshots. Report pass/fail with the screenshot paths. This is free, so no spend OK is needed. Promote a check to `e2e/` only when it's worth keeping.
 - A known-limited shortcut gets a `shortcut: <limit>, <when to upgrade>` comment.
 - One `.env` at the repo root; `.env.example` lists every variable. Never commit secrets.
 - Dependencies: pnpm 12 enforces a minimum release age. Pick a mature version rather than adding `minimumReleaseAgeExclude` entries.

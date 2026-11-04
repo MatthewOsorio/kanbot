@@ -3,7 +3,10 @@ import { resolve } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 
-/** Agent file frontmatter (requirements §8). `plugins` arrives in M3; `statusLines` is UI-only. */
+/**
+ * Agent file frontmatter (requirements §8). `statusLines` is UI-only. In `tools`, `{install}`,
+ * `{build}`, `{test}` and `{lint}` expand to the project's commands (dropped when it has none).
+ */
 export const agentFrontmatter = z.object({
   slug: z.string().regex(/^[a-z0-9-]+$/),
   name: z.string().min(1),
@@ -12,6 +15,12 @@ export const agentFrontmatter = z.object({
   column: z.string().min(1),
   model: z.string().min(1),
   tools: z.array(z.string().min(1)),
+  /** Where Edit/Write may write (§14): nowhere, anywhere in the worktree, or only the project's test globs. */
+  editScope: z.enum(["none", "worktree", "test_globs"]).default("none"),
+  /** Bundled plugins from plugins/<name> (§8). Ponytail's level is passed as PONYTAIL_DEFAULT_MODE. */
+  plugins: z
+    .array(z.object({ name: z.string().regex(/^[a-z0-9-]+$/), level: z.string().optional() }))
+    .default([]),
   maxTurns: z.number().int().positive(),
   timeoutMinutes: z.number().positive(),
   maxBudgetUsd: z.number().positive(),

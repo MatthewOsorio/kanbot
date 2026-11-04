@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Nothing to change."
+      }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Done."
+  },
+  "costUsd": 0.1,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

@@ -1,0 +1,12 @@
+{
+  "events": [{ "type": "assistant", "payload": { "text": "Re-running the suite." } }],
+  "report": {
+    "verdict": "success",
+    "summary": "Both criteria pass now.",
+    "criteriaResults": [
+      { "criterionId": "$criterion1", "status": "pass" },
+      { "criterionId": "$criterion2", "status": "pass" }
+    ]
+  },
+  "costUsd": 0.2
+}

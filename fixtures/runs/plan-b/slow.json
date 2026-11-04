@@ -434,7 +434,7 @@
     "artifacts": [
       {
         "kind": "plan",
-        "title": "Plan",
+        "title": "Plan: Add a filter",
         "markdown": "## Problem\nThe board has no way to filter cards.\n\n## Approach\n- Add a filter input to the top bar.\n\n## Implementation steps\n1. Add `filter` state in `apps/web/components/board.tsx`.\n2. Filter cards by title.\n\n## Files likely touched\n- `apps/web/components/board.tsx`\n\n## Tests\n- Playwright: typing filters the board.\n\n## Risks and open questions\n- None.\n\n## Size\nS"
       }
     ],

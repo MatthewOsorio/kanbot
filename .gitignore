@@ -1,9 +1,9 @@
 node_modules/
-.next/
-.next-e2e/
+.next*/
 next-env.d.ts
 *.tsbuildinfo
 .env
+evals/results/
 .env.local
 test-results/
 playwright-report/

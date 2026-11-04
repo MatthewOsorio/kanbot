@@ -16,7 +16,8 @@
     "db:migrate": "pnpm --filter @kanbot/shared db:migrate",
     "format": "prettier --write .",
     "dev:web": "pnpm --filter @kanbot/web dev",
-    "dev:worker": "pnpm --filter @kanbot/worker dev"
+    "dev:worker": "pnpm --filter @kanbot/worker dev",
+    "eval:agents": "pnpm --filter @kanbot/worker eval"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

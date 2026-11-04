@@ -7,7 +7,8 @@
     "start": "tsx src/main.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "tsx src/eval.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.304",

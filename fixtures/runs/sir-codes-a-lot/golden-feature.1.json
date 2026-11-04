@@ -1,0 +1,522 @@
+{
+  "events": [
+    {
+      "type": "system",
+      "payload": {
+        "subtype": "init",
+        "model": "claude-opus-5-5",
+        "tools": ["Bash", "Edit", "Glob", "Grep", "Read", "Write", "mcp__kanbot__report_result"],
+        "plugins": [
+          "ponytail",
+          "cc-plugin-agents-md",
+          "cc-plugin-telemetry",
+          "cc-plugin-plugin-authoring"
+        ],
+        "skills": [
+          "deep-research",
+          "ponytail:ponytail",
+          "ponytail:ponytail-review",
+          "design",
+          "design-sync",
+          "dataviz",
+          "update-config",
+          "verify",
+          "debug",
+          "code-review",
+          "simplify",
+          "batch",
+          "fewer-permission-prompts",
+          "doctor",
+          "loop",
+          "claude-api",
+          "workflow-authoring",
+          "run",
+          "run-skill-generator",
+          "plugin-authoring"
+        ]
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01MNLivSPoFZY7eadYARwoN3",
+        "name": "Read",
+        "input": {
+          "file_path": "<cwd>\\src\\server.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01MNLivSPoFZY7eadYARwoN3",
+        "isError": false,
+        "content": "1\timport { readFile } from \"node:fs/promises\";\n2\timport { createServer, type IncomingMessage, type ServerResponse } from \"node:http\";\n3\timport { TodoStore } from \"./todos.ts\";\n4\t\n5\tconst store = new TodoStore();\n6\t\n7\tfunction send(res: ServerResponse, status: number, body?: unknown) {\n8\t  res.writeHead(status, { \"content-type\": \"application/json\" });\n9\t  res.end(body === undefined ? undefined : JSON.stringify(body));\n10\t}\n11\t\n12\tasync function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {\n13\t  let raw = \"\";\n14\t  for await (const chunk of req) raw += chunk;\n15\t  try {\n16\t    return JSON.parse(raw || \"{}\");\n17\t  } catch {\n18\t    return {};\n19\t  }\n20\t}\n21\t\n22\texport async function handle(req: IncomingMessage, res: ServerResponse) {\n23\t  const url = new URL(req.url ?? \"/\", \"http://localhost\");\n24\t  const id = Number(url.pathname.match(/^\\/api\\/todos\\/(\\d+)$/)?.[1]);\n25\t\n26\t  if (req.method === \"GET\" && url.pathname === \"/\") {\n27\t    res.writeHead(200, { \"content-type\": \"text/html\" });\n28\t    res.end(await readFile(new URL(\"../public/index.html\", import.meta.url)));\n29\t    return;\n30\t  }\n31\t  if (req.method === \"GET\" && url.pathname === \"/api/todos\") return send(res, 200, store.list());\n32\t  if (req.method === \"POST\" && url.pathname === \"/api/todos\") {\n33\t    const { title } = await readJson(req);\n34\t    if (typeof title !== \"string\" || !title.trim())\n35\t      return send(res, 400, { error: \"title is required\" });\n36\t    return send(res, 201, store.add(title));\n37\t  }\n38\t  if (req.method === \"PATCH\" && id) {\n39\t    const todo = store.toggle(id);\n40\t    return todo ? send(res, 200, todo) : send(res, 404, { error: \"not found\" });\n41\t  }\n42\t  if (req.method === \"DELETE\" && id) {\n43\t    return store.remove(id) ? send(res, 204) : send(res, 404, { error: \"not found\" });\n44\t  }\n45\t  send(res, 404, { error: \"not found\" });\n46\t}\n47\t\n48\tif (import.meta.main) {\n49\t  const port = Number(process.env.PORT ?? 3000);\n50\t  createServer(handle).listen(port, () => console.log(`http://localhost:${port}`));\n51\t}\n52\t"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01QEohzKcxuurADnYJ9cEkgJ",
+        "name": "Read",
+        "input": {
+          "file_path": "<cwd>\\src\\todos.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01QEohzKcxuurADnYJ9cEkgJ",
+        "isError": false,
+        "content": "1\texport type Todo = { id: number; title: string; done: boolean };\n2\t\n3\texport class TodoStore {\n4\t  private todos: Todo[] = [];\n5\t  private nextId = 1;\n6\t\n7\t  list(): Todo[] {\n8\t    return [...this.todos];\n9\t  }\n10\t\n11\t  add(title: string): Todo {\n12\t    const trimmed = title.trim();\n13\t    if (!trimmed) throw new Error(\"Title is required\");\n14\t    const todo = { id: this.nextId++, title: trimmed, done: false };\n15\t    this.todos.push(todo);\n16\t    return todo;\n17\t  }\n18\t\n19\t  toggle(id: number): Todo | undefined {\n20\t    const todo = this.todos.find((t) => t.id === id);\n21\t    if (todo) todo.done = !todo.done;\n22\t    return todo;\n23\t  }\n24\t\n25\t  remove(id: number): boolean {\n26\t    const index = this.todos.findIndex((t) => t.id === id);\n27\t    this.todos.splice(index, 1);\n28\t    return index !== -1;\n29\t  }\n30\t}\n31\t"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_016DU3m3e8ars2bwn2HjCJo6",
+        "name": "Read",
+        "input": {
+          "file_path": "<cwd>\\public\\index.html"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_016DU3m3e8ars2bwn2HjCJo6",
+        "isError": false,
+        "content": "1\t<!doctype html>\n2\t<html lang=\"en\">\n3\t  <head>\n4\t    <meta charset=\"utf-8\" />\n5\t    <title>Todos</title>\n6\t  </head>\n7\t  <body>\n8\t    <h1>Todos</h1>\n9\t    <form id=\"add\">\n10\t      <label for=\"title\">New todo</label>\n11\t      <input id=\"title\" name=\"title\" required />\n12\t      <button type=\"submit\">Add</button>\n13\t    </form>\n14\t    <ul id=\"list\"></ul>\n15\t    <script type=\"module\">\n16\t      const list = document.getElementById(\"list\");\n17\t      async function render() {\n18\t        const todos = await (await fetch(\"/api/todos\")).json();\n19\t        list.replaceChildren(\n20\t          ...todos.map((t) => {\n21\t            const li = document.createElement(\"li\");\n22\t            const box = document.createElement(\"input\");\n23\t            box.type = \"checkbox\";\n24\t            box.checked = t.done;\n25\t            box.ariaLabel = t.title;\n26\t            box.onchange = async () => {\n27\t              await fetch(`/api/todos/${t.id}`, { method: \"PATCH\" });\n28\t              render();\n29\t            };\n30\t            li.append(box, ` ${t.title}`);\n31\t            return li;\n32\t          }),\n33\t        );\n34\t      }\n35\t      document.getElementById(\"add\").onsubmit = async (e) => {\n36\t        e.preventDefault();\n37\t        const input = document.getElementById(\"title\");\n38\t        await fetch(\"/api/todos\", { method: \"POST\", body: JSON.stringify({ title: input.value }) });\n39\t        input.value = \"\";\n40\t        render();\n41\t      };\n42\t      render();\n43\t    </script>\n44\t  </body>\n45\t</html>\n46\t"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_016yxmjDmdDuyBGAdjoJDNV8",
+        "name": "Read",
+        "input": {
+          "file_path": "<cwd>\\test\\server.test.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_016yxmjDmdDuyBGAdjoJDNV8",
+        "isError": false,
+        "content": "1\timport assert from \"node:assert/strict\";\n2\timport { createServer } from \"node:http\";\n3\timport type { AddressInfo } from \"node:net\";\n4\timport { after, test } from \"node:test\";\n5\timport { handle } from \"../src/server.ts\";\n6\t\n7\tconst server = createServer(handle).listen(0);\n8\tconst base = `http://localhost:${(server.address() as AddressInfo).port}`;\n9\tafter(() => server.close());\n10\t\n11\ttest(\"POST then GET /api/todos\", async () => {\n12\t  const created = await fetch(`${base}/api/todos`, {\n13\t    method: \"POST\",\n14\t    body: JSON.stringify({ title: \"Write tests\" }),\n15\t  });\n16\t  assert.equal(created.status, 201);\n17\t  const todos = await (await fetch(`${base}/api/todos`)).json();\n18\t  assert.equal(todos.at(-1).title, \"Write tests\");\n19\t});\n20\t\n21\ttest(\"POST /api/todos without a title is a 400\", async () => {\n22\t  const res = await fetch(`${base}/api/todos`, { method: \"POST\", body: \"{}\" });\n23\t  assert.equal(res.status, 400);\n24\t});\n25\t"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01Bi3UunXHjzYQyir3v4d27B",
+        "name": "Read",
+        "input": {
+          "file_path": "<cwd>\\test\\todos.test.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01Bi3UunXHjzYQyir3v4d27B",
+        "isError": false,
+        "content": "1\timport assert from \"node:assert/strict\";\n2\timport { test } from \"node:test\";\n3\timport { TodoStore } from \"../src/todos.ts\";\n4\t\n5\ttest(\"add trims the title and starts open\", () => {\n6\t  const store = new TodoStore();\n7\t  assert.deepEqual(store.add(\"  Buy milk \"), { id: 1, title: \"Buy milk\", done: false });\n8\t});\n9\t\n10\ttest(\"add rejects an empty title\", () => {\n11\t  assert.throws(() => new TodoStore().add(\"   \"), /required/);\n12\t});\n13\t\n14\ttest(\"toggle flips done\", () => {\n15\t  const store = new TodoStore();\n16\t  const { id } = store.add(\"Walk the dog\");\n17\t  assert.equal(store.toggle(id)?.done, true);\n18\t  assert.equal(store.toggle(id)?.done, false);\n19\t});\n20\t\n21\ttest(\"remove deletes the todo\", () => {\n22\t  const store = new TodoStore();\n23\t  const { id } = store.add(\"Call mom\");\n24\t  assert.equal(store.remove(id), true);\n25\t  assert.deepEqual(store.list(), []);\n26\t});\n27\t"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01GG3XbSiYFRpVpsGG2FG6FA",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\src\\todos.ts",
+          "old_string": "  add(title: string): Todo {\n    const trimmed = title.trim();\n    if (!trimmed) throw new Error(\"Title is required\");\n    const todo = { id: this.nextId++, title: trimmed, done: false };",
+          "new_string": "  add(title: string, dueDate: string | null = null): Todo {\n    const trimmed = title.trim();\n    if (!trimmed) throw new Error(\"Title is required\");\n    const todo = { id: this.nextId++, title: trimmed, done: false, dueDate };"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01GG3XbSiYFRpVpsGG2FG6FA",
+        "isError": false,
+        "content": "The file <cwd>\\src\\todos.ts has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01W1nCuJGAEtubdddXWrosZk",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\src\\todos.ts",
+          "old_string": "done: boolean };",
+          "new_string": "done: boolean; dueDate: string | null };"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01W1nCuJGAEtubdddXWrosZk",
+        "isError": false,
+        "content": "The file <cwd>\\src\\todos.ts has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01Q4BtpxGq4Mmh23DfHoSuig",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\src\\server.ts",
+          "old_string": "    const { title } = await readJson(req);\n    if (typeof title !== \"string\" || !title.trim())\n      return send(res, 400, { error: \"title is required\" });\n    return send(res, 201, store.add(title));",
+          "new_string": "    const { title, dueDate } = await readJson(req);\n    if (typeof title !== \"string\" || !title.trim())\n      return send(res, 400, { error: \"title is required\" });\n    if (dueDate != null && !isIsoDate(dueDate))\n      return send(res, 400, { error: \"dueDate must be YYYY-MM-DD\" });\n    return send(res, 201, store.add(title, dueDate ?? null));"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01Q4BtpxGq4Mmh23DfHoSuig",
+        "isError": false,
+        "content": "The file <cwd>\\src\\server.ts has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01FvNyH8pPe5gP44Ue17q6jj",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\src\\server.ts",
+          "old_string": "async function readJson(",
+          "new_string": "function isIsoDate(v: unknown): v is string {\n  if (typeof v !== \"string\" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(v)) return false;\n  // Round trip: Date silently rolls 2026-02-30 over to March 2.\n  const d = new Date(v + \"T00:00:00Z\");\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;\n}\n\nasync function readJson("
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01FvNyH8pPe5gP44Ue17q6jj",
+        "isError": false,
+        "content": "The file <cwd>\\src\\server.ts has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01Fq7VcAt2xT52hq7Jo4M2zK",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\public\\index.html",
+          "old_string": "            li.append(box, ` ${t.title}`);",
+          "new_string": "            li.append(box, ` ${t.title}`, t.dueDate ? ` (due ${t.dueDate})` : \"\");"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01Fq7VcAt2xT52hq7Jo4M2zK",
+        "isError": false,
+        "content": "The file <cwd>\\public\\index.html has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_014KtajzcFyYccpEcL3d1Gsb",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\public\\index.html",
+          "old_string": "      <input id=\"title\" name=\"title\" required />\n",
+          "new_string": "      <input id=\"title\" name=\"title\" required />\n      <label for=\"due\">Due</label>\n      <input id=\"due\" name=\"due\" type=\"date\" />\n"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_014KtajzcFyYccpEcL3d1Gsb",
+        "isError": false,
+        "content": "The file <cwd>\\public\\index.html has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01HxS9RZ2VGHSG2CStofFTRo",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\public\\index.html",
+          "old_string": "        await fetch(\"/api/todos\", { method: \"POST\", body: JSON.stringify({ title: input.value }) });\n        input.value = \"\";",
+          "new_string": "        const due = document.getElementById(\"due\");\n        await fetch(\"/api/todos\", {\n          method: \"POST\",\n          body: JSON.stringify({ title: input.value, dueDate: due.value || null }),\n        });\n        input.value = \"\";\n        due.value = \"\";"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01HxS9RZ2VGHSG2CStofFTRo",
+        "isError": false,
+        "content": "The file <cwd>\\public\\index.html has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_019vHrxvet2JnUubszZYBntZ",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\test\\todos.test.ts",
+          "old_string": "{ id: 1, title: \"Buy milk\", done: false });\n});",
+          "new_string": "{ id: 1, title: \"Buy milk\", done: false, dueDate: null });\n});\n\ntest(\"add stores the due date\", () => {\n  assert.equal(new TodoStore().add(\"x\", \"2026-12-31\").dueDate, \"2026-12-31\");\n});"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_019vHrxvet2JnUubszZYBntZ",
+        "isError": false,
+        "content": "The file <cwd>\\test\\todos.test.ts has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01QoRNHVB8fe8obVxMZcDeYk",
+        "name": "Edit",
+        "input": {
+          "replace_all": false,
+          "file_path": "<cwd>\\test\\server.test.ts",
+          "old_string": "test(\"POST /api/todos without a title is a 400\", async () => {",
+          "new_string": "test(\"POST with a dueDate returns it, and GET keeps it\", async () => {\n  const res = await fetch(`${base}/api/todos`, {\n    method: \"POST\",\n    body: JSON.stringify({ title: \"Pay rent\", dueDate: \"2026-12-31\" }),\n  });\n  assert.equal(res.status, 201);\n  assert.equal((await res.json()).dueDate, \"2026-12-31\");\n  const todos = await (await fetch(`${base}/api/todos`)).json();\n  assert.equal(todos.at(-1).dueDate, \"2026-12-31\");\n});\n\ntest(\"POST without a dueDate (or null) gives dueDate null\", async () => {\n  for (const body of [{ title: \"a\" }, { title: \"b\", dueDate: null }]) {\n    const res = await fetch(`${base}/api/todos`, { method: \"POST\", body: JSON.stringify(body) });\n    assert.equal(res.status, 201);\n    const todo = await res.json();\n    assert.equal(todo.dueDate, null);\n    const toggled = await (await fetch(`${base}/api/todos/${todo.id}`, { method: \"PATCH\" })).json();\n    assert.ok(\"dueDate\" in toggled);\n  }\n});\n\ntest(\"POST with a bad dueDate is a 400\", async () => {\n  const bad = [\"31/12/2026\", \"2026-1-5\", 20261231, \"2026-12-31T10:00\", \"2026-02-30\", \"2026-13-01\", \"\"];\n  for (const dueDate of bad) {\n    const res = await fetch(`${base}/api/todos`, {\n      method: \"POST\",\n      body: JSON.stringify({ title: \"x\", dueDate }),\n    });\n    assert.equal(res.status, 400, `dueDate ${JSON.stringify(dueDate)}`);\n  }\n});\n\ntest(\"POST /api/todos without a title is a 400\", async () => {"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01QoRNHVB8fe8obVxMZcDeYk",
+        "isError": false,
+        "content": "The file <cwd>\\test\\server.test.ts has been updated successfully. (file state is current in your context — no need to Read it back)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01H3iW6SAvWPbNBbjf7kBLP5",
+        "name": "Bash",
+        "input": {
+          "command": "node --test",
+          "description": "Run test suite"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01H3iW6SAvWPbNBbjf7kBLP5",
+        "isError": false,
+        "content": "✔ POST then GET /api/todos (37.3708ms)\n✔ POST with a dueDate returns it, and GET keeps it (3.7904ms)\n✔ POST without a dueDate (or null) gives dueDate null (5.2769ms)\n✔ POST with a bad dueDate is a 400 (6.1659ms)\n✔ POST /api/todos without a title is a 400 (0.9221ms)\n✔ add trims the title and starts open (0.9062ms)\n✔ add stores the due date (0.1293ms)\n✔ add rejects an empty title (0.2727ms)\n✔ toggle flips done (0.1124ms)\n✔ remove deletes the todo (0.1493ms)\nℹ tests 10\nℹ suites 0\nℹ pass 10\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 202.564"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_015xtsJ5UtszS6MxvHBmo25H",
+        "name": "Bash",
+        "input": {
+          "command": "git add -A",
+          "description": "Stage changes"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_015xtsJ5UtszS6MxvHBmo25H",
+        "isError": false,
+        "content": "(Bash completed with no output)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01CKYUf5uU3ybp1QPXVzCo1q",
+        "name": "Bash",
+        "input": {
+          "command": "git commit -m \"Add optional dueDate to todos\" -m \"POST /api/todos validates dueDate as a real YYYY-MM-DD calendar date (400 otherwise), todos carry dueDate or null, and the page shows and sets it.\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\"",
+          "description": "Commit the feature"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01CKYUf5uU3ybp1QPXVzCo1q",
+        "isError": false,
+        "content": "[kanbot/EV0XEBCZ-2-todos-can-have-a-due-date d88c321] Add optional dueDate to todos\n 5 files changed, 61 insertions(+), 8 deletions(-)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_014AKH6ACTQeRTqjFeUUCpBf",
+        "name": "Bash",
+        "input": {
+          "command": "git status --short",
+          "description": "Confirm clean tree"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_014AKH6ACTQeRTqjFeUUCpBf",
+        "isError": false,
+        "content": "(Bash completed with no output)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01BtMghf84XyosHSwvBQ1Z1x",
+        "name": "mcp__kanbot__report_result",
+        "input": {
+          "verdict": "success",
+          "summary": "Implemented the plan in one commit (d88c321).\n- src/todos.ts: Todo now has `dueDate: string | null`, and `add(title, dueDate = null)` stores it.\n- src/server.ts: there is a new `isIsoDate` check: it must be a string, match the regex, and survive a round trip through toISOString, so 2026-02-30 is rejected. POST returns 400 for any dueDate that is present, not null, and not a valid date. It then calls `store.add(title, dueDate ?? null)`.\n- public/index.html: the page shows \" (due YYYY-MM-DD)\" after the title as a text node, not through innerHTML. It also has an optional date input that sends `dueDate: due.value || null`.\n- Tests: updated the deepEqual in the todos test and added a store test. Server tests cover: a valid date round-tripping through POST and GET; missing and null both giving null, plus a check that PATCH output still has the dueDate key; and a loop over 7 bad values that each return 400.\n`node --test` passes 10/10 and the working tree is clean.\n\nNot done:\n- I did not run a TS type-check, since the project has none. TS may not narrow `dueDate` from unknown at the `store.add` call, but at runtime it is safe.\n- I left an existing bug in `TodoStore.remove` alone because it is out of scope: calling it with an unknown id runs `splice(-1, 1)`, which deletes the last todo.",
+          "touchPaths": [
+            "src/todos.ts",
+            "src/server.ts",
+            "public/index.html",
+            "test/todos.test.ts",
+            "test/server.test.ts"
+          ],
+          "criteriaResults": [
+            {
+              "criterionId": "$criterion1",
+              "status": "pass",
+              "note": "server test: POST with dueDate returns it, GET keeps it"
+            },
+            {
+              "criterionId": "$criterion2",
+              "status": "pass",
+              "note": "missing and null both give null; PATCH output checked for the dueDate key"
+            },
+            {
+              "criterionId": "$criterion3",
+              "status": "pass",
+              "note": "bad-format loop test"
+            },
+            {
+              "criterionId": "$criterion4",
+              "status": "pass",
+              "note": "2026-02-30 and 2026-13-01 return 400 (round-trip check)"
+            },
+            {
+              "criterionId": "$criterion5",
+              "status": "pass",
+              "note": "render appends ' (due X)' only when dueDate is set; not tested in a browser"
+            },
+            {
+              "criterionId": "$criterion6",
+              "status": "pass",
+              "note": "10/10 pass"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01BtMghf84XyosHSwvBQ1Z1x",
+        "isError": false,
+        "content": "[{\"type\":\"text\",\"text\":\"Recorded. End your turn now.\"}]"
+      }
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Todos now have an optional due date, and `node --test` passes (10 of 10). It's all in one commit (d88c321) and the working tree is clean.\n\n- **API:** `POST /api/todos` accepts `dueDate` as `YYYY-MM-DD`. If it's missing or `null`, the todo gets `dueDate: null`. Anything else is a 400: wrong formats, numbers, empty strings, and dates that don't exist like `2026-02-30`. Every todo returned by GET, POST and PATCH now includes `dueDate`.\n- **Page:** shows \" (due 2026-12-31)\" after the title when a todo has a due date, and nothing extra otherwise. I also added a date field to the form, as the plan said, so you can set a due date from the page. The ticket only asked to show it, so the field can be dropped if you want display-only.\n- **Tests:** new tests cover a valid date coming back from POST and GET, missing and `null` both giving `null`, and seven bad values each returning a 400. I updated the one existing store test that compares the whole todo.\n\n**Not checked:**\n- I haven't looked at the page in a browser.\n- The project has no TypeScript type-check, so I didn't run one. The type checker might complain about the `dueDate` value passed to `store.add` in `src/server.ts`, but it works at runtime.\n\n**Existing bug, not fixed:** deleting a todo with an id that doesn't exist removes the last todo in the list instead. This was already there and is outside this ticket."
+      }
+    },
+    {
+      "type": "system",
+      "payload": {
+        "subtype": "result",
+        "result": "success",
+        "turns": 20,
+        "costUsd": 0.21013790000000002,
+        "durationMs": 48415
+      }
+    }
+  ],
+  "stop": "completed",
+  "report": {
+    "verdict": "success",
+    "summary": "Implemented the plan in one commit (d88c321).\n- src/todos.ts: Todo now has `dueDate: string | null`, and `add(title, dueDate = null)` stores it.\n- src/server.ts: there is a new `isIsoDate` check: it must be a string, match the regex, and survive a round trip through toISOString, so 2026-02-30 is rejected. POST returns 400 for any dueDate that is present, not null, and not a valid date. It then calls `store.add(title, dueDate ?? null)`.\n- public/index.html: the page shows \" (due YYYY-MM-DD)\" after the title as a text node, not through innerHTML. It also has an optional date input that sends `dueDate: due.value || null`.\n- Tests: updated the deepEqual in the todos test and added a store test. Server tests cover: a valid date round-tripping through POST and GET; missing and null both giving null, plus a check that PATCH output still has the dueDate key; and a loop over 7 bad values that each return 400.\n`node --test` passes 10/10 and the working tree is clean.\n\nNot done:\n- I did not run a TS type-check, since the project has none. TS may not narrow `dueDate` from unknown at the `store.add` call, but at runtime it is safe.\n- I left an existing bug in `TodoStore.remove` alone because it is out of scope: calling it with an unknown id runs `splice(-1, 1)`, which deletes the last todo.",
+    "artifacts": [],
+    "questions": [],
+    "touchPaths": [
+      "src/todos.ts",
+      "src/server.ts",
+      "public/index.html",
+      "test/todos.test.ts",
+      "test/server.test.ts"
+    ],
+    "comments": [],
+    "criteriaResults": [
+      {
+        "criterionId": "$criterion1",
+        "status": "pass",
+        "note": "server test: POST with dueDate returns it, GET keeps it"
+      },
+      {
+        "criterionId": "$criterion2",
+        "status": "pass",
+        "note": "missing and null both give null; PATCH output checked for the dueDate key"
+      },
+      {
+        "criterionId": "$criterion3",
+        "status": "pass",
+        "note": "bad-format loop test"
+      },
+      {
+        "criterionId": "$criterion4",
+        "status": "pass",
+        "note": "2026-02-30 and 2026-13-01 return 400 (round-trip check)"
+      },
+      {
+        "criterionId": "$criterion5",
+        "status": "pass",
+        "note": "render appends ' (due X)' only when dueDate is set; not tested in a browser"
+      },
+      {
+        "criterionId": "$criterion6",
+        "status": "pass",
+        "note": "10/10 pass"
+      }
+    ],
+    "crossTicketRisks": []
+  },
+  "costUsd": 0.21013790000000002,
+  "inputTokens": 126582,
+  "outputTokens": 5783,
+  "patch": "diff --git a/public/index.html b/public/index.html\nindex 526bcda..7c05349 100644\n--- a/public/index.html\n+++ b/public/index.html\n@@ -9,6 +9,8 @@\n     <form id=\"add\">\n       <label for=\"title\">New todo</label>\n       <input id=\"title\" name=\"title\" required />\n+      <label for=\"due\">Due</label>\n+      <input id=\"due\" name=\"due\" type=\"date\" />\n       <button type=\"submit\">Add</button>\n     </form>\n     <ul id=\"list\"></ul>\n@@ -27,7 +29,7 @@\n               await fetch(`/api/todos/${t.id}`, { method: \"PATCH\" });\n               render();\n             };\n-            li.append(box, ` ${t.title}`);\n+            li.append(box, ` ${t.title}`, t.dueDate ? ` (due ${t.dueDate})` : \"\");\n             return li;\n           }),\n         );\n@@ -35,8 +37,13 @@\n       document.getElementById(\"add\").onsubmit = async (e) => {\n         e.preventDefault();\n         const input = document.getElementById(\"title\");\n-        await fetch(\"/api/todos\", { method: \"POST\", body: JSON.stringify({ title: input.value }) });\n+        const due = document.getElementById(\"due\");\n+        await fetch(\"/api/todos\", {\n+          method: \"POST\",\n+          body: JSON.stringify({ title: input.value, dueDate: due.value || null }),\n+        });\n         input.value = \"\";\n+        due.value = \"\";\n         render();\n       };\n       render();\ndiff --git a/src/server.ts b/src/server.ts\nindex e0fbc6b..82d4491 100644\n--- a/src/server.ts\n+++ b/src/server.ts\n@@ -9,6 +9,13 @@ function send(res: ServerResponse, status: number, body?: unknown) {\n   res.end(body === undefined ? undefined : JSON.stringify(body));\n }\n \n+function isIsoDate(v: unknown): v is string {\n+  if (typeof v !== \"string\" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(v)) return false;\n+  // Round trip: Date silently rolls 2026-02-30 over to March 2.\n+  const d = new Date(v + \"T00:00:00Z\");\n+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;\n+}\n+\n async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {\n   let raw = \"\";\n   for await (const chunk of req) raw += chunk;\n@@ -30,10 +37,12 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {\n   }\n   if (req.method === \"GET\" && url.pathname === \"/api/todos\") return send(res, 200, store.list());\n   if (req.method === \"POST\" && url.pathname === \"/api/todos\") {\n-    const { title } = await readJson(req);\n+    const { title, dueDate } = await readJson(req);\n     if (typeof title !== \"string\" || !title.trim())\n       return send(res, 400, { error: \"title is required\" });\n-    return send(res, 201, store.add(title));\n+    if (dueDate != null && !isIsoDate(dueDate))\n+      return send(res, 400, { error: \"dueDate must be YYYY-MM-DD\" });\n+    return send(res, 201, store.add(title, dueDate ?? null));\n   }\n   if (req.method === \"PATCH\" && id) {\n     const todo = store.toggle(id);\ndiff --git a/src/todos.ts b/src/todos.ts\nindex f4d7666..45d0859 100644\n--- a/src/todos.ts\n+++ b/src/todos.ts\n@@ -1,4 +1,4 @@\n-export type Todo = { id: number; title: string; done: boolean };\n+export type Todo = { id: number; title: string; done: boolean; dueDate: string | null };\n \n export class TodoStore {\n   private todos: Todo[] = [];\n@@ -8,10 +8,10 @@ export class TodoStore {\n     return [...this.todos];\n   }\n \n-  add(title: string): Todo {\n+  add(title: string, dueDate: string | null = null): Todo {\n     const trimmed = title.trim();\n     if (!trimmed) throw new Error(\"Title is required\");\n-    const todo = { id: this.nextId++, title: trimmed, done: false };\n+    const todo = { id: this.nextId++, title: trimmed, done: false, dueDate };\n     this.todos.push(todo);\n     return todo;\n   }\ndiff --git a/test/server.test.ts b/test/server.test.ts\nindex 8ffab10..9036812 100644\n--- a/test/server.test.ts\n+++ b/test/server.test.ts\n@@ -18,6 +18,39 @@ test(\"POST then GET /api/todos\", async () => {\n   assert.equal(todos.at(-1).title, \"Write tests\");\n });\n \n+test(\"POST with a dueDate returns it, and GET keeps it\", async () => {\n+  const res = await fetch(`${base}/api/todos`, {\n+    method: \"POST\",\n+    body: JSON.stringify({ title: \"Pay rent\", dueDate: \"2026-12-31\" }),\n+  });\n+  assert.equal(res.status, 201);\n+  assert.equal((await res.json()).dueDate, \"2026-12-31\");\n+  const todos = await (await fetch(`${base}/api/todos`)).json();\n+  assert.equal(todos.at(-1).dueDate, \"2026-12-31\");\n+});\n+\n+test(\"POST without a dueDate (or null) gives dueDate null\", async () => {\n+  for (const body of [{ title: \"a\" }, { title: \"b\", dueDate: null }]) {\n+    const res = await fetch(`${base}/api/todos`, { method: \"POST\", body: JSON.stringify(body) });\n+    assert.equal(res.status, 201);\n+    const todo = await res.json();\n+    assert.equal(todo.dueDate, null);\n+    const toggled = await (await fetch(`${base}/api/todos/${todo.id}`, { method: \"PATCH\" })).json();\n+    assert.ok(\"dueDate\" in toggled);\n+  }\n+});\n+\n+test(\"POST with a bad dueDate is a 400\", async () => {\n+  const bad = [\"31/12/2026\", \"2026-1-5\", 20261231, \"2026-12-31T10:00\", \"2026-02-30\", \"2026-13-01\", \"\"];\n+  for (const dueDate of bad) {\n+    const res = await fetch(`${base}/api/todos`, {\n+      method: \"POST\",\n+      body: JSON.stringify({ title: \"x\", dueDate }),\n+    });\n+    assert.equal(res.status, 400, `dueDate ${JSON.stringify(dueDate)}`);\n+  }\n+});\n+\n test(\"POST /api/todos without a title is a 400\", async () => {\n   const res = await fetch(`${base}/api/todos`, { method: \"POST\", body: \"{}\" });\n   assert.equal(res.status, 400);\ndiff --git a/test/todos.test.ts b/test/todos.test.ts\nindex 244c7b7..97220f8 100644\n--- a/test/todos.test.ts\n+++ b/test/todos.test.ts\n@@ -4,7 +4,11 @@ import { TodoStore } from \"../src/todos.ts\";\n \n test(\"add trims the title and starts open\", () => {\n   const store = new TodoStore();\n-  assert.deepEqual(store.add(\"  Buy milk \"), { id: 1, title: \"Buy milk\", done: false });\n+  assert.deepEqual(store.add(\"  Buy milk \"), { id: 1, title: \"Buy milk\", done: false, dueDate: null });\n+});\n+\n+test(\"add stores the due date\", () => {\n+  assert.equal(new TodoStore().add(\"x\", \"2026-12-31\").dueDate, \"2026-12-31\");\n });\n \n test(\"add rejects an empty title\", () => {\n",
+  "commitMessage": "Add optional dueDate to todos\n\nPOST /api/todos validates dueDate as a real YYYY-MM-DD calendar date (400 otherwise), todos carry dueDate or null, and the page shows and sets it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+}

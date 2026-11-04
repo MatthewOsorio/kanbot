@@ -1,0 +1,44 @@
+{
+  "at": "2026-11-03T16:59:00.727Z",
+  "runtime": "sdk",
+  "minutes": 6.7,
+  "results": [
+    {
+      "slug": "bug",
+      "reachedQa": true,
+      "column": "qa",
+      "bounces": 0,
+      "costUsd": 0.3387,
+      "seconds": 86,
+      "diff": "3 files changed, 23 insertions(+), 2 deletions(-)"
+    },
+    {
+      "slug": "feature",
+      "reachedQa": true,
+      "column": "qa",
+      "bounces": 0,
+      "costUsd": 0.427,
+      "seconds": 121,
+      "diff": "5 files changed, 61 insertions(+), 8 deletions(-)"
+    },
+    {
+      "slug": "review",
+      "reachedQa": true,
+      "column": "qa",
+      "bounces": 0,
+      "costUsd": 0.3731,
+      "seconds": 102,
+      "diff": "4 files changed, 83 insertions(+)"
+    },
+    {
+      "slug": "ui",
+      "reachedQa": true,
+      "column": "qa",
+      "bounces": 0,
+      "costUsd": 0.2642,
+      "seconds": 91,
+      "diff": "2 files changed, 82 insertions(+), 1 deletion(-)"
+    }
+  ],
+  "problems": []
+}
