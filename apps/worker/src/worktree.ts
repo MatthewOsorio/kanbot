@@ -23,7 +23,7 @@ export async function ensureWorktree(
   defaultBranch: string,
   ticket: Ticket,
   config: ProjectConfig,
-): Promise<{ path: string; branch: string; created: boolean }> {
+): Promise<{ path: string; branch: string }> {
   const branch = ticket.branchName ?? branchName(ticket.key, ticket.title);
   const root = worktreesRoot(repoPath);
   const path = join(root, ticket.key);
@@ -33,7 +33,7 @@ export async function ensureWorktree(
   if (existsSync(path)) {
     const head = (await git(path, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
     if (head !== branch) throw new Error(`Worktree ${path} is on ${head}, expected ${branch}`);
-    return { path, branch, created: false };
+    return { path, branch };
   }
   await git(repoPath, ["worktree", "prune"]); // forget worktrees whose folder was deleted
   const exists = await git(repoPath, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])
@@ -45,8 +45,13 @@ export async function ensureWorktree(
       ? ["worktree", "add", path, branch]
       : ["worktree", "add", "-b", branch, path, defaultBranch],
   );
-  if (config.commands.install) await runCommand(config.commands.install, path);
-  return { path, branch, created: true };
+  // A failed install removes the worktree again (the branch stays), so the next run installs anew.
+  if (config.commands.install)
+    await runCommand(config.commands.install, path).catch(async (e: Error) => {
+      await git(repoPath, ["worktree", "remove", "--force", path]).catch(() => {});
+      throw new Error(`Install failed (${config.commands.install}): ${e.message}`);
+    });
+  return { path, branch };
 }
 
 /** A project command, run by the worker itself (install). Same scrubbed env as agents get. */

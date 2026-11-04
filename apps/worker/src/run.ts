@@ -30,7 +30,7 @@ import { git, loadProjectConfig, projectConfig, type ProjectConfig } from "@kanb
 import { and, count, eq, max, sql } from "drizzle-orm";
 import { buildContext } from "./context";
 import { EDIT_TOOLS } from "./runtime/fence";
-import { record } from "./runtime/replay";
+import { record, redactText } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
 import {
   changedSince,
@@ -105,18 +105,37 @@ export async function recoverInterrupted(db: Db) {
   return stale.length;
 }
 
-const secret = process.env.ANTHROPIC_API_KEY;
-/** Secrets never reach stored run events (requirements §14). */
-const redact = (payload: Record<string, unknown>): Record<string, unknown> =>
-  secret && secret.length >= 8
-    ? (JSON.parse(JSON.stringify(payload).replaceAll(secret, "[redacted]")) as Record<
-        string,
-        unknown
-      >)
-    : payload;
+/**
+ * Secrets never reach stored run events (requirements §14). NUL characters are dropped too: Postgres
+ * jsonb rejects `\u0000`, so one in a tool's output would fail the run mid-way.
+ */
+const redact = (payload: Record<string, unknown>) =>
+  JSON.parse(
+    redactText(
+      JSON.stringify(payload, (_, v: unknown) =>
+        typeof v === "string" ? v.replaceAll("\0", "") : v,
+      ),
+    ),
+  ) as Record<string, unknown>;
 
 /** Executes a claimed run end to end. `cancel` aborts when the owner cancels or moves the ticket. */
 export async function executeRun(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSignal) {
+  try {
+    await execute(db, runtime, run, cancel);
+  } catch (e) {
+    // A throw after the agent stopped (a git command, finish's transaction) would leave the run
+    // `running`, holding the project's only slot until the worker restarts.
+    console.error(`run ${run.id} crashed`, e);
+    // drizzle's own message repeats the query's parameters, which may hold the very value Postgres refused.
+    const err = e as Error & { cause?: Error };
+    await finish(db, run.id, {
+      state: "failed",
+      error: `Kanbot failed to record this run: ${(err.cause ?? err).message.replaceAll("\0", "")}`,
+    });
+  }
+}
+
+async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSignal) {
   const [row] = await db
     .select({ ticket: tickets, project: projects })
     .from(tickets)
@@ -319,6 +338,10 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
           outputTokens: usage.outputTokens,
         }
       : {};
+    // Ticket before run, the order the web app's move, cancel and delete lock in (else they can deadlock).
+    await tx.execute(
+      sql`select 1 from tickets where id = (select ticket_id from runs where id = ${runId}) for update`,
+    );
     const [run] = await tx
       .update(runs)
       .set({
@@ -335,11 +358,7 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
       if (usage) await tx.update(runs).set(usageFields).where(eq(runs.id, runId));
       return;
     }
-    const [ticket] = await tx
-      .select()
-      .from(tickets)
-      .where(eq(tickets.id, run.ticketId))
-      .for("update");
+    const [ticket] = await tx.select().from(tickets).where(eq(tickets.id, run.ticketId));
     if (!ticket) return;
     const actor = agentActor(run.agentSlug);
     if (o.verdict) await storeResults(tx, ticket, run, o.verdict);

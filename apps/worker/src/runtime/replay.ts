@@ -122,6 +122,11 @@ function withCriterionIds(report: unknown, prompt: string): unknown {
   );
 }
 
+const secret = process.env.ANTHROPIC_API_KEY;
+/** Secrets never reach stored run events or recorded scripts (requirements §14). */
+export const redactText = (s: string) =>
+  secret && secret.length >= 8 ? s.replaceAll(secret, "[redacted]") : s;
+
 /**
  * Saves a real run as a replay script (requirements §8 recorded runs, KANBOT_RECORD=1): its events,
  * report and usage, plus what it committed as one patch. Secrets are redacted like stored events.
@@ -157,10 +162,7 @@ export async function record(
     .replaceAll(JSON.stringify(cwd).slice(1, -1), "<cwd>")
     .replaceAll(JSON.stringify(cwd.replaceAll("\\", "/")).slice(1, -1), "<cwd>");
   criterionIds(prompt).forEach((id, i) => (text = text.replaceAll(id, `$criterion${i + 1}`)));
-  for (const secret of [process.env.ANTHROPIC_API_KEY].filter(
-    (s): s is string => !!s && s.length >= 8,
-  ))
-    text = text.replaceAll(secret, "[redacted]");
+  text = redactText(text);
   const file = resolve(fixturesDir(), slug, `${scenario}.${attempt}.json`);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, `${text}\n`);
