@@ -31,7 +31,7 @@ export const verdictShape = {
     .array(
       z.object({
         file: z.string().trim().min(1).max(500),
-        line: z.number().int().positive().optional(),
+        line: z.number().int().positive().max(2_147_483_647).optional(), // Postgres integer
         body: z.string().trim().min(1).max(5_000),
       }),
     )

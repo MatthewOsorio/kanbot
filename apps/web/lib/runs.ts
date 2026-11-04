@@ -79,6 +79,15 @@ export function approvePlan(ticketId: string) {
   });
 }
 
+export async function planExists(tx: Tx, ticketId: string) {
+  const [plan] = await tx
+    .select({ id: artifacts.id })
+    .from(artifacts)
+    .where(and(eq(artifacts.ticketId, ticketId), eq(artifacts.kind, "plan")))
+    .limit(1);
+  return !!plan;
+}
+
 /** Locks a ticket that is in Planning with a plan and no active run, or throws 409. */
 async function plannedTicket(tx: Tx, ticketId: string, verb: string) {
   const [row] = await tx
@@ -90,12 +99,8 @@ async function plannedTicket(tx: Tx, ticketId: string, verb: string) {
   if (!row) throw notFound("Ticket not found");
   if (row.column.slug !== "planning")
     throw new HttpError(409, "not_in_planning", `Plans can only be ${verb} in Planning`);
-  const [plan] = await tx
-    .select({ id: artifacts.id })
-    .from(artifacts)
-    .where(and(eq(artifacts.ticketId, ticketId), eq(artifacts.kind, "plan")))
-    .limit(1);
-  if (!plan) throw new HttpError(409, "no_plan", `This ticket has no plan to be ${verb} yet`);
+  if (!(await planExists(tx, ticketId)))
+    throw new HttpError(409, "no_plan", `This ticket has no plan to be ${verb} yet`);
   if (await activeRun(tx, ticketId))
     throw new HttpError(409, "run_active", "This ticket already has an active run");
   return row;

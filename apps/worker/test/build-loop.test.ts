@@ -1,5 +1,5 @@
 // The M3 build loop against the replay runtime, on a real git repo (fixtures/sample-repo): no API calls.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { activeRunStates, DEFAULT_COLUMNS, uuidv7 } from "@kanbot/shared";
@@ -356,6 +356,33 @@ describe("build loop (M3 done criterion)", () => {
     await move("qa");
     const [run] = await drain();
     expect(run!.state).toBe("succeeded"); // stopped as a stall in the M3 golden run
+  });
+
+  it("removes the worktree when install fails, so the next run installs again", async () => {
+    const { project, repo, move } = await setup("bounce");
+    const setInstall = async (cmd: string) => {
+      writeFileSync(
+        join(repo, ".kanbot/project.yml"),
+        `commands:\n  install: ${cmd}\n  test: node --test\ntestGlobs: ["test/**"]\n`,
+      );
+      await git(repo, ["commit", "-q", "-am", `install: ${cmd}`]);
+    };
+    const runOne = async () => {
+      const run = (await claimNext(db))!;
+      await executeRun(db, runtime, run, new AbortController().signal);
+      return (await db.select().from(runs).where(eq(runs.id, run.id)))[0]!;
+    };
+    const wt = join(`${repo}.kanbot-worktrees`, `${project.keyPrefix}-1`);
+
+    await setInstall("node -e process.exit(1)");
+    await move("in_progress");
+    expect((await runOne()).error).toMatch(/Install failed/);
+    expect(existsSync(wt)).toBe(false);
+
+    await setInstall("node --version");
+    await move("in_progress");
+    expect((await runOne()).error ?? "").not.toMatch(/Install failed/);
+    expect(existsSync(wt)).toBe(true);
   });
 
   it("refuses to build without a linked repo", async () => {

@@ -19,6 +19,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
 import { afterPrevious, claimNext, executeRun, recoverInterrupted } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
+import type { AgentRuntime } from "../src/runtime/types";
 
 const db = createDb(TEST_DATABASE_URL);
 const runtime = new ReplayRuntime();
@@ -197,6 +198,26 @@ describe("run outcomes", () => {
       0,
     );
     expect((await ticketNow(ticket.id)).statusFlag).toBe("none");
+  });
+
+  it("fails a run that can't be recorded instead of leaving it running, and keeps NULs out of the log", async () => {
+    const { ticket } = await plannedTicket();
+    // A NUL in the summary makes finish()'s insert throw (Postgres text rejects 0x00).
+    const nul: AgentRuntime = {
+      run: async (_req, emit) => {
+        await emit({ type: "tool_result", payload: { content: "bin\0ary" } });
+        const report = { verdict: "success", summary: "done\0", artifacts: [] };
+        return { report, stop: "completed", costUsd: 0, inputTokens: 0, outputTokens: 0 };
+      },
+    };
+    const run = (await claimNext(db))!;
+    await executeRun(db, nul, run, new AbortController().signal);
+    const [after] = await db.select().from(runs).where(eq(runs.id, run.id));
+    expect(after!.state).toBe("failed");
+    expect(after!.error).toMatch(/failed to record/);
+    const [logged] = await db.select().from(runEvents).where(eq(runEvents.runId, run.id));
+    expect(logged!.payload.content).toBe("binary");
+    expect((await ticketNow(ticket.id)).statusFlag).toBe("failed");
   });
 
   it("marks runs left running by a dead worker as interrupted", async () => {

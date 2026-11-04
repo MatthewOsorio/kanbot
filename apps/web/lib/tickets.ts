@@ -27,16 +27,19 @@ import { and, asc, desc, eq, inArray, isNotNull, max, ne, sql } from "drizzle-or
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";
+import { planExists } from "./runs";
 import { db } from "./db";
 import { publish, type Tx } from "./events";
 
 type In<T extends z.ZodType> = z.output<T>;
 
-async function projectOf(tx: Tx, ticketId: string): Promise<string> {
-  const [t] = await tx
+/** `lock`: take the ticket row lock before touching its runs, the order the worker's finish() uses. */
+async function projectOf(tx: Tx, ticketId: string, lock = false): Promise<string> {
+  const q = tx
     .select({ projectId: tickets.projectId })
     .from(tickets)
     .where(eq(tickets.id, ticketId));
+  const [t] = await (lock ? q.for("update") : q);
   if (!t) throw notFound("Ticket not found");
   return t.projectId;
 }
@@ -132,7 +135,7 @@ export function patchTicket(id: string, input: In<typeof patchTicketBody>) {
 
 export async function deleteTicket(id: string) {
   const t = await db.transaction(async (tx) => {
-    const projectId = await projectOf(tx, id);
+    const projectId = await projectOf(tx, id, true);
     await cancelActiveRun(tx, projectId, id); // tells the worker to stop the agent before the run row goes
     const [t] = await tx
       .delete(tickets)
@@ -270,16 +273,7 @@ export function moveTicket(
       if (hits.length)
         throw new HttpError(409, "overlap", `Overlaps tickets in flight: ${hits.join("; ")}`);
     }
-    const hasPlan =
-      changesColumn &&
-      to.slug === "planning" &&
-      (
-        await tx
-          .select({ id: artifacts.id })
-          .from(artifacts)
-          .where(and(eq(artifacts.ticketId, id), eq(artifacts.kind, "plan")))
-          .limit(1)
-      ).length > 0;
+    const hasPlan = changesColumn && to.slug === "planning" && (await planExists(tx, id));
     if (hasPlan && !keepPlan && !requestMd)
       throw new HttpError(409, "has_plan", "This ticket already has a plan");
     const keep = hasPlan && !requestMd; // back to Planning without re-planning
