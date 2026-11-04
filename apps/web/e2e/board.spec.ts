@@ -68,7 +68,7 @@ test("create and move a ticket; a second tab updates live", async ({ browser }) 
   await expect(column(a, "Ready").getByText("Live ticket")).toBeVisible();
 });
 
-// No auth until M4: a DNS-rebound Host or a cross-site POST must not reach the API (proxy.ts).
+// No auth until M5: a DNS-rebound Host or a cross-site POST must not reach the API (proxy.ts).
 test("refuses foreign hosts and cross-site writes", async ({ baseURL }) => {
   const send = (method: string, headers: Record<string, string>) =>
     new Promise<number>((resolve, reject) => {

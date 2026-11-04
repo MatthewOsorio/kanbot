@@ -70,4 +70,4 @@ If `pnpm dev` returns 500 with a Turbopack panic about `globals.css` / exit code
 - A known-limited shortcut gets a `shortcut: <limit>, <when to upgrade>` comment.
 - One `.env` at the repo root; `.env.example` lists every variable. Never commit secrets.
 - Dependencies: pnpm 12 enforces a minimum release age. Pick a mature version rather than adding `minimumReleaseAgeExclude` entries.
-- The app has no auth until M4 and binds to 127.0.0.1. Don't expose it.
+- The app has no auth until M5 and binds to 127.0.0.1. Don't expose it.

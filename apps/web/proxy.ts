@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-// No auth until M4 (requirements §14), and binding to 127.0.0.1 doesn't stop a browser tab: a DNS-rebound
+// No auth until M5 (requirements §14), and binding to 127.0.0.1 doesn't stop a browser tab: a DNS-rebound
 // host would read our pages and API, and a cross-site POST needs no preflight. So only local Host names
 // get in, and writes must come from our own origin (browsers always send Origin on POST/PATCH/DELETE).
 const LOCAL = new Set(["127.0.0.1", "localhost", "[::1]"]);

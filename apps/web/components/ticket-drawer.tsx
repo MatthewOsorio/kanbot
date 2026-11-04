@@ -577,7 +577,7 @@ type Diff = {
 
 /**
  * The branch diff vs the default branch (FR-41), unified, with review comments under their line.
- * shortcut: unified only; the spec's side-by-side view is M5 polish.
+ * shortcut: unified only; the spec's side-by-side view is M6 polish.
  */
 function DiffView({ ticketId, refresh }: { ticketId: string; refresh: unknown }) {
   const [d, setD] = useState<Diff | null>(null);

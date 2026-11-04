@@ -77,7 +77,7 @@ export const createProjectBody = z.object({
       "Not a valid branch name",
     )
     .default("main"),
-  // Absolute path to a local checkout; Plan B reads it (read-only). Optional until onboarding clones repos (M4).
+  // Absolute path to a local checkout; Plan B reads it (read-only). Optional until onboarding clones repos (M5).
   repoPath: z.string().trim().min(1).max(1_000).optional(),
 });
 

@@ -1,4 +1,4 @@
-# M1 runs locally: only Postgres. web, worker and caddy are added for deployment in M4.
+# M1 runs locally: only Postgres. web, worker and caddy are added for deployment in M5.
 services:
   db:
     image: postgres:16

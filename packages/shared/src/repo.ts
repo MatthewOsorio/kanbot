@@ -23,7 +23,7 @@ export async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
-/** `.kanbot/project.yml` (requirements §9). Settings UI and DB columns arrive with onboarding (M4). */
+/** `.kanbot/project.yml` (requirements §9). Settings UI and DB columns arrive with Settings (M4). */
 export const projectConfig = z.object({
   commands: z
     .object({

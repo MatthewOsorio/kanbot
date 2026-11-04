@@ -84,7 +84,7 @@ async function listen() {
 
 // One worker per database: crash recovery below would mark a live worker's runs interrupted.
 const lock = new Client({ connectionString: url, application_name: "kanbot-worker" });
-// shortcut: if this connection drops, the lock goes with it and a second worker could start; fine for one dev machine, revisit with deployment (M4).
+// shortcut: if this connection drops, the lock goes with it and a second worker could start; fine for one dev machine, revisit with deployment (M5).
 lock.on("error", (e) => console.warn("worker lock connection lost", e.message));
 await lock.connect();
 const { rows } = await lock.query<{ ok: boolean }>(
