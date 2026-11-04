@@ -1,6 +1,7 @@
 # M2 report: orchestrator and Plan B
 
-Status: **done, awaiting review.** Built 2026-11-02. Nothing is committed yet.
+Status: **done.** Built 2026-11-02, merged in PR #1.
+This report is a snapshot from the time of the merge. Open items now live in `requirements.md` §16, "Still to build".
 
 M2 in the spec (`requirements.md` §16): job queue, worker process, `AgentRuntime` adapter on the Claude Agent SDK, agent file loader, context assembly, `report_result` tool, run events streamed to the Live tab, cancel and retry, per-run budget, the replay runtime for tests, API retry with backoff, and the health indicator. M2 also owned its rows in "Deferred from M1".
 **Done when:** moving a ticket to Planning produces a plan artifact and a "Plan ready" flag. That works with the real SDK (smoke test below) and is covered without API calls by a Playwright test and the worker tests (replay runtime).

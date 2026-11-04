@@ -1,6 +1,7 @@
 # M1 report: board without agents
 
-Status: **done, awaiting review.** Built 2026-11-02. Nothing is committed yet (the repo has `git init` only).
+Status: **done.** Built 2026-11-02 and included in the repo's first commit.
+This report is a snapshot from the time of the merge. Open items now live in `requirements.md` §16, "Still to build".
 
 M1 in the spec (`requirements.md` §16): monorepo scaffold, Docker Compose, Postgres + Drizzle schema/migrations, project creation, tickets with acceptance criteria and comments, a drag-and-drop board with the default columns, an activity log, and SSE for moves.
 **Done when:** tickets can be created and moved, and the board updates live in two browser tabs. That works and is covered by the e2e test.
