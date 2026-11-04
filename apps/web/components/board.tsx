@@ -151,10 +151,16 @@ export function Board({ projectId }: { projectId: string }) {
     const moved = { ...card, columnId: toColumnId, position };
     setBoard({ ...board, tickets: board.tickets.map((t) => (t.id === card.id ? moved : t)) });
     const target = board.columns.find((c) => c.id === toColumnId);
-    const move = (flags: { confirmCancel?: boolean; startAnyway?: boolean }) =>
+    type Flags = {
+      confirmCancel?: boolean;
+      startAnyway?: boolean;
+      keepPlan?: boolean;
+      requestMd?: string;
+    };
+    const move = (flags: Flags) =>
       api(`/api/tickets/${card.id}/move`, { body: { toColumnId, position, ...flags } });
     try {
-      const flags: { confirmCancel?: boolean; startAnyway?: boolean } = {};
+      const flags: Flags = {};
       for (;;) {
         try {
           await move(flags);
@@ -171,11 +177,19 @@ export function Board({ projectId }: { projectId: string }) {
             if (!confirm(`${key(card)} ${e.message.replace(/^O/, "o")}. Start anyway?`))
               return void load();
             flags.startAnyway = true;
+          } else if (e.code === "has_plan" && !flags.keepPlan && !flags.requestMd) {
+            // Back to Planning: ask before Plan B redoes the plan.
+            if (confirm(`${key(card)} already has a plan. Have Plan B revise it?`)) {
+              const request = prompt("What should Plan B change?")?.trim();
+              if (!request) return void load();
+              flags.requestMd = request;
+            } else flags.keepPlan = true;
           } else throw e;
         }
       }
       // shortcut: the notice stays until the next move, even after the run ends; clear it on run.finished in M4.
-      if (target?.agent && card.columnId !== toColumnId) setNotice(target.agent.startLine);
+      if (target?.agent && card.columnId !== toColumnId && !flags.keepPlan)
+        setNotice(target.agent.startLine);
     } catch (e) {
       setError((e as Error).message);
       void load(); // roll back the optimistic move

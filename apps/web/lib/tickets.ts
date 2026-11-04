@@ -16,6 +16,7 @@ import {
   columns,
   comments,
   logActivity,
+  OWNER,
   projects,
   runs,
   startColumnAgent,
@@ -226,11 +227,20 @@ async function overlapping(
  * cancels the active run (only with confirmCancel, FR-24), clears the status flag (dropping on Ready
  * is the plan approval) and starts the target column's agent. Reordering within a column changes nothing else.
  * Entering In Progress runs the overlap check (409 `overlap` unless startAnyway); entering Planning
- * resets the bounce count. Ship/Done confirmations arrive with their agents (M4).
+ * resets the bounce count. Entering Planning with a plan already there asks first (409 `has_plan`):
+ * keepPlan keeps it (Plan ready, no run), requestMd has Plan B revise it.
+ * Ship/Done confirmations arrive with their agents (M4).
  */
 export function moveTicket(
   id: string,
-  { toColumnId, position, confirmCancel, startAnyway }: In<typeof moveTicketBody>,
+  {
+    toColumnId,
+    position,
+    confirmCancel,
+    startAnyway,
+    keepPlan,
+    requestMd,
+  }: In<typeof moveTicketBody>,
 ) {
   try {
     generateKeyBetween(position, null); // throws on a malformed fractional-index key
@@ -260,6 +270,19 @@ export function moveTicket(
       if (hits.length)
         throw new HttpError(409, "overlap", `Overlaps tickets in flight: ${hits.join("; ")}`);
     }
+    const hasPlan =
+      changesColumn &&
+      to.slug === "planning" &&
+      (
+        await tx
+          .select({ id: artifacts.id })
+          .from(artifacts)
+          .where(and(eq(artifacts.ticketId, id), eq(artifacts.kind, "plan")))
+          .limit(1)
+      ).length > 0;
+    if (hasPlan && !keepPlan && !requestMd)
+      throw new HttpError(409, "has_plan", "This ticket already has a plan");
+    const keep = hasPlan && !requestMd; // back to Planning without re-planning
     if (changesColumn) {
       const active = await activeRun(tx, id);
       if (active && !confirmCancel)
@@ -272,7 +295,7 @@ export function moveTicket(
         columnId: to.id,
         position,
         updatedAt: new Date(),
-        ...(changesColumn && { statusFlag: "none" as const }),
+        ...(changesColumn && { statusFlag: keep ? ("plan_ready" as const) : ("none" as const) }),
         // Re-planning starts the build loop over (§3 Manual moves, FR-23).
         ...(changesColumn && to.slug === "planning" && { bounceCount: 0 }),
       })
@@ -287,7 +310,8 @@ export function moveTicket(
       position,
       actor: "owner",
     });
-    if (changesColumn) await startColumnAgent(tx, t.projectId, id, to);
+    if (changesColumn && !keep)
+      await startColumnAgent(tx, t.projectId, id, to, OWNER, hasPlan ? requestMd : undefined);
   });
 }
 

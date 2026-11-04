@@ -58,28 +58,47 @@ export function cancelRun(runId: string) {
  */
 export function revisePlan(ticketId: string, requestMd: string) {
   return db.transaction(async (tx) => {
-    const [row] = await tx
-      .select({ ticket: tickets, column: columns })
-      .from(tickets)
-      .innerJoin(columns, eq(columns.id, tickets.columnId))
-      .where(eq(tickets.id, ticketId))
-      .for("update", { of: tickets });
-    if (!row) throw notFound("Ticket not found");
-    const { ticket, column } = row;
-    if (column.slug !== "planning")
-      throw new HttpError(409, "not_in_planning", "Plans can only be revised in Planning");
-    const [plan] = await tx
-      .select({ id: artifacts.id })
-      .from(artifacts)
-      .where(and(eq(artifacts.ticketId, ticketId), eq(artifacts.kind, "plan")))
-      .limit(1);
-    if (!plan) throw new HttpError(409, "no_plan", "This ticket has no plan to revise yet");
-    if (await activeRun(tx, ticketId))
-      throw new HttpError(409, "run_active", "This ticket already has an active run");
+    const { ticket, column } = await plannedTicket(tx, ticketId, "revised");
     const next = await startColumnAgent(tx, ticket.projectId, ticketId, column, OWNER, requestMd);
     if (!next) throw new HttpError(409, "no_agent", "Planning has no agent file");
     return next;
   });
+}
+
+/** "Approve plan" in the drawer: the same as dropping the ticket at the bottom of Ready. */
+export function approvePlan(ticketId: string) {
+  return db.transaction(async (tx) => {
+    const { ticket, column } = await plannedTicket(tx, ticketId, "approved");
+    const [ready] = await tx
+      .select()
+      .from(columns)
+      .where(and(eq(columns.projectId, ticket.projectId), eq(columns.slug, "ready")));
+    if (!ready) throw new HttpError(409, "column_gone", "This board has no Ready column");
+    await tx.update(tickets).set({ statusFlag: "none" }).where(eq(tickets.id, ticketId));
+    await moveToColumnEnd(tx, ticket, column, ready, OWNER);
+  });
+}
+
+/** Locks a ticket that is in Planning with a plan and no active run, or throws 409. */
+async function plannedTicket(tx: Tx, ticketId: string, verb: string) {
+  const [row] = await tx
+    .select({ ticket: tickets, column: columns })
+    .from(tickets)
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .where(eq(tickets.id, ticketId))
+    .for("update", { of: tickets });
+  if (!row) throw notFound("Ticket not found");
+  if (row.column.slug !== "planning")
+    throw new HttpError(409, "not_in_planning", `Plans can only be ${verb} in Planning`);
+  const [plan] = await tx
+    .select({ id: artifacts.id })
+    .from(artifacts)
+    .where(and(eq(artifacts.ticketId, ticketId), eq(artifacts.kind, "plan")))
+    .limit(1);
+  if (!plan) throw new HttpError(409, "no_plan", `This ticket has no plan to be ${verb} yet`);
+  if (await activeRun(tx, ticketId))
+    throw new HttpError(409, "run_active", "This ticket already has an active run");
+  return row;
 }
 
 /**

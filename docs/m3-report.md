@@ -72,6 +72,7 @@ Every departure from the spec is edited into the spec itself. This list says whe
 | Change | Why | Where in the spec |
 | --- | --- | --- |
 | **Path fence for every agent tool** (M2 leftover, not on any deferred list). The M2 hook checked tool names only, so Plan B could Read/Grep/Glob any file on the machine. Paths and globs outside `cwd` are now refused, symlinks followed. | Found after M2; it matters more now that agents edit and run commands | §8 step 4, §14 code safety, §16 "Deferred from M2" (new ✓ row) |
+| **Ask before re-planning; Approve plan button** (owner review). Moving a planned ticket back to Planning asks whether Plan B should revise it (with a request) or keep the plan; the drawer has Approve plan (→ Ready). Auto-pull from Ready stays in M5 | Re-planning by accident cost a run; approving needed a drag | §3 Planning row and Manual moves, UC-4, §12 move and approve-plan endpoints |
 | The hook, not the SDK's allowlist, is the shell fence; `dontAsk` + `blockReadsOutsideWorkingDirectories` as a second layer; subprocess env scrub | SDK auto-approves read-only commands in every mode | §8 step 4, §14 |
 | Plan titles are always `Plan: <ticket title>` | v1 had the key, v2 didn't | `agents/plan-b.md` (prompt only) |
 | Commands, test globs, hotspots from `.kanbot/project.yml` (default branch); DB columns + Settings → M4 | Agreed before building; onboarding detects commands | §9 hotspots, §11 `projects`, §16 both deferred tables |
@@ -215,6 +216,14 @@ Run before the PR, with no code changes:
 - `pnpm db:migrate` on the existing dev database, typecheck, lint, `prettier --check`, `pnpm test` (26 + 75), `pnpm test:e2e` (6), `pnpm build` and `KANBOT_RUNTIME=replay pnpm eval:agents`: all pass. A throwaway browser walkthrough of M1 → M2 → M3 on the replay worker passed 11/11 steps.
 - Real agents, $2.17 total. One new ticket ("Todos can be renamed") went Backlog → Planning → Ready → In Progress → Code Review → QA in about 2 minutes for $0.45, with all 6 criteria passing. In the golden eval ($1.72), all 4 tickets reached QA. The eval flagged 2 bounces against the baseline's 0: Nancy's cross-ticket review caught that the due-date ticket would break the rename ticket's tests once both merged. That is the feature working, and it depends on run order, so the baseline was kept.
 - Found: the agent notice stays up after the run ends (deferred to M4).
+
+## Post-review changes (2026-11-03)
+
+After trying the app, the owner asked for two changes, both in this PR:
+- Moving a ticket that has a plan back to Planning asks first. Yes asks what to change, and Plan B revises the plan with that. No moves the ticket and keeps the plan (Plan ready, no run). The server enforces it with 409 `has_plan`.
+- The drawer has an **Approve plan** button (ticket in Planning with a plan, no active run). It moves the ticket to Ready, the same as dropping it there.
+
+Checked with a new e2e test (`agents.spec.ts`, now 7 e2e tests) and a browser walkthrough on the replay worker.
 
 ## Known risks
 

@@ -22,6 +22,7 @@ async function addTicket(page: Page, title: string) {
 }
 
 async function drag(page: Page, title: string, toColumn: string) {
+  await card(page, title).scrollIntoViewIfNeeded(); // the drawer can leave the board scrolled
   const from = (await card(page, title).boundingBox())!;
   const to = (await column(page, toColumn).boundingBox())!;
   // Grab the middle: rectIntersection drops where the dragged card's rect overlaps most, in either direction.
@@ -112,4 +113,60 @@ test("moving a ticket while its agent works asks first, then cancels the run", a
   await expect(page.getByRole("dialog").getByText(/-1 · Planning$/)).toBeVisible();
   await page.getByRole("button", { name: "Cancel run" }).click(); // leave no slow run behind
   await expect(page.getByLabel("Latest run")).toContainText("plan-b · cancelled");
+});
+
+// Moving a planned ticket back to Planning asks before re-planning; Approve plan moves it to Ready.
+test("back to Planning asks before Plan B redoes the plan; Approve plan moves to Ready", async ({
+  page,
+}) => {
+  await newBoard(page);
+  await addTicket(page, "Add a filter");
+  await drag(page, "Add a filter", "Planning");
+  await expect(column(page, "Planning").getByText("Plan ready · needs you")).toBeVisible();
+  // Setup moves go through the API: pointer drags to the left are unreliable (see the keyboard move above).
+  const projectId = page.url().split("/p/")[1]!;
+  const toBacklog = async () => {
+    const board = await (await page.request.get(`/api/projects/${projectId}/board`)).json();
+    const backlog = board.columns.find((c: { slug: string }) => c.slug === "backlog").id;
+    const res = await page.request.post(`/api/tickets/${board.tickets[0].id}/move`, {
+      data: { toColumnId: backlog, position: "a0" },
+    });
+    expect(res.status()).toBe(204);
+  };
+
+  const answers: (boolean | string)[] = [];
+  const asked: string[] = [];
+  page.on("dialog", (d) => {
+    asked.push(d.message());
+    const a = answers.shift();
+    void (a === false ? d.dismiss() : d.accept(typeof a === "string" ? a : undefined));
+  });
+
+  // No: the plan is kept as is and nothing runs.
+  await toBacklog();
+  await expect(column(page, "Backlog").getByText("Add a filter")).toBeVisible();
+  answers.push(false);
+  await drag(page, "Add a filter", "Planning");
+  await expect.poll(() => asked).toEqual([expect.stringContaining("already has a plan")]);
+  await expect(column(page, "Planning").getByText("Plan ready · needs you")).toBeVisible();
+  await card(page, "Add a filter").click();
+  await expect(page.getByLabel("Latest run")).toContainText("plan-b · succeeded");
+  await page.getByRole("tab", { name: /Artifacts/ }).click();
+  await expect(page.getByRole("article", { name: "Plan: Add a filter v1" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Yes: Plan B revises the plan with the request.
+  await toBacklog();
+  await expect(column(page, "Backlog").getByText("Add a filter")).toBeVisible();
+  answers.push(true, "Use SQLite, not Postgres");
+  await drag(page, "Add a filter", "Planning");
+  await expect(column(page, "Planning").getByText("Plan ready · needs you")).toBeVisible();
+  await card(page, "Add a filter").click();
+  await page.getByRole("tab", { name: /Artifacts/ }).click();
+  await expect(page.getByRole("article", { name: "Plan: Add a filter v2" })).toBeVisible();
+
+  // Approve plan: the same as dropping it on Ready.
+  await page.getByRole("button", { name: "Approve plan" }).click();
+  await expect(page.getByRole("dialog").getByText(/-1 · Ready$/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
 });

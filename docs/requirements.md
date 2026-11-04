@@ -60,7 +60,7 @@ The orchestrator applies these rules after every verdict; the human can still dr
 | --- | --- | --- | --- |
 | Backlog | User drags | Planning (starts Plan B, or Dr. Rabbit Hole for spikes) | No |
 | Planning | `success` | Stays in Planning, flagged "Plan ready" | Yes |
-| Planning | User approves | Ready | No (configurable) |
+| Planning | User approves (drags to Ready, or clicks Approve plan on the ticket) | Ready | No (configurable) |
 | Ready | User drags, or auto-pull with a free WIP slot | In Progress (creates worktree, starts Sir Codes-a-Lot) | No by default |
 | Ready | Overlaps an in-flight ticket (section 9) | The move is refused (409 `overlap`) and the ticket stays in Ready; the owner is asked to "Start anyway". Dependencies (`blocks` links) join this check in M4 | Yes; user can "Start anyway" |
 | In Progress | `success` | Code Review | Yes |
@@ -84,7 +84,7 @@ Dragging a ticket yourself always works and always triggers the target column's 
 | You move a ticket to | What happens |
 | --- | --- |
 | Backlog | Any active run is cancelled; worktree and branch are kept; no agent runs. |
-| Planning | Plan B runs. If a plan exists, it revises it using the current branch diff, your comments (as background) and, when started from Revise plan, your change request. Bounce count resets. |
+| Planning | Plan B runs. If a plan exists, you are asked first (409 `has_plan`): keep it (the ticket shows Plan ready and nothing runs) or say what to change, and Plan B revises it using the current branch diff, your comments (as background) and your change request. Bounce count resets. |
 | Ready | No agent; counts as approving the plan. |
 | In Progress | Sir Codes-a-Lot runs; a worktree is created if missing. |
 | Code Review | Nitpick Nancy reviews the branch as it stands, including commits you made yourself. |
@@ -163,7 +163,7 @@ Fourteen use cases define v1; UC-1 through UC-9 are the happy path and its loops
 | UC-1 | Capture an idea | User types a one-line idea in a quick-add box (or via CLI/API). | Ticket created in Backlog with type and priority defaults. No agent runs. |
 | UC-2 | Plan a feature | User drags a ticket from Backlog to Planning. | Plan B writes a plan and acceptance criteria. Ticket shows "Plan ready — awaiting approval". |
 | UC-3 | Revise a plan | User types what to change under the plan ("use SQLite, not Postgres") and clicks Revise plan. | Plan B re-runs at once with that request as its instruction and produces plan v2; v1 is kept in history. Comments are separate: general notes (later @mentions) that Plan B reads as background, and they never start a run. |
-| UC-4 | Approve and build | User drags the planned ticket to Ready, then In Progress (or enables auto-pull from Ready). | Worktree and branch created; Sir Codes-a-Lot implements and commits; on success the ticket auto-moves to Code Review. |
+| UC-4 | Approve and build | User clicks Approve plan on the ticket (or drags it to Ready), then drags it to In Progress (or enables auto-pull from Ready). | Worktree and branch created; Sir Codes-a-Lot implements and commits; on success the ticket auto-moves to Code Review. |
 | UC-5 | Review requests changes | Nitpick Nancy returns `changes_requested`. | Ticket bounces to In Progress with review comments attached; Sir Codes-a-Lot runs again with them as input. |
 | UC-6 | QA finds a bug | Testy McTestface returns `failed` with a bug report. | Ticket bounces to In Progress with the bug report; after the fix it goes through Code Review and QA again. |
 | UC-7 | Agent needs input | Any agent returns `needs_input`, or the bounce-back limit is hit. | Ticket moves to Blocked; Rubber Duckworth posts numbered questions; user gets a notification. User answers in a comment and clicks Resume; the ticket returns to its previous column and the agent resumes. |
@@ -648,7 +648,7 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | GET | `/api/projects/:id/board` | Columns with ordered ticket cards (one call renders the board). |
 | POST | `/api/projects/:id/tickets` | Create a ticket. |
 | GET / PATCH / DELETE | `/api/tickets/:id` | Read (with criteria, latest artifacts, active run), edit, delete. |
-| POST | `/api/tickets/:id/move` | Body `{toColumnId, position, confirmCancel?, startAnyway?}`. Validates the transition, cancels any active run if confirmed, enqueues the column's agent. Returns 409 `run_active` if a run is active and `confirmCancel` is not set, and 409 `overlap` when entering In Progress overlaps an in-flight ticket and `startAnyway` is not set (section 9). A move to Planning resets the bounce count. |
+| POST | `/api/tickets/:id/move` | Body `{toColumnId, position, confirmCancel?, startAnyway?, keepPlan?, requestMd?}`. Validates the transition, cancels any active run if confirmed, enqueues the column's agent. Returns 409 `run_active` if a run is active and `confirmCancel` is not set, and 409 `overlap` when entering In Progress overlaps an in-flight ticket and `startAnyway` is not set (section 9). A move to Planning resets the bounce count; if the ticket has a plan it returns 409 `has_plan` unless `keepPlan` (no run, flag Plan ready) or `requestMd` (Plan B revises with it) is set. |
 | GET / POST | `/api/tickets/:id/comments` | List or add comments. |
 | POST | `/api/tickets/:id/criteria` | Body `{text}`. Add an acceptance criterion. |
 | PATCH / DELETE | `/api/criteria/:id` | Body `{text?, status?}`. Edit or remove a criterion. |
@@ -657,6 +657,7 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | GET | `/api/tickets/:id/runs` | Run history. |
 | GET | `/api/runs/:id/events?after=seq` | Paged run log (for catching up before streaming). |
 | POST | `/api/runs/:id/cancel` | Cancel a run. |
+| POST | `/api/tickets/:id/approve-plan` | Moves the ticket to the bottom of Ready, the same as dropping it there. 409 unless the ticket is in Planning, has a plan, and has no active run. |
 | POST | `/api/tickets/:id/revise-plan` | Body `{requestMd}`. Starts Plan B with the request (UC-3). 409 unless the ticket is in Planning, has a plan, and has no active run. |
 | POST | `/api/runs/:id/retry` | Start a fresh run of the same agent. If the failure moved the ticket (e.g. to Blocked), it goes back to the run's column first. |
 | GET | `/api/health` | Database, worker, Anthropic and GitHub status (section 8). |

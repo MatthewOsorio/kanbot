@@ -135,6 +135,20 @@ export function TicketDrawer(props: {
               />
             )}
 
+            {ticket.columnSlug === "planning" &&
+              ticket.artifacts.some((a) => a.kind === "plan") &&
+              !isActive(latest) && (
+                // The same as dropping the ticket on Ready (UC-4).
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    run(() => api(`/api/tickets/${ticket.id}/approve-plan`, { method: "POST" }))
+                  }
+                >
+                  Approve plan
+                </Button>
+              )}
+
             <div className="flex flex-wrap gap-3 text-sm">
               <label className="flex items-center gap-1">
                 Type

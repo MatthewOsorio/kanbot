@@ -110,6 +110,10 @@ export const moveTicketBody = z.object({
   confirmCancel: z.boolean().optional(),
   // Required to start a ticket in In Progress that overlaps an in-flight ticket (§9 "Start anyway").
   startAnyway: z.boolean().optional(),
+  // Moving a ticket that has a plan into Planning needs one of these (409 `has_plan` otherwise):
+  // keep the plan as is, or have Plan B revise it with this request.
+  keepPlan: z.boolean().optional(),
+  requestMd: z.string().trim().min(1).max(10_000).optional(),
 });
 
 export const createCommentBody = z.object({ bodyMd: z.string().trim().min(1).max(20_000) });
