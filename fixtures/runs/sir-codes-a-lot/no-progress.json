@@ -1,0 +1,459 @@
+{
+  "events": [
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t1",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file1.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t1",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t2",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file2.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t2",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t3",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file3.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t3",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t4",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file4.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t4",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t5",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file5.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t5",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t6",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file6.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t6",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t7",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file7.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t7",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t8",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file8.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t8",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t9",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file9.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t9",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t10",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file10.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t10",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t11",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file11.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t11",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t12",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file12.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t12",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t13",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file13.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t13",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t14",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file14.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t14",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t15",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file15.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t15",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t16",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file16.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t16",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t17",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file17.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t17",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t18",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file18.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t18",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t19",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file19.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t19",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t20",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file20.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t20",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t21",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file21.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t21",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t22",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file22.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t22",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t23",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file23.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t23",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t24",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file24.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t24",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t25",
+        "name": "Read",
+        "input": {
+          "file_path": "src/file25.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t25",
+        "isError": false,
+        "content": "(file contents)"
+      }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "never reached"
+  },
+  "costUsd": 0.05
+}

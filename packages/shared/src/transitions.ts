@@ -42,6 +42,10 @@ export const RUN_RULES: readonly {
     flag: "none",
     bounce: true,
   },
+  // Rubber Duckworth only diagnoses: however its run ends, the ticket waits in Blocked for the owner (§8).
+  ...(["succeeded", "failed", "timed_out", "budget_exceeded", "awaiting_input"] as const).map(
+    (outcome) => ({ column: "blocked", outcome, to: null, flag: "needs_input" as const }),
+  ),
   { column: "*", outcome: "awaiting_input", to: "blocked", flag: "needs_input" },
   { column: "*", outcome: "failed", to: "blocked", flag: "failed" },
   { column: "*", outcome: "timed_out", to: "blocked", flag: "failed" },

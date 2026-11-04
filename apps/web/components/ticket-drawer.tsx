@@ -1,6 +1,12 @@
 "use client";
 
-import { activeRunStates, priorities, ticketTypes, type BoardEvent } from "@kanbot/shared";
+import {
+  activeRunStates,
+  priorities,
+  resumableRunStates,
+  ticketTypes,
+  type BoardEvent,
+} from "@kanbot/shared";
 import { useEffect, useState } from "react";
 import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
@@ -132,6 +138,16 @@ export function TicketDrawer(props: {
                 run={latest}
                 onCancel={() => run(() => api(`/api/runs/${latest.id}/cancel`, { method: "POST" }))}
                 onRetry={() => run(() => api(`/api/runs/${latest.id}/retry`, { method: "POST" }))}
+              />
+            )}
+
+            {ticket.columnSlug === "blocked" && (
+              <BlockedPanel
+                key={ticket.runs.find((r) => r.columnSlug !== "blocked")?.id} // a new stuck run clears the answer
+                ticket={ticket}
+                onResume={(runId, answer) =>
+                  run(() => api(`/api/runs/${runId}/resume`, { method: "POST", body: { answer } }))
+                }
               />
             )}
 
@@ -411,6 +427,57 @@ export function TicketDrawer(props: {
   );
 }
 
+/** Blocked (§13, UC-7): Duckworth's questions, an answer box and Resume for the run that got stuck. */
+function BlockedPanel({
+  ticket,
+  onResume,
+}: {
+  ticket: TicketDetail;
+  onResume: (runId: string, answer: string) => Promise<void>;
+}) {
+  const [answer, setAnswer] = useState("");
+  const [busy, setBusy] = useState(false);
+  const stuck = ticket.runs.find((r) => r.columnSlug !== "blocked");
+  const duck = ticket.runs[0]?.columnSlug === "blocked" ? ticket.runs[0] : undefined;
+  // Only this visit's summary: one written before the stuck run started is about an earlier block.
+  const blocker = ticket.artifacts.find(
+    (a) => a.kind === "blocker" && stuck && new Date(a.createdAt) > new Date(stuck.createdAt),
+  );
+  return (
+    <section aria-label="Blocker" className="space-y-2 rounded-md border border-amber-500 p-3">
+      {blocker ? (
+        <Markdown>{blocker.contentMd}</Markdown>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {isActive(duck) ? "Rubber Duckworth is looking into it…" : "No blocker summary."}
+        </p>
+      )}
+      {stuck && resumableRunStates.includes(stuck.state) && (
+        <form
+          className="space-y-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            await onResume(stuck.id, answer);
+            setBusy(false);
+          }}
+        >
+          <Textarea
+            aria-label="Your answer"
+            placeholder={`Your answer for ${stuck.agentSlug}`}
+            rows={3}
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+          />
+          <Button size="sm" type="submit" disabled={busy}>
+            Resume {stuck.agentSlug}
+          </Button>
+        </form>
+      )}
+    </section>
+  );
+}
+
 /** Latest run: agent, state, elapsed time, cost, and the Cancel / Retry actions (FR-35). */
 function RunBar({
   run,
@@ -533,6 +600,8 @@ function describe(a: Activity): string {
         ? `${String(d.change)} criterion "${String(d.text)}"`
         : `edited ${(d.fields as string[]).join(", ")}`;
     case "run_started":
+      if (d.resumed)
+        return `resumed ${String(d.agent)}${d.request ? ` with the answer "${String(d.request)}"` : ""}`;
       return d.request
         ? `requested plan changes: "${String(d.request)}"`
         : `started ${String(d.agent)}`;

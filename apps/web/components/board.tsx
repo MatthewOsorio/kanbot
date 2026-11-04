@@ -83,6 +83,14 @@ export function Board({ projectId }: { projectId: string }) {
     es.onmessage = (m) => {
       const event = JSON.parse(m.data) as BoardEvent;
       setLastEvent(event);
+      // FR-60: the in-app list is "Needs me"; the browser shows one too when allowed and we're not looking.
+      if (
+        event.type === "notification" &&
+        document.hidden &&
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted"
+      )
+        new Notification("Kanbot", { body: event.message });
       if (event.type !== "run.event") void load(); // log lines don't change the board
     };
     return () => es.close();
@@ -254,10 +262,11 @@ export function Board({ projectId }: { projectId: string }) {
             {error}
           </p>
         )}
-        <span className="text-sm" aria-label="Tickets that need you">
-          Needs me:{" "}
-          <strong>{board.tickets.filter((t) => NEEDS_ME.includes(t.statusFlag)).length}</strong>
-        </span>
+        <NeedsMe
+          tickets={board.tickets.filter((t) => NEEDS_ME.includes(t.statusFlag))}
+          cardKey={key}
+          onOpen={setOpenId}
+        />
         {settings && <SpendControls settings={settings} onError={setError} />}
         <HealthDot health={health} />
       </header>
@@ -299,6 +308,66 @@ export function Board({ projectId }: { projectId: string }) {
       </DndContext>
 
       <TicketDrawer key={openId} ticketId={openId} lastEvent={lastEvent} onClose={closeDrawer} />
+    </div>
+  );
+}
+
+const FLAG_TEXT: Partial<Record<StatusFlag, string>> = {
+  needs_input: "needs your answer",
+  failed: "failed",
+  plan_ready: "plan ready",
+  awaiting_approval: "awaiting approval",
+};
+
+/** "Needs me" (§13, FR-60): the tickets waiting on the owner, and a switch for browser notifications. */
+function NeedsMe(props: {
+  tickets: Card[];
+  cardKey: (c: Card) => string;
+  onOpen: (id: string) => void;
+}) {
+  const { tickets, cardKey, onOpen } = props;
+  const [open, setOpen] = useState(false);
+  const [permission, setPermission] = useState(() =>
+    typeof Notification === "undefined" ? "denied" : Notification.permission,
+  );
+  return (
+    <div className="relative text-sm">
+      <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
+        Needs me: <strong>{tickets.length}</strong>
+      </Button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-72 space-y-1 rounded-md border bg-background p-2 shadow-md">
+          {tickets.length === 0 && <p className="text-muted-foreground">Nothing needs you.</p>}
+          <ul aria-label="Tickets that need you">
+            {tickets.map((t) => (
+              <li key={t.id}>
+                <button
+                  className="w-full rounded px-1 py-0.5 text-left hover:bg-muted"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpen(t.id);
+                  }}
+                >
+                  <span className="text-muted-foreground">{cardKey(t)}</span> {t.title}
+                  <span className="block text-xs text-muted-foreground">
+                    {FLAG_TEXT[t.statusFlag]}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {permission === "default" && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() => void Notification.requestPermission().then(setPermission)}
+            >
+              Turn on browser notifications
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

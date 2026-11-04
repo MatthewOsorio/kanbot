@@ -305,7 +305,9 @@ export function moveTicket(
       actor: "owner",
     });
     if (changesColumn && !keep)
-      await startColumnAgent(tx, t.projectId, id, to, OWNER, hasPlan ? requestMd : undefined);
+      await startColumnAgent(tx, t.projectId, id, to, OWNER, {
+        requestMd: hasPlan ? requestMd : undefined,
+      });
   });
 }
 

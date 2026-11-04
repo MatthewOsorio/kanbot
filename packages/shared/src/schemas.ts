@@ -35,8 +35,17 @@ export const runStates = [
   "budget_exceeded",
   "interrupted",
 ] as const;
-/** Non-terminal run states; at most one per ticket (partial unique index on runs). */
-export const activeRunStates = ["queued", "running", "awaiting_input"] as const;
+/** Non-terminal run states; at most one per ticket (partial unique index on runs). `awaiting_input` is terminal (§8 Resume). */
+export const activeRunStates = ["queued", "running"] as const;
+/** Ended runs that Resume can continue (§8 Resume, UC-7, UC-13). */
+export const resumableRunStates: readonly string[] = [
+  "awaiting_input",
+  "failed",
+  "timed_out",
+  "budget_exceeded",
+  "changes_requested",
+  "interrupted",
+] satisfies RunState[];
 export const runEventTypes = ["assistant", "tool_call", "tool_result", "stdout", "system"] as const;
 export const artifactKinds = [
   "plan",
@@ -120,6 +129,8 @@ export const createCommentBody = z.object({ bodyMd: z.string().trim().min(1).max
 
 /** "Request changes" on a plan (UC-3): Plan B re-runs at once with this as the instruction. */
 export const revisePlanBody = z.object({ requestMd: z.string().trim().min(1).max(10_000) });
+/** Resume (UC-7): the owner's answer to the blocker; empty when nothing needs saying (UC-13). */
+export const resumeRunBody = z.object({ answer: z.string().trim().max(10_000).default("") });
 
 /** Pause all (FR-63) and the daily cap (§14). Resuming clears a pause reason Kanbot set itself. */
 export const patchSettingsBody = z

@@ -34,7 +34,13 @@ describe("parseAgentFile", () => {
 
 describe("loadAgent", () => {
   it("loads every shipped agent file, each serving its default column", () => {
-    const shipped = ["plan-b", "sir-codes-a-lot", "nitpick-nancy", "testy-mctestface"];
+    const shipped = [
+      "plan-b",
+      "sir-codes-a-lot",
+      "nitpick-nancy",
+      "testy-mctestface",
+      "rubber-duckworth",
+    ];
     for (const slug of shipped) {
       const a = loadAgent(slug);
       expect(DEFAULT_COLUMNS.find((c) => c.agentSlug === slug)?.slug).toBe(a?.column);

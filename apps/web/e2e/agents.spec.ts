@@ -43,7 +43,7 @@ test("moving a ticket to Planning runs Plan B: plan artifact, criteria, Plan rea
   await drag(page, "Add a filter", "Planning");
   await expect(page.getByLabel("Agent notice")).toHaveText("Plan B is on it.");
   await expect(column(page, "Planning").getByText("Plan ready · needs you")).toBeVisible();
-  await expect(page.getByLabel("Tickets that need you")).toContainText("1");
+  await expect(page.getByRole("button", { name: /Needs me/ })).toContainText("1");
 
   await card(page, "Add a filter").click();
   await expect(page.getByLabel("Latest run")).toContainText("plan-b · succeeded");
@@ -169,4 +169,32 @@ test("back to Planning asks before Plan B redoes the plan; Approve plan moves to
   await page.getByRole("button", { name: "Approve plan" }).click();
   await expect(page.getByRole("dialog").getByText(/-1 · Ready$/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
+});
+
+// M4 done criterion: a needs_input run goes to Blocked, Duckworth asks, the owner answers and resumes.
+test("a blocked ticket shows Duckworth's questions; Resume sends the answer back to the agent", async ({
+  page,
+}) => {
+  await newBoard(page);
+  await addTicket(page, "Pick a filter");
+  await card(page, "Pick a filter").click();
+  await page.getByLabel("Labels").fill("replay:needs-input");
+  await page.getByLabel("Labels").blur();
+  await expect(page.getByLabel("Labels")).toHaveValue("replay:needs-input");
+  await page.keyboard.press("Escape");
+
+  await drag(page, "Pick a filter", "Planning");
+  await expect(column(page, "Blocked").getByText("Pick a filter")).toBeVisible();
+  await page.getByRole("button", { name: /Needs me/ }).click();
+  await page
+    .getByRole("list", { name: "Tickets that need you" })
+    .getByText("Pick a filter")
+    .click();
+
+  const blocked = page.getByRole("region", { name: "Blocker" });
+  await expect(blocked.getByRole("heading", { name: "Questions" })).toBeVisible();
+  await blocked.getByLabel("Your answer").fill("Title only.");
+  await blocked.getByRole("button", { name: "Resume plan-b" }).click();
+  await page.getByRole("tab", { name: "Activity" }).click();
+  await expect(page.getByText('resumed plan-b with the answer "Title only."')).toBeVisible();
 });

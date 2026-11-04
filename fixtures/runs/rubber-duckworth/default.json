@@ -1,0 +1,21 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": { "text": "Quack. Reading why the ticket stopped." }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "The agent needs one decision before it can go on.",
+    "artifacts": [
+      {
+        "kind": "blocker",
+        "title": "Blocked: replay ticket",
+        "markdown": "## Why it's stuck\nThe agent found two readings of the ticket.\n\n## Questions\n1. Filter by title only, or by labels too?"
+      }
+    ],
+    "questions": ["1. Filter by title only, or by labels too?"]
+  },
+  "costUsd": 0.01
+}

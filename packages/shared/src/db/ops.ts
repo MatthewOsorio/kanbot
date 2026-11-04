@@ -55,19 +55,31 @@ export async function startColumnAgent(
   ticketId: string,
   column: Column,
   actor: Actor = OWNER,
-  requestMd?: string,
+  /** requestMd: the owner's words the run answers; resumeSessionId: the agent session it continues. */
+  { requestMd, resumeSessionId }: { requestMd?: string; resumeSessionId?: string | null } = {},
 ) {
   if (!column.agentSlug || !agentFileExists(column.agentSlug)) return null;
   const [r] = await tx
     .insert(runs)
-    .values({ ticketId, agentSlug: column.agentSlug, columnSlug: column.slug, requestMd })
+    .values({
+      ticketId,
+      agentSlug: column.agentSlug,
+      columnSlug: column.slug,
+      requestMd,
+      resumeSessionId,
+    })
     .returning();
   await tx.update(tickets).set({ statusFlag: "running" }).where(eq(tickets.id, ticketId));
   await logActivity(
     tx,
     ticketId,
     "run_started",
-    { runId: r!.id, agent: r!.agentSlug, ...(requestMd && { request: requestMd }) },
+    {
+      runId: r!.id,
+      agent: r!.agentSlug,
+      ...(requestMd && { request: requestMd }),
+      ...(resumeSessionId !== undefined && { resumed: true }), // null: Resume, but no session to continue
+    },
     actor,
   );
   await publish(tx, projectId, {

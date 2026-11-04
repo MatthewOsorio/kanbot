@@ -166,6 +166,8 @@ export const runs = pgTable(
     // The owner's "Request changes" text this run answers (UC-3); null for runs started by a move.
     requestMd: text("request_md"),
     sessionId: text("session_id"),
+    // The agent session this run continues (Resume, or a bounce back to the same agent; FR-35).
+    resumeSessionId: text("resume_session_id"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     costUsd: numeric("cost_usd", { precision: 10, scale: 4, mode: "number" }).notNull().default(0),
@@ -180,7 +182,7 @@ export const runs = pgTable(
     // One active run per ticket (requirements §11); keep in sync with activeRunStates.
     uniqueIndex("runs_one_active_per_ticket")
       .on(t.ticketId)
-      .where(sql`${t.state} in ('queued', 'running', 'awaiting_input')`),
+      .where(sql`${t.state} in ('queued', 'running')`),
     index().on(t.state, t.createdAt),
     index().on(t.ticketId, t.createdAt),
   ],

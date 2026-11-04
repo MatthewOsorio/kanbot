@@ -70,6 +70,7 @@ async function setup(
     db.transaction(async (tx) => {
       const [now] = await tx.select().from(tickets).where(eq(tickets.id, id));
       const from = cols.find((c) => c.id === now!.columnId)!;
+      await cancelActiveRun(tx, p!.id, id); // e.g. Rubber Duckworth, queued when the ticket hit Blocked
       await moveToColumnEnd(tx, now!, from, col(slug), { kind: "user", name: "owner" });
       await startColumnAgent(tx, p!.id, id, col(slug));
     });
@@ -124,6 +125,10 @@ describe("build loop (M3 done criterion)", () => {
       "nitpick-nancy:succeeded",
       "testy-mctestface:succeeded",
     ]);
+    // The bounce resumed Sir Codes-a-Lot's session instead of starting cold (FR-35).
+    expect(done[0]!.sessionId).toBeTruthy();
+    expect(done[2]!.resumeSessionId).toBe(done[0]!.sessionId);
+    expect(done[3]!.resumeSessionId).toBeNull(); // Nancy re-reviews with fresh eyes
 
     const t = await ticketNow(ticket.id);
     expect(t.columnId).toBe(col("qa").id);
@@ -214,7 +219,7 @@ describe("build loop (M3 done criterion)", () => {
       .from(activity)
       .where(and(eq(activity.ticketId, ticket.id), eq(activity.action, "run_finished")))
       .orderBy(asc(activity.createdAt))
-      .then((rows) => rows.slice(-1));
+      .then((rows) => rows.filter((r) => r.data.agent === "nitpick-nancy").slice(-1));
     expect(last!.data.reason).toMatch(/Bounce limit/);
   });
 
@@ -235,9 +240,18 @@ describe("build loop (M3 done criterion)", () => {
     const [run] = await drain();
     expect(run!.state).toBe("awaiting_input");
     expect(run!.error).toMatch(/same Bash call 3 times/);
+    expect(run!.sessionId).toBe("replay-sir-codes-a-lot-stall.1"); // kept for Resume, though it never reported
     const t = await ticketNow(ticket.id);
     expect(t.columnId).toBe(col("blocked").id);
     expect(t.statusFlag).toBe("needs_input");
+  });
+
+  it("stops a run that makes 25 calls with no file change and no test run", async () => {
+    const { move } = await setup("no-progress");
+    await move("in_progress");
+    const [run] = await drain();
+    expect(run!.state).toBe("awaiting_input");
+    expect(run!.error).toMatch(/25 tool calls with no file change and no test run/);
   });
 
   it("bounces a QA failure back to In Progress, then passes", async () => {

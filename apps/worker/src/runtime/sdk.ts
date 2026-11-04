@@ -1,5 +1,6 @@
 import {
   createSdkMcpServer,
+  getSessionInfo,
   query,
   tool,
   type HookCallback,
@@ -36,6 +37,7 @@ export class SdkRuntime implements AgentRuntime {
       cwd,
       signal,
       env: extraEnv,
+      resumeSessionId,
     }: Parameters<AgentRuntime["run"]>[0],
     emit: (e: RuntimeEvent) => Promise<void>,
   ): Promise<RuntimeResult> {
@@ -111,6 +113,11 @@ export class SdkRuntime implements AgentRuntime {
               : [],
           ),
           mcpServers: { kanbot },
+          // Sessions are files on this machine, under the cwd; one that is gone means a cold start.
+          resume:
+            resumeSessionId && (await getSessionInfo(resumeSessionId, { dir: cwd }))
+              ? resumeSessionId
+              : undefined,
           maxTurns: agent.maxTurns,
           maxBudgetUsd: agent.maxBudgetUsd,
           settingSources: [], // no user or project settings from the host machine
@@ -174,6 +181,7 @@ function toEvents(m: SDKMessage): RuntimeEvent[] {
         payload: {
           subtype: "init",
           model: m.model,
+          sessionId: m.session_id, // kept on the run even if it is stopped, for Resume (§8)
           tools: m.tools,
           plugins: m.plugins.map((p) => p.name), // proves a plugin actually loaded
           skills: m.skills,
