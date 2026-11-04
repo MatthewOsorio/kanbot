@@ -5,6 +5,7 @@ import {
   type HookCallback,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { verdictShape } from "@kanbot/shared";
@@ -151,6 +152,16 @@ export class SdkRuntime implements AgentRuntime {
     }
     signal.throwIfAborted();
     return { ...result, report, apiError };
+  }
+}
+
+/** The health probe behind automatic resume (§8): listing models is free and needs a working API. */
+export async function anthropicReachable() {
+  try {
+    await new Anthropic({ maxRetries: 0, timeout: 10_000 }).models.list({ limit: 1 });
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -23,7 +23,7 @@ export async function GET(req: Request) {
       const send = (s: string) => controller.enqueue(encoder.encode(s));
       const unsubscribe = await subscribe(({ id, projectId: p, event }) => {
         // Unnamed SSE events so the client's single onmessage sees all of them; `type` is in the data.
-        if (p === projectId) send(`id: ${id}\ndata: ${JSON.stringify(event)}\n\n`);
+        if (p === projectId || p === "*") send(`id: ${id}\ndata: ${JSON.stringify(event)}\n\n`);
       });
       const heartbeat = setInterval(() => send(": ping\n\n"), 25_000);
       cleanup = () => {

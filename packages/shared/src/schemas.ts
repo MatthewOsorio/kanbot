@@ -121,6 +121,12 @@ export const createCommentBody = z.object({ bodyMd: z.string().trim().min(1).max
 /** "Request changes" on a plan (UC-3): Plan B re-runs at once with this as the instruction. */
 export const revisePlanBody = z.object({ requestMd: z.string().trim().min(1).max(10_000) });
 
+/** Pause all (FR-63) and the daily cap (§14). Resuming clears a pause reason Kanbot set itself. */
+export const patchSettingsBody = z
+  .object({ paused: z.boolean(), dailyBudgetUsd: z.number().min(0).max(10_000) })
+  .partial()
+  .refine(nonEmpty, "No fields to update");
+
 export const createCriterionBody = z.object({ text: z.string().trim().min(1).max(1_000) });
 
 export const patchCriterionBody = z

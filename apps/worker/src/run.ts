@@ -12,17 +12,21 @@ import {
 import { loadAgent, type AgentConfig } from "@kanbot/shared/agents";
 import {
   acceptanceCriteria,
+  activeRun,
   artifacts,
   columns,
   comments,
+  getSettings,
   logActivity,
   moveToColumnEnd,
   projects,
   publish,
   runEvents,
   runs,
+  spendToday,
   startColumnAgent,
   tickets,
+  updateSettings,
   type Db,
   type Tx,
 } from "@kanbot/shared/db";
@@ -60,6 +64,11 @@ const pluginsDir = () => resolve(process.env.KANBOT_PLUGINS_DIR ?? "../../plugin
 export async function claimNext(db: Db): Promise<Run | null> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kanbot_claim'))`);
+    // Pause all (FR-63) and the daily cap (§14): nothing new starts.
+    const s = await getSettings(tx);
+    const { spent, reserved } = await spendToday(tx);
+    const left = s.dailyBudgetUsd - spent - reserved;
+    if (s.paused || left < 0.01) return null; // the cap is in cents, spend in hundredths of a cent
     const res = await tx.execute<{ id: string }>(sql`
       update runs set state = 'running', started_at = now()
       where id = (
@@ -74,9 +83,76 @@ export async function claimNext(db: Db): Promise<Run | null> {
       returning id`);
     const id = res.rows[0]?.id;
     if (!id) return null;
-    const [run] = await tx.select().from(runs).where(eq(runs.id, id));
+    const [claimed] = await tx.select().from(runs).where(eq(runs.id, id));
+    let agentBudget = left;
+    try {
+      agentBudget = loadAgent(claimed!.agentSlug)?.maxBudgetUsd ?? left;
+    } catch {
+      // invalid agent file: execute() fails the run with the validation error
+    }
+    const [run] = await tx
+      .update(runs)
+      .set({ budgetUsd: Math.min(agentBudget, left) })
+      .where(eq(runs.id, id))
+      .returning();
     return run!;
   });
+}
+
+/** Error of a run stopped by Pause all; such runs, like outage ones, restart on their own (§8). */
+export const PAUSED_ERROR = "Stopped by Pause all";
+const API_ERROR = "Anthropic API error";
+
+/**
+ * Restarts runs that an outage or Pause all interrupted (requirements §8 failure handling), once agents
+ * aren't paused and `reachable()` (the Anthropic probe) says the API is back. Only a ticket's latest run,
+ * still in its column with nothing active, restarts: anything the owner did since wins.
+ */
+export async function resumeInterrupted(db: Db, reachable: () => Promise<boolean>) {
+  const candidates = await db.execute<{ id: string }>(sql`
+    select r.id from runs r
+    join tickets t on t.id = r.ticket_id
+    join columns c on c.id = t.column_id and c.slug = r.column_slug
+    where r.state = 'interrupted'
+      and (r.error = ${PAUSED_ERROR} or r.error like ${`${API_ERROR}%`})
+      and not exists (select 1 from runs r2 where r2.ticket_id = r.ticket_id and r2.created_at > r.created_at)`);
+  if (!candidates.rows.length) return 0;
+  if ((await getSettings(db)).paused || !(await reachable())) return 0;
+  let n = 0;
+  for (const { id } of candidates.rows)
+    await db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({ run: runs, ticket: tickets, column: columns })
+        .from(runs)
+        .innerJoin(tickets, eq(tickets.id, runs.ticketId))
+        .innerJoin(columns, eq(columns.id, tickets.columnId))
+        .where(eq(runs.id, id))
+        .for("update", { of: tickets });
+      // Re-checked under the ticket lock: the owner may have moved, retried or deleted it meanwhile.
+      if (!row || row.column.slug !== row.run.columnSlug || (await activeRun(tx, row.ticket.id)))
+        return;
+      const [newer] = await tx
+        .select({ id: runs.id })
+        .from(runs)
+        // In SQL: a JS Date drops the microseconds, so the run would count as newer than itself.
+        .where(
+          and(
+            eq(runs.ticketId, row.ticket.id),
+            sql`${runs.createdAt} > (select created_at from runs where id = ${id})`,
+          ),
+        )
+        .limit(1);
+      if (newer) return;
+      const started = await startColumnAgent(
+        tx,
+        row.ticket.projectId,
+        row.ticket.id,
+        row.column,
+        agentActor(row.run.agentSlug),
+      );
+      if (started) n++;
+    });
+  return n;
 }
 
 const byTicket = new Map<string, Promise<unknown>>();
@@ -155,6 +231,10 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       error: `Invalid agent file: ${(e as Error).message}`,
     });
   }
+
+  // The daily cap (§14) can leave less than the agent's own budget.
+  const dayCapped = run.budgetUsd != null && run.budgetUsd < agent.maxBudgetUsd;
+  if (dayCapped) agent = { ...agent, maxBudgetUsd: run.budgetUsd! };
 
   const recorded: RuntimeEvent[] = [];
   const calls = new Map<string, number>();
@@ -260,7 +340,15 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         cwd,
       );
   } catch (e) {
-    if (cancel.aborted) return finish(db, run.id, { state: "cancelled" }); // already cancelled by the web app
+    // Pause all leaves the run `running` for us to mark; a cancel was already written by the web app.
+    if (cancel.aborted)
+      return finish(
+        db,
+        run.id,
+        cancel.reason === PAUSED_ERROR
+          ? { state: "interrupted", error: PAUSED_ERROR }
+          : { state: "cancelled" },
+      );
     if (timeout.aborted)
       return finish(db, run.id, {
         state: "timed_out",
@@ -274,6 +362,8 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   }
 
   const outcome = outcomeOf(result);
+  if (dayCapped && outcome.state === "budget_exceeded")
+    outcome.error = `Daily budget reached: this run could spend only $${run.budgetUsd!.toFixed(2)} of what was left today`;
   if (wt && before) {
     const broken = await checkAfterRun(wt, project.defaultBranch, before, canEdit).catch(
       (e: Error) => `Post-run check failed: ${e.message}`,
@@ -291,6 +381,8 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
 type Outcome = {
   state: RunOutcome;
   error?: string;
+  /** Pause all agents with this reason (auth or billing errors: every run would fail the same way). */
+  pause?: string;
   verdict?: VerdictPayload;
   /** Files the branch changed (In Progress runs), added to the ticket's touch set. */
   touched?: string[];
@@ -304,10 +396,9 @@ export function outcomeOf(r: RuntimeResult): Outcome {
   if (r.stop === "api_error") {
     // The SDK already retried; an outage leaves the ticket in place with Retry. Auth/billing fail outright.
     const transient = ["rate_limit", "overloaded", "server_error"].includes(r.apiError ?? "");
-    return {
-      state: transient ? "interrupted" : "failed",
-      error: `Anthropic API error: ${r.apiError ?? "unknown"}${r.error ? ` (${r.error})` : ""}`,
-    };
+    const account = ["authentication_failed", "billing_error"].includes(r.apiError ?? "");
+    const error = `${API_ERROR}: ${r.apiError ?? "unknown"}${r.error ? ` (${r.error})` : ""}`;
+    return { state: transient ? "interrupted" : "failed", error, ...(account && { pause: error }) };
   }
   if (r.stop === "error") return { state: "failed", error: r.error ?? "The agent run failed" };
   if (r.report == null)
@@ -358,6 +449,7 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
       if (usage) await tx.update(runs).set(usageFields).where(eq(runs.id, runId));
       return;
     }
+    if (o.pause) await updateSettings(tx, { paused: true, pausedReason: o.pause });
     const [ticket] = await tx.select().from(tickets).where(eq(tickets.id, run.ticketId));
     if (!ticket) return;
     const actor = agentActor(run.agentSlug);

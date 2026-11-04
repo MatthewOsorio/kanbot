@@ -437,7 +437,7 @@ function RunBar({
         <span className="flex-1">
           <strong>{run.agentSlug}</strong> · {run.state.replace("_", " ")}
           {start && ` · ${Math.floor(secs / 60)}m ${secs % 60}s`}
-          {/* shortcut: the SDK reports cost only when a run ends, so a running run shows none; M4 cost tracking can sum per-turn usage. */}
+          {/* shortcut: the SDK reports cost only when a run ends, so a running run shows none; a live figure needs a price table (M6). */}
           {!active && ` · $${run.costUsd.toFixed(2)}`}
         </span>
         {active && (

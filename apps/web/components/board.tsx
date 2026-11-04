@@ -27,13 +27,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TicketDrawer } from "@/components/ticket-drawer";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/client";
 import type { Board as BoardData, Card } from "@/lib/projects";
+import type { settingsView } from "@/lib/settings";
 
 type Project = { id: string; name: string };
 type ColumnData = BoardData["columns"][number];
 type Health = Record<"database" | "worker" | "anthropic" | "github", string>;
+type SettingsView = Awaited<ReturnType<typeof settingsView>>;
 
 /** Flags that mean the owner has to act (the top bar's "Needs me" count). */
 const NEEDS_ME: StatusFlag[] = ["needs_input", "plan_ready", "awaiting_approval", "failed"];
@@ -52,14 +55,21 @@ export function Board({ projectId }: { projectId: string }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [health, setHealth] = useState<Health | null>(null);
+  const [settings, setSettings] = useState<SettingsView | null>(null);
   const loadSeq = useRef(0);
   const closeDrawer = useCallback(() => setOpenId(null), []);
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
     try {
-      const b = await api<BoardData>(`/api/projects/${projectId}/board`);
-      if (seq === loadSeq.current) setBoard(b); // drop stale responses
+      // Settings ride along: run.finished changes today's spend, settings.updated the rest.
+      const [b, s] = await Promise.all([
+        api<BoardData>(`/api/projects/${projectId}/board`),
+        api<SettingsView>("/api/settings"),
+      ]);
+      if (seq !== loadSeq.current) return; // drop stale responses
+      setBoard(b);
+      setSettings(s);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -207,7 +217,7 @@ export function Board({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-4 border-b px-4 py-2">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2">
         <Link href="/" className="font-semibold">
           Kanbot
         </Link>
@@ -248,8 +258,10 @@ export function Board({ projectId }: { projectId: string }) {
           Needs me:{" "}
           <strong>{board.tickets.filter((t) => NEEDS_ME.includes(t.statusFlag)).length}</strong>
         </span>
+        {settings && <SpendControls settings={settings} onError={setError} />}
         <HealthDot health={health} />
       </header>
+      {settings && <Banner settings={settings} health={health} />}
 
       <DndContext
         sensors={sensors}
@@ -287,6 +299,82 @@ export function Board({ projectId }: { projectId: string }) {
       </DndContext>
 
       <TicketDrawer key={openId} ticketId={openId} lastEvent={lastEvent} onClose={closeDrawer} />
+    </div>
+  );
+}
+
+const usd = (n: number) => `$${n.toFixed(2)}`;
+
+/** Today's spend vs the daily cap (click to change the cap) and Pause all (§13, FR-63). */
+function SpendControls(props: { settings: SettingsView; onError: (m: string) => void }) {
+  const { settings: s, onError } = props;
+  const [editing, setEditing] = useState(false);
+  // No refetch here: the settings.updated event reloads the board and these settings.
+  const patch = (body: object) =>
+    api("/api/settings", { method: "PATCH", body }).catch((e: Error) => onError(e.message));
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      {editing ? (
+        <form
+          className="flex items-center gap-1"
+          action={async (f) => {
+            await patch({ dailyBudgetUsd: Number(f.get("cap")) });
+            setEditing(false);
+          }}
+        >
+          <label htmlFor="daily-cap">Daily cap $</label>
+          <Input
+            id="daily-cap"
+            name="cap"
+            type="number"
+            min={0}
+            step={0.5}
+            defaultValue={s.dailyBudgetUsd}
+            className="h-8 w-20"
+            autoFocus
+          />
+          <Button size="sm" type="submit">
+            Save
+          </Button>
+        </form>
+      ) : (
+        <button
+          type="button"
+          className="underline-offset-2 hover:underline"
+          title="Change the daily cap"
+          onClick={() => setEditing(true)}
+        >
+          Today {usd(s.spentTodayUsd)} / {usd(s.dailyBudgetUsd)}
+        </button>
+      )}
+      <Button
+        size="sm"
+        variant={s.paused ? "default" : "outline"}
+        aria-pressed={s.paused}
+        onClick={() => void patch({ paused: !s.paused })}
+      >
+        {s.paused ? "Resume agents" : "Pause all"}
+      </Button>
+    </div>
+  );
+}
+
+/** Why nothing is starting, when that's the case (§8 outage banner, §14 caps). */
+function Banner({ settings: s, health }: { settings: SettingsView; health: Health | null }) {
+  const lines = [
+    s.paused &&
+      `Agents are paused${s.pausedReason ? ` because of an ${s.pausedReason}` : ""}. Nothing new starts; stopped runs restart when you resume.`,
+    s.spentTodayUsd >= s.dailyBudgetUsd &&
+      `Daily budget reached (${usd(s.spentTodayUsd)} of ${usd(s.dailyBudgetUsd)}). Nothing new starts until midnight or until you raise the cap.`,
+    health?.anthropic === "down" &&
+      "Anthropic is unreachable. Interrupted runs restart on their own once it's back.",
+  ].filter(Boolean);
+  if (!lines.length) return null;
+  return (
+    <div role="alert" className="border-b bg-amber-100 px-4 py-2 text-sm text-amber-950">
+      {lines.map((l) => (
+        <p key={l as string}>{l}</p>
+      ))}
     </div>
   );
 }

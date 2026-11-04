@@ -28,7 +28,9 @@ export type BoardEvent =
       costUsd?: number;
     }
   // Ids only: NOTIFY payloads are capped at 8 KB, so clients page GET /api/runs/:id/events?after=seq.
-  | { type: "run.event"; runId: string; ticketId: string; seq: number; eventType: RunEventType };
+  | { type: "run.event"; runId: string; ticketId: string; seq: number; eventType: RunEventType }
+  // Global (projectId "*"): Pause all or the daily cap changed. The worker aborts its runs on `paused`.
+  | { type: "settings.updated"; paused: boolean };
 
-/** Payload sent on EVENTS_CHANNEL; projectId routes it to the right SSE subscribers. */
+/** Payload sent on EVENTS_CHANNEL; projectId routes it to the right SSE subscribers ("*" = all). */
 export type EventEnvelope = { id: string; projectId: string; event: BoardEvent };

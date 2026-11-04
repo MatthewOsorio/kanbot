@@ -7,17 +7,28 @@ import {
   comments,
   columns,
   createDb,
+  getSettings,
   projects,
   runEvents,
   runs,
+  settings,
+  spendToday,
   startColumnAgent,
   tickets,
+  updateSettings,
 } from "@kanbot/shared/db";
 import { TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
-import { afterPrevious, claimNext, executeRun, recoverInterrupted } from "../src/run";
+import {
+  afterPrevious,
+  claimNext,
+  executeRun,
+  PAUSED_ERROR,
+  recoverInterrupted,
+  resumeInterrupted,
+} from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
 import type { AgentRuntime } from "../src/runtime/types";
 
@@ -259,6 +270,83 @@ describe("claiming", () => {
       .from(runs)
       .where(and(inArray(runs.id, [first!.id, next!.id])));
     expect(states.map((s) => s.state)).toEqual(["succeeded", "succeeded"]);
+  });
+});
+
+describe("Pause all and the daily cap (FR-63, §14)", () => {
+  const setSettings = (s: Partial<typeof settings.$inferInsert>) =>
+    db.transaction((tx) => updateSettings(tx, s));
+  afterEach(() => setSettings({ paused: false, pausedReason: null, dailyBudgetUsd: 1_000 }));
+
+  it("claims nothing while paused, and the run starts once agents resume", async () => {
+    await plannedTicket();
+    await setSettings({ paused: true });
+    expect(await claimNext(db)).toBeNull();
+    await setSettings({ paused: false });
+    expect(await claimNext(db)).not.toBeNull();
+  });
+
+  it("claims nothing once today's cap is spent, and caps a run's budget at what is left", async () => {
+    await plannedTicket();
+    const { spent } = await spendToday(db);
+    await setSettings({ dailyBudgetUsd: spent });
+    expect(await claimNext(db)).toBeNull();
+    await setSettings({ dailyBudgetUsd: spent + 0.05 });
+    const run = await claimNext(db);
+    expect(run!.budgetUsd).toBeCloseTo(0.05, 1); // Plan B's own budget is larger
+    // Its budget counts as spent while it runs, so nothing else fits today.
+    await plannedTicket();
+    expect(await claimNext(db)).toBeNull();
+  });
+
+  it("an auth error pauses all agents with the reason", async () => {
+    await plannedTicket("auth-error");
+    const run = await claimAndRun();
+    expect(run.state).toBe("failed");
+    const s = await getSettings(db);
+    expect(s.paused).toBe(true);
+    expect(s.pausedReason).toMatch(/authentication_failed/);
+  });
+
+  it("Pause all interrupts a running run, which restarts once resumed and Anthropic answers", async () => {
+    const { ticket } = await plannedTicket("slow");
+    const run = (await claimNext(db))!;
+    const ac = new AbortController();
+    const done = executeRun(db, runtime, run, ac.signal);
+    await new Promise((r) => setTimeout(r, 300));
+    await setSettings({ paused: true });
+    ac.abort(PAUSED_ERROR); // what the worker does when it hears settings.updated
+    await done;
+    const [after] = await db.select().from(runs).where(eq(runs.id, run.id));
+    expect(after).toMatchObject({ state: "interrupted", error: PAUSED_ERROR });
+
+    expect(await resumeInterrupted(db, async () => true)).toBe(0); // still paused
+    await setSettings({ paused: false });
+    expect(await resumeInterrupted(db, async () => false)).toBe(0); // API still down
+    expect(await resumeInterrupted(db, async () => true)).toBeGreaterThanOrEqual(1);
+    const active = await db
+      .select()
+      .from(runs)
+      .where(and(eq(runs.ticketId, ticket.id), eq(runs.state, "queued")));
+    expect(active).toHaveLength(1);
+    expect(await resumeInterrupted(db, async () => true)).toBe(0); // only once
+  });
+
+  it("an outage-interrupted run restarts; one the owner moved away from does not", async () => {
+    const { ticket, cols } = await plannedTicket("outage");
+    await claimAndRun();
+    const moved = await plannedTicket("outage");
+    await claimAndRun();
+    await db
+      .update(tickets)
+      .set({ columnId: moved.cols.find((c) => c.slug === "backlog")!.id })
+      .where(eq(tickets.id, moved.ticket.id));
+    await resumeInterrupted(db, async () => true);
+    const latest = async (id: string) =>
+      (await db.select().from(runs).where(eq(runs.ticketId, id))).map((r) => r.state).sort();
+    expect(await latest(ticket.id)).toEqual(["interrupted", "queued"]);
+    expect(await latest(moved.ticket.id)).toEqual(["interrupted"]);
+    expect(columnSlug(cols, (await ticketNow(ticket.id)).columnId)).toBe("planning");
   });
 });
 

@@ -29,6 +29,13 @@
       "when": 1793719226789,
       "tag": "0003_build_loop",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793766738061,
+      "tag": "0004_settings_and_run_budget",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,6 @@
+{
+  "stop": "api_error",
+  "apiError": "authentication_failed",
+  "error": "invalid x-api-key",
+  "costUsd": 0
+}

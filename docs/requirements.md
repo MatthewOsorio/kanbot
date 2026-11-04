@@ -15,7 +15,8 @@ Last updated 2026-11-03.
   - Bounce-backs and the bounce limit, the overlap check, stall detection (repetition rule), Ponytail, and the golden-ticket eval.
 - **How it runs:** locally only, bound to 127.0.0.1, with no login. Tested on Windows only. Project commands, test globs and hotspots come from `.kanbot/project.yml`.
 - **Next: M4 (unblock, still local).**
-  - Rubber Duckworth with resume, Archie, costs, the daily cap and Pause all.
+  - Built so far: the daily cap, Pause all, automatic resume after an outage, CI.
+  - Still to come: Rubber Duckworth with resume, Archie, costs per ticket.
   - Project Settings, ticket links, notifications, the remaining stall rules.
 - **Then M5 (ship and deploy):** the server and login, the GitHub App, Captain Ship-It, CI and the PR Review gate.
 
@@ -270,7 +271,7 @@ Requirements marked MVP must ship in the first usable version; Later items are d
 | FR-60 | In-app notifications for "needs input", run failure, budget exceeded and PR ready for review; browser notifications when permitted. | MVP |
 | FR-61 | Optional outbound webhook (e.g. a Discord channel) for the same events. | Later |
 | FR-62 | Cost tracking per run, ticket, agent, project and day (tokens and USD). | MVP |
-| FR-63 | Global "Pause all agents" switch: running runs finish their current step and stop; nothing new starts. | MVP |
+| FR-63 | Global "Pause all agents" switch: running runs stop at once (`interrupted`, "Stopped by Pause all") and restart on their own when agents resume; nothing new starts. | MVP |
 
 ## 7. Architecture and tech stack
 
@@ -387,7 +388,7 @@ Before raising any level, compare the same tickets with Ponytail on and off usin
 
 ### Other bundled plugins
 
-Four more plugins ship in the worker image, each enabled only for the agents that benefit; every plugin adds context to every turn, so the set stays small. M3 ships only Ponytail (vendored in `plugins/ponytail/`); these four arrive in M4, each added once the golden-ticket eval can compare it on and off.
+Four more plugins ship in the worker image, each enabled only for the agents that benefit; every plugin adds context to every turn, so the set stays small. M3 ships only Ponytail (vendored in `plugins/ponytail/`); these four arrive in M6, each added once the golden-ticket eval can compare it on and off.
 
 | Plugin | Source | Agents | Notes |
 | --- | --- | --- | --- |
@@ -441,7 +442,7 @@ Run states: `queued`, `running`, `awaiting_input`, `succeeded`, `changes_request
 
 - **Cancellation**: moving a ticket away, "Pause all", or a budget breach aborts the run via an `AbortController`; commits already made stay on the branch. The ticket's next run waits until the aborted one has fully stopped, so two agents never share a worktree.
 - **Crash recovery**: one worker per database (a Postgres advisory lock; a second worker exits at start). On worker start, any run left in `running` becomes `interrupted` and the ticket shows a Retry / Resume choice. A run whose result the worker cannot record (a git or database error after the agent stopped) is marked `failed` with that error at once, so it never holds a concurrency slot.
-- **Resume**: `needs_input` stores the agent session ID; when the user answers, the run resumes that session with the answer appended instead of starting cold.
+- **Resume**: a run that ends `awaiting_input` (`needs_input`) is finished, like `failed`: it stores the agent session ID and frees the ticket's one active run, so Rubber Duckworth can run on the Blocked ticket. When the user answers and clicks Resume, a new run of the same agent starts in the column the ticket came from, resuming that session with the answer appended instead of starting cold. The same Resume works after `failed`, `timed_out` and `budget_exceeded` (UC-13). (Decided 2026-11-03; built in M4.)
 - **Post-run checks**: after every run in a worktree, the worker fails the run (ticket to Blocked, commits kept, nothing reverted) if the worktree left its ticket branch, any commit the run made reached the default branch (the owner committing to the default branch during a run is fine), commits that existed before the run were rewritten (amend, reset, rebase), the run changed any file under `.kanbot/`, or the run changed files outside the agent's `editScope` (for Testy McTestface: the project's test globs). Only what the run itself committed or left dirty counts; files an earlier run left behind are not its change.
 - **Idempotency**: jobs carry the run ID; a run that is already terminal is never executed twice.
 
@@ -453,7 +454,7 @@ Hard limits (turns, timeout, budget, bounce limit) guarantee every run ends; sta
 | --- | --- | --- |
 | Repetition | The same tool call with the same arguments 3 times with no file edit in between (a command failing with the same error 3 times is the same call; rerunning tests after an edit is not) | Run stops with `needs_input` and the repeated action as the reason (M3) |
 | No progress | About 15 turns with no file changes and no new test results | Run stops with `needs_input` (M4) |
-| Repeated feedback | Code Review or QA raises essentially the same issue (same file, line and message) on a second bounce | Ticket goes to Blocked instead of bouncing again (M4) |
+| Repeated feedback | Code Review or QA raises essentially the same issue (same file, line and message) on a second bounce | Ticket goes to Blocked instead of bouncing again (M6) |
 | Recurring block | A ticket lands in Blocked a second time for the same reason | Duckworth flags it as recurring and suggests re-planning or splitting the ticket (M4) |
 
 **Rubber Duckworth's own limits.** Duckworth only diagnoses: read-only access, no shell, around 10 turns and a $0.25 budget, one run per entry to Blocked. It can't resume or move a ticket; only the owner's answer and Resume do that. If its run fails, the worker posts a plain fallback summary (last error and last verdict) and the ticket stays in Blocked.
@@ -465,8 +466,8 @@ Outside services fail routinely, so the worker sorts every error into transient 
 | Failure | Behavior |
 | --- | --- |
 | Anthropic rate limit (429) or overloaded / 5xx | The Agent SDK's built-in retry with backoff handles it; each retry is logged as a "waiting on API" line in the Live tab and turns the health indicator amber. Retries don't count against the run's turn limit. If the SDK gives up, the run becomes `interrupted`, the ticket stays put with Retry. |
-| Anthropic unavailable for more than 10 minutes | Run becomes `interrupted` and a banner appears; runs resume automatically once a health probe (every minute) succeeds. (M2 stops at `interrupted` + Retry; the banner and automatic resume arrive with Pause all in M4.) |
-| Anthropic auth or billing error (invalid key, no credit) | All agents pause immediately, with a banner and a notification; nothing retries until it's fixed. |
+| Anthropic unavailable for more than 10 minutes | Run becomes `interrupted` and a banner appears; runs resume automatically once a health probe (every minute, listing models: free) succeeds. Only a ticket's latest run restarts, and only while the ticket is still in that run's column with nothing active, so anything the owner did meanwhile wins. Runs stopped by Pause all restart the same way when agents resume. |
+| Anthropic auth or billing error (invalid key, no credit) | The run fails and all agents pause, with the error as the pause reason in the banner (the notification comes with notifications); nothing retries until the owner resumes. |
 | GitHub rate limit | Wait until the reset time GitHub reports; GitHub calls queue instead of failing runs. |
 | GitHub push or PR creation fails | Retry 3 times, then move the ticket to Blocked with the error. PR creation checks for an existing PR first, so retries never open duplicates. |
 | A command hangs (tests, install) | A per-command timeout (default 10 min) kills the process; the agent sees the timeout and decides what to do. (Built so far for the worker's own install only. An agent's command is bounded by the run's timeout until M4.) |
@@ -648,13 +649,13 @@ Ten tables plus a single-row `settings` table cover v1; all IDs are UUIDv7, all 
 | `tickets` | id, project\_id, number, title, description\_md, type, priority, labels\[\], column\_id, position, parent\_id, branch\_name, worktree\_path, bounce\_count, status\_flag (`none`, `running`, `needs_input`, `plan_ready`, `awaiting_approval`, `waiting_on_ticket`, `pr_open`, `failed`), touch\_paths\[\], pr\_number, pr\_url, head\_sha, ci\_state, review\_state, created\_at, updated\_at | `(project_id, number)` unique; `position` is a fractional index for ordering in a column. |
 | `acceptance_criteria` | id, ticket\_id, position, text, status (`open`, `pass`, `fail`), source (`user`, `agent`) | QA updates status. |
 | `ticket_links` | from\_ticket\_id, to\_ticket\_id, kind (`blocks`, `relates`) | Epics use `tickets.parent_id`, not this table. |
-| `runs` | id, ticket\_id, agent\_slug, agent\_config\_hash, column\_slug, state, verdict, summary, request\_md, session\_id, input\_tokens, output\_tokens, cost\_usd, created\_at, started\_at, ended\_at, error | One active run per ticket enforced with a partial unique index on non-terminal states (`queued`, `running`, `awaiting_input`). Also the job queue (§7). Token counts include cache reads and writes. `request_md` is the owner's Revise plan text the run answers (UC-3); null otherwise. |
+| `runs` | id, ticket\_id, agent\_slug, agent\_config\_hash, column\_slug, state, verdict, summary, request\_md, session\_id, input\_tokens, output\_tokens, cost\_usd, budget\_usd, created\_at, started\_at, ended\_at, error | One active run per ticket enforced with a partial unique index on non-terminal states (`queued`, `running`; `awaiting_input` leaves it in M4, see §8 Resume). `budget_usd` is set when the run is claimed: the agent's budget, capped by what is left of the day; while the run goes, it counts toward today's spend. Also the job queue (§7). Token counts include cache reads and writes. `request_md` is the owner's Revise plan text the run answers (UC-3); null otherwise. |
 | `run_events` | id, run\_id, seq, type (`assistant`, `tool_call`, `tool_result`, `stdout`, `system`), payload (jsonb), created\_at | Append-only; `(run_id, seq)` unique; pruned after 90 days except the last run per ticket. |
 | `artifacts` | id, ticket\_id, run\_id, kind (`plan`, `research`, `review`, `test_report`, `blocker`, `retro`, `diff_snapshot`), title, version, content\_md, data (jsonb), created\_at | New versions never overwrite old ones. |
 | `comments` | id, ticket\_id, author\_kind (`user`, `agent`), agent\_slug, body\_md, file, line, resolved, created\_at | Review line comments use `file` and `line`. |
 | `activity` | id, ticket\_id, actor\_kind, actor, action (`created`, `moved`, `run_started`, `run_finished`, `commented`, `edited`), data (jsonb), created\_at | Drives the ticket timeline and the audit trail. Criteria changes are `edited` with `fields: ["criteria"]`. |
 
-Global settings (daily budget, global concurrency, serious mode, pause-all flag, encrypted GitHub App credentials) live in a single-row `settings` table, added in M4 with its first user (Pause all). Until then the concurrency limits are constants in the worker. `projects.repo_path` exists from M2: an optional absolute path to a local checkout that Plan B reads; onboarding fills it with the clone path from M5.
+Global settings (daily budget, global concurrency, serious mode, pause-all flag, encrypted GitHub App credentials) live in a single-row `settings` table (id 1; a missing row means the defaults). M4 adds `paused`, `paused_reason` (set when Kanbot paused itself) and `daily_budget_usd`; each other field arrives with its first user. Until then the concurrency limits are constants in the worker. `projects.repo_path` exists from M2: an optional absolute path to a local checkout that Plan B reads; onboarding fills it with the clone path from M5.
 
 ## 12. API and real-time events
 
@@ -686,7 +687,7 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | POST | `/api/runs/:id/resume` | Body `{answer}`. Resume a `needs_input` run with the user's answer. | M4 |
 | GET / PUT | `/api/agents`, `/api/agents/:slug` | List agents; read or save an agent definition file. | M6 |
 | GET | `/api/costs?groupBy=day\|agent\|ticket&from&to` | Cost reports. | M6 |
-| POST | `/api/settings/pause` | Body `{paused: boolean}`. Pause or resume all agents. | M4 |
+| GET / PATCH | `/api/settings` | Read Pause all, the pause reason, the daily cap and today's spend; body `{paused?, dailyBudgetUsd?}` pauses or resumes all agents and sets the cap. Resuming clears the pause reason. | M4 |
 
 GitHub endpoints (all M5): `POST /api/webhooks/github` receives signature-verified webhooks; `POST /api/tickets/:id/merge` merges only when GitHub reports a human approval and green checks. "Start anyway" is the move's `startAnyway` flag rather than its own endpoint. `GET /api/github/setup` starts the two-click GitHub App setup and `GET /api/github/callback` completes it; `/api/auth/*` handles Sign in with GitHub.
 
@@ -702,6 +703,7 @@ GitHub endpoints (all M5): `POST /api/webhooks/github` receives signature-verifi
 - `run.event` — `{runId, ticketId, seq, eventType}`: ids only, because `NOTIFY` payloads are capped at 8 KB; the Live tab fetches the new lines from `GET /api/runs/:id/events?after=seq`. Sent to every client of the project (no `&runId=` filter; the board ignores them).
 - `comment.created` — `{ticketId, commentId}`; `artifact.created` — `{ticketId, artifactId}`
 - `notification` — `{kind, ticketId, message}` (M4)
+- `settings.updated` — `{paused}`, sent to every project's stream; the worker stops its runs when `paused` (M4)
 
 The app is publicly reachable on the DigitalOcean server, so every route except the GitHub webhook requires login: Sign in with GitHub through the Kanbot GitHub App, restricted to the owner's account, with a secure, HTTP-only session cookie. The webhook endpoint is authenticated by its HMAC signature instead.
 
@@ -768,7 +770,7 @@ Agents run real commands on the server, so every agent is boxed in by its worktr
 | --- | --- | --- |
 | Per-run budget | From agent frontmatter (e.g. $1.50) | Run stops with `budget_exceeded`; ticket to Blocked. |
 | Per-ticket budget | $3 | No new runs start for that ticket until raised. |
-| Daily budget (global) | $5 | Nothing new starts until midnight local time or the cap is raised. |
+| Daily budget (global) | $5 | Nothing new starts until midnight local time (the worker's clock) or the cap is raised. Today's spend is the cost of runs that ended today plus the budgets of runs still going; a run started late in the day gets only what is left, and ends `budget_exceeded` if it needs more. |
 | Max turns | From frontmatter | Run stops with `failed` and a summary. |
 | Wall-clock timeout | From frontmatter (e.g. 20 min) | Run stops with `timed_out`. |
 | Bounce-back limit | 3 per ticket | Ticket to Blocked with Duckworth's summary. |
@@ -813,27 +815,19 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 
 | Item | Spec | Notes |
 | --- | --- | --- |
-| GitHub Actions CI for the Kanbot repo | §15 | The repo is on GitHub (`MatthewOsorio/kanbot`). It should run `pnpm typecheck lint test test:e2e`. |
-| `settings` table; top bar spend vs cap and Pause all | §11, §13, FR-62, FR-63 | Pause all is the table's first user. |
-| Banner and automatic resume after an Anthropic outage; auth/billing errors pausing all agents | §8 | Need Pause all and `settings`. Until then such runs end `interrupted` or `failed` with Retry. |
 | Project settings in the database (`commands`, `test_globs`, `hotspots`, `settings`) and a Settings page; per-project bounce limit and concurrency | §11, FR-2, FR-23, §14 | `.kanbot/project.yml` on the default branch until then; `BOUNCE_LIMIT` and `LIMITS` are constants. Command detection comes with onboarding (M5); in M4 the owner fills them in, seeded from `project.yml`. |
 | Ticket links: `ticket_links`, "blocked by", Plan B's `relatedTickets`, Nancy's proposed `blocks` links, overlap shown on cards | §9, FR-14 | Needs a confirm-links UI. The overlap check uses touch sets and hotspots only. |
-| `columns.wip_limit`, `auto_advance`; WIP display and enforcement | FR-20, FR-22 | The only approval gate so far (QA → Ship) stays a gate; the concurrency limits already cap parallel runs. WIP limits matter most with auto-pull (M6). |
 | Agent files for Rubber Duckworth and Archie | §4, §17 | Until a file ships, its column is a gate. Locally a ticket reaches Done by a manual move with no PR; Archie runs on it as on an unmerged ticket (§3 Done row, minus closing the PR). |
-| `needs_input` vs Rubber Duckworth: a `needs_input` run stays `awaiting_input` (active), and the partial unique index allows one active run per ticket, so Duckworth can't run on Blocked tickets as specced | §3, §8, §11 | Decide when Duckworth and resume are built, e.g. exclude `awaiting_input` from the index or run Duckworth outside `runs`. |
+| Resume with answer: `awaiting_input` out of the active states and the one-active-run index; `POST /api/runs/:id/resume` starts a new run in the blocked run's column with its session and the answer | §8 Resume, §11, UC-7, UC-13 | Decided 2026-11-03 (§8 Resume). Until then a `needs_input` run stays active and Duckworth can't run beside it. |
+| Stall detection: no progress, recurring block | §8 | Max turns, budget and the bounce limit already bound every run; the recurring block is Duckworth's. Marked with a `shortcut:` comment. |
 | Resuming the agent's session on a bounce-back | FR-35 | Bounced runs start cold with the review or test report in context. `resume: sessionId` is verified in the SDK; sessions are files on the worker's machine. |
-| Running cost while a run works | UC-8, §13 | The SDK reports cost when a run ends; the drawer shows elapsed time live and cost at the end. Cost tracking can sum per-turn usage. Marked with a `shortcut:` comment. |
-| Playwright-based QA (browser exploration, Playwright MCP, per-ticket `PORT`, headless Chromium in the worker) | §4 "How QA runs" | Testy runs the suite and writes tests in the project's framework; the browser steps arrive with the Playwright plugin. |
-| TypeScript LSP, Context7, Security Guidance and Playwright plugins | §8 | Each adds context to every turn, so each is added once the golden-ticket eval can compare it on and off. |
 | Only the agent's own plugins in its session | §8 | Skills are already limited to our plugins' skills. Claude Code's bundled plugins (`cc-plugin-agents-md`, `cc-plugin-telemetry`, `cc-plugin-plugin-authoring`) still load with `settingSources: []`; find the SDK switch for them. |
-| Stall detection: no progress, repeated feedback, recurring block | §8 | Max turns, budget and the bounce limit already bound every run; repeated feedback needs fuzzy matching; the recurring block is Duckworth's. Marked with a `shortcut:` comment. |
 | Install when the lockfile changes (not only when the worktree is created) | §8 step 2 | Agents can run `{install}` themselves. |
 | Per-command timeout for agents' shell commands | §8 failure handling | Found in the 2026-11-03 docs cleanup: only the worker's own install has the 10-minute timeout; an agent's command is bounded by the run's timeout. |
 | Worktree removal when a ticket reaches Done | FR-49 | Archie. Deleting a ticket already removes its worktree. |
 | `blockWritesOutsideWorkingDirectories` | §7, §14 | Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
 | The top bar's agent notice clears when the run ends | §13 | It stays up after the run ends, until the next move. Cosmetic. Marked with a `shortcut:` comment. |
 | A golden ticket that reliably makes Nancy request changes, so the eval covers a real bounce | §8 | With real agents, `review.json`'s bad hint was ignored by Sir Codes-a-Lot, so Nancy approved. Bounces are covered by replay tests; real bounces so far depended on run order. Rewrite the ticket and re-save the baseline. |
-| Dark theme | §13 | shadcn dark tokens exist in `globals.css` but nothing switches to them yet. |
 
 **M5**
 
@@ -861,6 +855,12 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Agents and Costs pages | §13 | |
 | Agent config hash on runs | FR-37 | With the Agents page. |
 | Side-by-side diff view | §13 | The Diff tab is unified. |
+| `columns.wip_limit`, `auto_advance`; WIP display and enforcement | FR-20, FR-22 | The only approval gate so far (QA → Ship) stays a gate; the concurrency limits already cap parallel runs. WIP limits matter most with auto-pull (M6). Moved from M4 on 2026-11-03. |
+| Running cost while a run works | UC-8, §13 | The SDK reports cost only when a run ends (per-turn messages carry tokens, not dollars), so a live figure needs Kanbot's own price table. The drawer shows elapsed time live and cost at the end; today's spend counts a running run's budget. Moved from M4 on 2026-11-03. Marked with a `shortcut:` comment. |
+| Playwright-based QA (browser exploration, Playwright MCP, per-ticket `PORT`, headless Chromium in the worker) | §4 "How QA runs" | Testy runs the suite and writes tests in the project's framework; the browser steps arrive with the Playwright plugin. Moved from M4 on 2026-11-03: each plugin needs its own eval spend. |
+| TypeScript LSP, Context7, Security Guidance and Playwright plugins | §8 | Each adds context to every turn, so each is added once the golden-ticket eval can compare it on and off. Moved from M4 on 2026-11-03. |
+| Stall detection: repeated feedback (same issue raised on a second bounce) | §8 | Needs fuzzy matching; the bounce limit already stops the loop. Moved from M4 on 2026-11-03. |
+| Dark theme | §13 | shadcn dark tokens exist in `globals.css` but nothing switches to them yet. Moved from M4 on 2026-11-03. |
 
 Known shortcuts are also marked in code with `shortcut:` comments (list them with `/ponytail-debt` or `git grep -n "shortcut:"`).
 
