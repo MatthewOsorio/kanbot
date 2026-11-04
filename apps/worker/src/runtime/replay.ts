@@ -1,11 +1,18 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
-import { runEventTypes } from "@kanbot/shared";
-import type { AgentRuntime, RuntimeResult } from "./types";
+import { runEventTypes, uuidv7 } from "@kanbot/shared";
+import { git } from "@kanbot/shared/repo";
+import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./types";
 
-/** A scripted run (requirements §8 "Testing without real agents"), stored as fixtures/runs/<agent>/<scenario>.json. */
+/**
+ * A scripted run (requirements §8 "Testing without real agents"), stored as
+ * fixtures/runs/<agent>/<scenario>.<n>.json for the agent's nth run on the ticket, else <scenario>.json.
+ * Recorded runs (KANBOT_RECORD=1) are written in this same format.
+ */
 const script = z.object({
   events: z
     .array(
@@ -34,26 +41,41 @@ const script = z.object({
   costUsd: z.number().default(0),
   inputTokens: z.number().int().default(0),
   outputTokens: z.number().int().default(0),
+  /** A git patch the replay applies and commits in the run's cwd, so diffs and checks are real. */
+  patch: z.string().optional(),
+  commitMessage: z.string().default("Replay commit"),
 });
 
 export const fixturesDir = () => resolve(process.env.KANBOT_FIXTURES_DIR ?? "../../fixtures/runs");
 
+// Replay commits need an identity even where git has none configured (CI).
+const IDENTITY = ["-c", "user.name=Kanbot replay", "-c", "user.email=replay@kanbot.local"];
+
 export class ReplayRuntime implements AgentRuntime {
   async run(
-    { agent, scenario, signal }: Parameters<AgentRuntime["run"]>[0],
+    { agent, scenario, attempt, cwd, signal, prompt }: Parameters<AgentRuntime["run"]>[0],
     emit: Parameters<AgentRuntime["run"]>[1],
   ): Promise<RuntimeResult> {
-    const file = resolve(fixturesDir(), agent.slug, `${scenario}.json`);
+    // An agent with no script for this scenario plays its default (e.g. golden tickets not recorded yet).
+    const file = [`${scenario}.${attempt}`, scenario, "default"]
+      .map((name) => resolve(fixturesDir(), agent.slug, `${name}.json`))
+      .find((f) => existsSync(f));
+    if (!file) throw new Error(`No replay script for ${agent.slug}/${scenario} and no default`);
     const s = script.parse(JSON.parse(await readFile(file, "utf8")));
     await emit({
       type: "system",
       payload: { subtype: "init", model: agent.model, replay: scenario },
     });
-    for (let attempt = 1; attempt <= s.apiRetries; attempt++) {
+    for (let i = 1; i <= s.apiRetries; i++) {
       signal.throwIfAborted();
       await emit({
         type: "system",
-        payload: { subtype: "api_retry", attempt, max_retries: s.apiRetries, error: "rate_limit" },
+        payload: {
+          subtype: "api_retry",
+          attempt: i,
+          max_retries: s.apiRetries,
+          error: "rate_limit",
+        },
       });
     }
     for (const e of s.events) {
@@ -62,8 +84,18 @@ export class ReplayRuntime implements AgentRuntime {
       await emit({ type: e.type, payload: e.payload });
     }
     signal.throwIfAborted();
+    if (s.patch) {
+      const tmp = join(tmpdir(), `kanbot-replay-${uuidv7()}.patch`);
+      await writeFile(tmp, s.patch);
+      try {
+        await git(cwd, ["apply", "--index", tmp]);
+        await git(cwd, [...IDENTITY, "commit", "-m", s.commitMessage]);
+      } finally {
+        await rm(tmp, { force: true });
+      }
+    }
     return {
-      report: s.report,
+      report: withCriterionIds(s.report, prompt),
       stop: s.stop,
       apiError: s.apiError,
       error: s.error,
@@ -73,4 +105,63 @@ export class ReplayRuntime implements AgentRuntime {
       outputTokens: s.outputTokens,
     };
   }
+}
+
+/** Criterion ids in the run's context, in order (`id="…"` in <acceptance_criteria>). */
+const criterionIds = (prompt: string) =>
+  [...prompt.matchAll(/\(id="([0-9a-f-]{36})"/g)].map((m) => m[1]!);
+
+/**
+ * Scripts can't know the database's ids, so they name criteria `$criterion1`, `$criterion2`… by
+ * position. Replay swaps in this run's ids; recording swaps them back out.
+ */
+function withCriterionIds(report: unknown, prompt: string): unknown {
+  const ids = criterionIds(prompt);
+  return JSON.parse(
+    JSON.stringify(report).replace(/\$criterion(\d+)/g, (m, n: string) => ids[Number(n) - 1] ?? m),
+  );
+}
+
+/**
+ * Saves a real run as a replay script (requirements §8 recorded runs, KANBOT_RECORD=1): its events,
+ * report and usage, plus what it committed as one patch. Secrets are redacted like stored events.
+ */
+export async function record(
+  slug: string,
+  scenario: string,
+  attempt: number,
+  events: RuntimeEvent[],
+  result: RuntimeResult,
+  wt: { path: string; base: string } | null,
+  prompt: string,
+  cwd: string,
+) {
+  const commits = wt ? (await git(wt.path, ["rev-list", `${wt.base}..HEAD`])).trim() : "";
+  const out = {
+    events,
+    stop: result.stop,
+    apiError: result.apiError,
+    error: result.error,
+    report: result.report,
+    costUsd: result.costUsd,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    ...(wt &&
+      commits && {
+        patch: await git(wt.path, ["diff", "--binary", wt.base, "HEAD"]),
+        commitMessage: (await git(wt.path, ["log", "-1", "--format=%B"])).trim(),
+      }),
+  };
+  // The run's folder (a temp path with the host's user name) becomes <cwd>; scripts are committed.
+  let text = JSON.stringify(out, null, 2)
+    .replaceAll(JSON.stringify(cwd).slice(1, -1), "<cwd>")
+    .replaceAll(JSON.stringify(cwd.replaceAll("\\", "/")).slice(1, -1), "<cwd>");
+  criterionIds(prompt).forEach((id, i) => (text = text.replaceAll(id, `$criterion${i + 1}`)));
+  for (const secret of [process.env.ANTHROPIC_API_KEY].filter(
+    (s): s is string => !!s && s.length >= 8,
+  ))
+    text = text.replaceAll(secret, "[redacted]");
+  const file = resolve(fixturesDir(), slug, `${scenario}.${attempt}.json`);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, `${text}\n`);
 }

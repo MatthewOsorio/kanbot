@@ -1,0 +1,7 @@
+{
+  "events": [
+    { "type": "assistant", "payload": { "text": "Starting." } },
+    { "type": "assistant", "payload": { "text": "Still working." }, "delayMs": 5000 }
+  ],
+  "report": { "verdict": "success", "summary": "Never reached: the test cancels first." }
+}

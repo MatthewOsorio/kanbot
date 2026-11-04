@@ -11,3 +11,6 @@ export const DEFAULT_COLUMNS = [
   { slug: "done", name: "Done", agentSlug: "archie-the-archivist" },
   { slug: "blocked", name: "Blocked", agentSlug: "rubber-duckworth" },
 ] as const satisfies readonly { slug: string; name: string; agentSlug: string | null }[];
+
+/** Columns where a ticket is "in flight": the §9 overlap check and Nancy's cross-ticket review. */
+export const IN_FLIGHT_COLUMNS = ["in_progress", "code_review", "qa", "ship", "pr_review"];

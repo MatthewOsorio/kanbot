@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { request } from "node:http";
 
 const column = (p: Page, name: string) => p.getByRole("region", { name, exact: true });
 
@@ -65,4 +66,23 @@ test("create and move a ticket; a second tab updates live", async ({ browser }) 
   await b.mouse.move(to.x + to.width / 2, to.y + 60, { steps: 10 });
   await b.mouse.up();
   await expect(column(a, "Ready").getByText("Live ticket")).toBeVisible();
+});
+
+// No auth until M4: a DNS-rebound Host or a cross-site POST must not reach the API (proxy.ts).
+test("refuses foreign hosts and cross-site writes", async ({ baseURL }) => {
+  const send = (method: string, headers: Record<string, string>) =>
+    new Promise<number>((resolve, reject) => {
+      const req = request(new URL("/api/projects", baseURL), { method, headers }, (res) => {
+        res.resume();
+        resolve(res.statusCode!);
+      });
+      req.on("error", reject);
+      req.end(method === "POST" ? '{"name":"x","keyPrefix":"XX"}' : undefined);
+    });
+  const host = new URL(baseURL!).host;
+  expect(await send("GET", { host })).toBe(200);
+  expect(await send("GET", { host: "evil.test" })).toBe(403);
+  expect(
+    await send("POST", { host, origin: "http://evil.test", "content-type": "text/plain" }),
+  ).toBe(403);
 });

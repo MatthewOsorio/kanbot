@@ -1,0 +1,5 @@
+{
+  "title": "Todos can have a due date",
+  "type": "feature",
+  "description": "Let a todo carry an optional due date.\n\n- `POST /api/todos` accepts an optional `dueDate` as `YYYY-MM-DD`; anything else is a 400.\n- Todos returned by the API include `dueDate` (or `null`).\n- The page shows the due date next to the title when there is one."
+}

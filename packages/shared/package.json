@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./db": "./src/db/index.ts",
     "./db/testing": "./src/db/testing.ts",
-    "./agents": "./src/agents.ts"
+    "./agents": "./src/agents.ts",
+    "./repo": "./src/repo.ts"
   },
   "scripts": {
     "typecheck": "tsc -p . --noEmit",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadAgent, parseAgentFile } from "./agents";
+import { DEFAULT_COLUMNS } from "./workflow";
 
 const file = (front: string, body = "You plan.") => `---\n${front}\n---\n${body}\n`;
 const valid = `slug: plan-b
@@ -32,8 +33,16 @@ describe("parseAgentFile", () => {
 });
 
 describe("loadAgent", () => {
-  it("loads the shipped Plan B file and returns null for agents not shipped yet", () => {
-    expect(loadAgent("plan-b")?.column).toBe("planning");
-    expect(loadAgent("sir-codes-a-lot")).toBeNull();
+  it("loads every shipped agent file, each serving its default column", () => {
+    const shipped = ["plan-b", "sir-codes-a-lot", "nitpick-nancy", "testy-mctestface"];
+    for (const slug of shipped) {
+      const a = loadAgent(slug);
+      expect(DEFAULT_COLUMNS.find((c) => c.agentSlug === slug)?.slug).toBe(a?.column);
+    }
+    expect(loadAgent("sir-codes-a-lot")?.editScope).toBe("worktree");
+    expect(loadAgent("nitpick-nancy")?.plugins).toEqual([{ name: "ponytail", level: "off" }]);
+  });
+  it("returns null for agents not shipped yet", () => {
+    expect(loadAgent("captain-ship-it")).toBeNull();
   });
 });

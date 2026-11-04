@@ -17,7 +17,7 @@ import { TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
-import { claimNext, executeRun, recoverInterrupted } from "../src/run";
+import { afterPrevious, claimNext, executeRun, recoverInterrupted } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
 
 const db = createDb(TEST_DATABASE_URL);
@@ -138,10 +138,17 @@ describe("Plan B run (M2 done criterion)", () => {
     const first = await claimAndRun();
     await db.insert(comments).values({ ticketId: ticket.id, bodyMd: "FYI: staging is down" });
     const t = { ...ticket, key: "W-1" };
-    const plain = await buildContext(db, t, { id: first.id, requestMd: null }, null);
+    const noRepo = { cwd: null, defaultBranch: "main", hotspots: [] };
+    const plan = { columnSlug: "planning" };
+    const plain = await buildContext(db, t, { ...plan, id: first.id, requestMd: null }, noRepo);
     expect(plain).not.toContain("<revision_request>");
     expect(plain).toContain("FYI: staging is down");
-    const revise = await buildContext(db, t, { id: uuidv7(), requestMd: "Use SQLite" }, null);
+    const revise = await buildContext(
+      db,
+      t,
+      { ...plan, id: uuidv7(), requestMd: "Use SQLite" },
+      noRepo,
+    );
     expect(revise).toMatch(/^Revise this ticket's plan/);
     expect(revise).toContain("<revision_request>\nUse SQLite\n</revision_request>");
   });
@@ -231,5 +238,21 @@ describe("claiming", () => {
       .from(runs)
       .where(and(inArray(runs.id, [first!.id, next!.id])));
     expect(states.map((s) => s.state)).toEqual(["succeeded", "succeeded"]);
+  });
+});
+
+describe("afterPrevious", () => {
+  it("starts a ticket's next run only once its previous one has stopped, even if that one threw", async () => {
+    const order: string[] = [];
+    const stopping = afterPrevious("t1", async () => {
+      await new Promise((r) => setTimeout(r, 50)); // a cancelled agent still shutting down
+      order.push("old stopped");
+      throw new Error("aborted");
+    });
+    const next = afterPrevious("t1", async () => void order.push("next started"));
+    const other = afterPrevious("t2", async () => void order.push("other ticket started"));
+    await Promise.allSettled([stopping, next, other]);
+    expect(order).toEqual(["other ticket started", "old stopped", "next started"]);
+    await expect(stopping).rejects.toThrow("aborted"); // the caller still sees the failure
   });
 });

@@ -63,6 +63,7 @@ export async function getBoard(projectId: string) {
         columnId: tickets.columnId,
         position: tickets.position,
         statusFlag: tickets.statusFlag,
+        bounceCount: tickets.bounceCount,
       })
       .from(tickets)
       .where(eq(tickets.projectId, projectId))

@@ -1,0 +1,25 @@
+{
+  "events": [
+    {
+      "type": "tool_call",
+      "payload": { "id": "t1", "name": "Bash", "input": { "command": "node --test" } }
+    },
+    {
+      "type": "tool_call",
+      "payload": { "id": "t2", "name": "Edit", "input": { "file_path": "test/a.test.ts" } }
+    },
+    {
+      "type": "tool_call",
+      "payload": { "id": "t3", "name": "Bash", "input": { "command": "node --test" } }
+    },
+    {
+      "type": "tool_call",
+      "payload": { "id": "t4", "name": "Edit", "input": { "file_path": "test/a.test.ts" } }
+    },
+    {
+      "type": "tool_call",
+      "payload": { "id": "t5", "name": "Bash", "input": { "command": "node --test" } }
+    }
+  ],
+  "report": { "verdict": "success", "summary": "Fixed my own test twice, then green." }
+}

@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Suite is green."
+      }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "All pass."
+  },
+  "costUsd": 0.05,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

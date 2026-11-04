@@ -1,0 +1,24 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Still not right."
+      }
+    }
+  ],
+  "report": {
+    "verdict": "changes_requested",
+    "summary": "Still not right.",
+    "comments": [
+      {
+        "file": "src/todos.ts",
+        "line": 1,
+        "body": "Still not right."
+      }
+    ]
+  },
+  "costUsd": 0.05,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

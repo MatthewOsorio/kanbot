@@ -1,0 +1,146 @@
+{
+  "events": [
+    {
+      "type": "system",
+      "payload": {
+        "subtype": "init",
+        "model": "claude-sonnet-5-5",
+        "tools": ["Bash", "Glob", "Grep", "Read", "Skill", "mcp__kanbot__report_result"],
+        "plugins": [
+          "ponytail",
+          "cc-plugin-agents-md",
+          "cc-plugin-telemetry",
+          "cc-plugin-plugin-authoring"
+        ],
+        "skills": [
+          "deep-research",
+          "ponytail:ponytail",
+          "ponytail:ponytail-review",
+          "design",
+          "design-sync",
+          "dataviz",
+          "update-config",
+          "verify",
+          "debug",
+          "code-review",
+          "simplify",
+          "batch",
+          "fewer-permission-prompts",
+          "doctor",
+          "loop",
+          "claude-api",
+          "workflow-authoring",
+          "run",
+          "run-skill-generator",
+          "plugin-authoring"
+        ]
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01Q3vjhc1VcWnDPawtq6UeiG",
+        "name": "Bash",
+        "input": {
+          "command": "git diff main...HEAD -- src test/server.test.ts"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01Q3vjhc1VcWnDPawtq6UeiG",
+        "isError": false,
+        "content": "diff --git a/src/server.ts b/src/server.ts\nindex e0fbc6b..8fcce29 100644\n--- a/src/server.ts\n+++ b/src/server.ts\n@@ -36,6 +36,15 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {\n     return send(res, 201, store.add(title));\n   }\n   if (req.method === \"PATCH\" && id) {\n+    const body = await readJson(req);\n+    // Copy only title: assigning the whole body would let clients overwrite id/done or add fields.\n+    if (body && typeof body === \"object\" && \"title\" in body) {\n+      const { title } = body;\n+      if (typeof title !== \"string\" || !title.trim())\n+        return send(res, 400, { error: \"title is required\" });\n+      const todo = store.rename(id, title);\n+      return todo ? send(res, 200, todo) : send(res, 404, { error: \"not found\" });\n+    }\n     const todo = store.toggle(id);\n     return todo ? send(res, 200, todo) : send(res, 404, { error: \"not found\" });\n   }\ndiff --git a/src/todos.ts b/src/todos.ts\nindex f4d7666..0836f82 100644\n--- a/src/todos.ts\n+++ b/src/todos.ts\n@@ -22,6 +22,14 @@ export class TodoStore {\n     return todo;\n   }\n \n+  rename(id: number, title: string): Todo | undefined {\n+    const trimmed = title.trim();\n+    if (!trimmed) throw new Error(\"Title is required\");\n+    const todo = this.todos.find((t) => t.id === id);\n+    if (todo) todo.title = trimmed;\n+    return todo;\n+  }\n+\n   remove(id: number): boolean {\n     const index = this.todos.findIndex((t) => t.id === id);\n     this.todos.splice(index, 1);\ndiff --git a/test/server.test.ts b/test/server.test.ts\nindex 8ffab10..bbd7caf 100644\n--- a/test/server.test.ts\n+++ b/test/server.test.ts\n@@ -22,3 +22,51 @@ test(\"POST /api/todos without a title is a 400\", async () => {\n   const res = await fetch(`${base}/api/todos`, { method: \"POST\", body: \"{}\" });\n   assert.equal(res.status, 400);\n });\n+\n+async function create(title = \"Original\") {\n+  const res = await fetch(`${base}/api/todos`, { method: \"POST\", body: JSON.stringify({ title }) });\n+  return res.json();\n+}\n+\n+const patch = (id: number, body?: string) =>\n+  fetch(`${base}/api/todos/${id}`, { method: \"PATCH\", body });\n+\n+test(\"PATCH with a title renames and leaves done alone\", async () => {\n+  const todo = await create();\n+  const res = await patch(todo.id, JSON.stringify({ title: \"  New name \" }));\n+  assert.equal(res.status, 200);\n+  assert.deepEqual(await res.json(), { ...todo, title: \"New name\" });\n+});\n+\n+test(\"PATCH with an empty body or {} toggles done\", async () => {\n+  const todo = await create();\n+  const res = await patch(todo.id);\n+  assert.equal(res.status, 200);\n+  assert.equal((await res.json()).done, true);\n+  assert.equal((await (await patch(todo.id, \"{}\")).json()).done, false);\n+});\n+\n+test(\"PATCH with a bad title is a 400 and changes nothing\", async () => {\n+  const todo = await create();\n+  for (const title of [\"\", \"  \", 5, null]) {\n+    const res = await patch(todo.id, JSON.stringify({ title }));\n+    assert.equal(res.status, 400);\n+    assert.deepEqual(await res.json(), { error: \"title is required\" });\n+  }\n+  const todos = await (await fetch(`${base}/api/todos`)).json();\n+  assert.deepEqual(todos.find((t: { id: number }) => t.id === todo.id), todo);\n+});\n+\n+test(\"PATCH ignores fields other than title\", async () => {\n+  const todo = await create();\n+  const res = await patch(todo.id, JSON.stringify({ title: \"x\", id: 999, done: true, foo: 1 }));\n+  assert.equal(res.status, 200);\n+  assert.deepEqual(await res.json(), { ...todo, title: \"x\" });\n+  const todos = await (await fetch(`${base}/api/todos`)).json();\n+  assert.deepEqual(todos.find((t: { id: number }) => t.id === todo.id), { ...todo, title: \"x\" });\n+});\n+\n+test(\"PATCH with a title on an unknown id is a 404\", async () => {\n+  const res = await patch(99999, JSON.stringify({ title: \"x\" }));\n+  assert.equal(res.status, 404);\n+});"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "toolu_01UScym8hgTU9Cbt6zgo8TtY",
+        "name": "mcp__kanbot__report_result",
+        "input": {
+          "verdict": "success",
+          "summary": "Rename via PATCH is implemented correctly: only title is copied (no mass assignment), blank or non-string titles give 400, unknown id gives 404, and an empty body still toggles. Tests cover every acceptance criterion. No blocking issues.",
+          "artifacts": [
+            {
+              "kind": "review",
+              "title": "Review: Rename a todo",
+              "markdown": "Ready for QA. The diff matches the plan and all acceptance criteria. Mass assignment is avoided and tests ship with the change.\n\n1. (minor, non-blocking) The `body && typeof body === \"object\"` guard is slightly redundant given the `readJson` type, but it protects against a raw `null` body, so keep it.\n2. Cross-ticket: EV0XEBCZ-2 adds `dueDate` to Todo. The tests here use `{ ...todo, title }`, so they survive. The adjacent edits in todos.ts, server.ts and the test files are in different regions. EV0XEBCZ-1 edits `remove`, just below `rename`, and should merge trivially."
+            }
+          ],
+          "crossTicketRisks": [
+            {
+              "ticket": "EV0XEBCZ-1",
+              "kind": "file-overlap",
+              "severity": "warning",
+              "description": "Both edit src/todos.ts and test/todos.test.ts in adjacent hunks (rename vs remove); trivial merge."
+            },
+            {
+              "ticket": "EV0XEBCZ-2",
+              "kind": "file-overlap",
+              "severity": "warning",
+              "description": "Both edit src/todos.ts, src/server.ts and the test files in different regions. Server tests here use spread, so they tolerate dueDate. The rename test in test/todos.test.ts may deepEqual on {id,title,done} and would need dueDate: null after merge."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "toolu_01UScym8hgTU9Cbt6zgo8TtY",
+        "isError": false,
+        "content": "[{\"type\":\"text\",\"text\":\"Recorded. End your turn now.\"}]"
+      }
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Review recorded: success, with no blocking issues."
+      }
+    },
+    {
+      "type": "system",
+      "payload": {
+        "subtype": "result",
+        "result": "success",
+        "turns": 3,
+        "costUsd": 0.044741600000000006,
+        "durationMs": 8863
+      }
+    }
+  ],
+  "stop": "completed",
+  "report": {
+    "verdict": "success",
+    "summary": "Rename via PATCH is implemented correctly: only title is copied (no mass assignment), blank or non-string titles give 400, unknown id gives 404, and an empty body still toggles. Tests cover every acceptance criterion. No blocking issues.",
+    "artifacts": [
+      {
+        "kind": "review",
+        "title": "Review: Rename a todo",
+        "markdown": "Ready for QA. The diff matches the plan and all acceptance criteria. Mass assignment is avoided and tests ship with the change.\n\n1. (minor, non-blocking) The `body && typeof body === \"object\"` guard is slightly redundant given the `readJson` type, but it protects against a raw `null` body, so keep it.\n2. Cross-ticket: EV0XEBCZ-2 adds `dueDate` to Todo. The tests here use `{ ...todo, title }`, so they survive. The adjacent edits in todos.ts, server.ts and the test files are in different regions. EV0XEBCZ-1 edits `remove`, just below `rename`, and should merge trivially."
+      }
+    ],
+    "questions": [],
+    "comments": [],
+    "criteriaResults": [],
+    "crossTicketRisks": [
+      {
+        "ticket": "EV0XEBCZ-1",
+        "kind": "file-overlap",
+        "severity": "warning",
+        "description": "Both edit src/todos.ts and test/todos.test.ts in adjacent hunks (rename vs remove); trivial merge."
+      },
+      {
+        "ticket": "EV0XEBCZ-2",
+        "kind": "file-overlap",
+        "severity": "warning",
+        "description": "Both edit src/todos.ts, src/server.ts and the test files in different regions. Server tests here use spread, so they tolerate dueDate. The rename test in test/todos.test.ts may deepEqual on {id,title,done} and would need dueDate: null after merge."
+      }
+    ]
+  },
+  "costUsd": 0.044741600000000006,
+  "inputTokens": 65092,
+  "outputTokens": 794
+}

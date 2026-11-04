@@ -12,6 +12,7 @@ export const activityActions = [
   "run_finished",
 ] as const;
 export const criterionSources = ["user", "agent"] as const;
+export const authorKinds = ["user", "agent"] as const;
 export const statusFlags = [
   "none",
   "running",
@@ -64,7 +65,18 @@ export const createProjectBody = z.object({
     .string()
     .trim()
     .regex(/^[A-Z][A-Z0-9]{1,9}$/, "2-10 uppercase letters or digits, starting with a letter"),
-  defaultBranch: z.string().trim().min(1).max(200).default("main"),
+  // Passed to git as an argument: a leading "-" would be read as an option (e.g. --output=<file>).
+  // The rest is the core of git check-ref-format.
+  defaultBranch: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .regex(
+      /^(?![-/])(?!.*(\.\.|@\{|\/\/))[^\s\p{Cc}~^:?*[\\]+(?<![/.])$/u,
+      "Not a valid branch name",
+    )
+    .default("main"),
   // Absolute path to a local checkout; Plan B reads it (read-only). Optional until onboarding clones repos (M4).
   repoPath: z.string().trim().min(1).max(1_000).optional(),
 });
@@ -96,6 +108,8 @@ export const moveTicketBody = z.object({
   position: z.string().min(1).max(200),
   // Required to move a ticket whose run is active (FR-24): the run is cancelled first.
   confirmCancel: z.boolean().optional(),
+  // Required to start a ticket in In Progress that overlaps an in-flight ticket (§9 "Start anyway").
+  startAnyway: z.boolean().optional(),
 });
 
 export const createCommentBody = z.object({ bodyMd: z.string().trim().min(1).max(20_000) });

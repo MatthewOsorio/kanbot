@@ -1,0 +1,5 @@
+{
+  "title": "Deleting an unknown todo removes the last one",
+  "type": "bug",
+  "description": "`DELETE /api/todos/999` (an id that doesn't exist) returns 404, but the last todo in the list is gone afterwards."
+}

@@ -1,6 +1,8 @@
+import { cp } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
+import { git } from "../repo";
 import { createDb } from "./index";
 
 export const TEST_DATABASE_URL =
@@ -23,4 +25,21 @@ export async function prepareTestDatabase(url = TEST_DATABASE_URL) {
     migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
   });
   await db.$client.end();
+}
+
+/**
+ * Copies fixtures/sample-repo into `dir` (which must not exist) as a fresh git repo with one commit on
+ * `main`. Used by worker tests, e2e and `pnpm eval:agents`.
+ */
+export async function prepareSampleRepo(dir: string) {
+  await cp(fileURLToPath(new URL("../../../../fixtures/sample-repo", import.meta.url)), dir, {
+    recursive: true,
+  });
+  await git(dir, ["init", "-q", "-b", "main"]);
+  await git(dir, ["config", "user.name", "Sample Owner"]);
+  await git(dir, ["config", "user.email", "owner@sample.local"]);
+  await git(dir, ["config", "core.autocrlf", "false"]);
+  await git(dir, ["add", "-A"]);
+  await git(dir, ["commit", "-q", "-m", "Initial sample app"]);
+  return dir;
 }

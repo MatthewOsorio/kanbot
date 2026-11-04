@@ -5,7 +5,10 @@ import {
   type HookCallback,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { existsSync, readdirSync } from "node:fs";
+import { basename, join } from "node:path";
 import { verdictShape } from "@kanbot/shared";
+import { checkToolCall } from "./fence";
 import type { AgentRuntime, ApiError, RuntimeEvent, RuntimeResult } from "./types";
 
 const REPORT_TOOL = "mcp__kanbot__report_result";
@@ -23,7 +26,16 @@ const API_ERRORS: readonly ApiError[] = [
 /** Claude Agent SDK adapter (requirements §8 step 4). Checked against @anthropic-ai/claude-agent-sdk 0.3.304. */
 export class SdkRuntime implements AgentRuntime {
   async run(
-    { agent, prompt, cwd, signal }: Parameters<AgentRuntime["run"]>[0],
+    {
+      agent,
+      tools,
+      canEdit,
+      plugins,
+      prompt,
+      cwd,
+      signal,
+      env: extraEnv,
+    }: Parameters<AgentRuntime["run"]>[0],
     emit: (e: RuntimeEvent) => Promise<void>,
   ): Promise<RuntimeResult> {
     let report: unknown = null;
@@ -43,17 +55,19 @@ export class SdkRuntime implements AgentRuntime {
       ],
     });
 
-    // Every tool call goes through this hook, so the frontmatter allowlist is the only way in (§14).
-    // shortcut: exact tool-name match only; M3 adds `Bash(cmd:*)` patterns when agents get a shell.
-    const allowed = new Set([...agent.tools, REPORT_TOOL]);
+    // Every tool call goes through this hook first (§14): tool allowlist, cwd fence, Bash allowlist,
+    // edit scope. The SDK auto-runs read-only shell commands (cat, ls, find…) in every permission
+    // mode, so the hook, not the SDK's rules, is the fence.
+    const fence = { cwd, tools: [...tools, REPORT_TOOL], canEdit };
     const gate: HookCallback = async (input) => {
       const name = "tool_name" in input ? input.tool_name : "";
-      const ok = allowed.has(name);
+      const args = ("tool_input" in input ? input.tool_input : {}) as Record<string, unknown>;
+      const reason = checkToolCall(name, args ?? {}, fence);
       return {
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
-          permissionDecision: ok ? "allow" : "deny",
-          permissionDecisionReason: ok ? undefined : `${name} is not in this agent's tools`,
+          permissionDecision: reason ? "deny" : "allow",
+          permissionDecisionReason: reason ?? undefined,
         },
       };
     };
@@ -61,8 +75,10 @@ export class SdkRuntime implements AgentRuntime {
     const abortController = new AbortController();
     const onAbort = () => abortController.abort(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
-    // The agent never needs our database; DATABASE_URL stays out of its environment.
-    const { DATABASE_URL: _db, ...env } = process.env;
+    // The agent never needs our database; DATABASE_URL stays out of its environment. The SDK itself
+    // needs the API key, so the subprocesses it starts (Bash, hooks) get credentials scrubbed (§7, §14).
+    const { DATABASE_URL: _db, ...base } = process.env;
+    const env = { ...base, ...extraEnv, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" };
 
     const result: RuntimeResult = {
       report: null,
@@ -80,9 +96,19 @@ export class SdkRuntime implements AgentRuntime {
           systemPrompt: agent.prompt,
           cwd,
           // Only the frontmatter's built-in tools exist for the agent; the hook still gates every call.
-          tools: agent.tools.map((t) => t.replace(/\(.*$/, "")),
-          allowedTools: [...allowed],
+          tools: [...new Set(tools.map((t) => t.replace(/\(.*$/, "")))],
+          allowedTools: fence.tools,
+          permissionMode: "dontAsk", // anything neither the hook nor allowedTools approves is denied
           hooks: { PreToolUse: [{ hooks: [gate] }] },
+          // Second layer behind the hook. blockWrites needs Claude Code 2.1.314; this SDK bundles 2.1.304.
+          settings: { permissions: { blockReadsOutsideWorkingDirectories: true } },
+          plugins: plugins.map((path) => ({ type: "local" as const, path })),
+          // Only our plugins' skills; Claude Code's bundled ones (deep-research, design…) showed up in the M3 golden run.
+          skills: plugins.flatMap((p) =>
+            existsSync(join(p, "skills"))
+              ? readdirSync(join(p, "skills")).map((s) => `${basename(p)}:${s}`)
+              : [],
+          ),
           mcpServers: { kanbot },
           maxTurns: agent.maxTurns,
           maxBudgetUsd: agent.maxBudgetUsd,
@@ -131,7 +157,18 @@ export class SdkRuntime implements AgentRuntime {
 /** Maps SDK messages to the run_event types the Live tab shows; everything else is dropped. */
 function toEvents(m: SDKMessage): RuntimeEvent[] {
   if (m.type === "system" && m.subtype === "init")
-    return [{ type: "system", payload: { subtype: "init", model: m.model, tools: m.tools } }];
+    return [
+      {
+        type: "system",
+        payload: {
+          subtype: "init",
+          model: m.model,
+          tools: m.tools,
+          plugins: m.plugins.map((p) => p.name), // proves a plugin actually loaded
+          skills: m.skills,
+        },
+      },
+    ];
   if (m.type === "system" && m.subtype === "api_retry")
     return [
       {

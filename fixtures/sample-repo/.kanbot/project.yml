@@ -1,0 +1,7 @@
+# Kanbot settings for this repo (read from the default branch).
+commands:
+  test: node --test
+testGlobs: ["test/**"]
+hotspots:
+  - name: api
+    paths: ["src/server.ts"]

@@ -2,13 +2,14 @@ import {
   createCommentBody,
   createCriterionBody,
   createTicketBody,
-  activeRunStates,
+  IN_FLIGHT_COLUMNS,
   moveTicketBody,
   patchCriterionBody,
   patchTicketBody,
 } from "@kanbot/shared";
 import {
   acceptanceCriteria,
+  activeRun,
   activity,
   artifacts,
   cancelActiveRun,
@@ -20,7 +21,8 @@ import {
   startColumnAgent,
   tickets,
 } from "@kanbot/shared/db";
-import { and, asc, desc, eq, inArray, max, sql } from "drizzle-orm";
+import { git, loadProjectConfig, overlap } from "@kanbot/shared/repo";
+import { and, asc, desc, eq, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";
@@ -127,16 +129,95 @@ export function patchTicket(id: string, input: In<typeof patchTicketBody>) {
   });
 }
 
-export function deleteTicket(id: string) {
-  return db.transaction(async (tx) => {
+export async function deleteTicket(id: string) {
+  const t = await db.transaction(async (tx) => {
     const projectId = await projectOf(tx, id);
     await cancelActiveRun(tx, projectId, id); // tells the worker to stop the agent before the run row goes
     const [t] = await tx
       .delete(tickets)
       .where(eq(tickets.id, id))
-      .returning({ projectId: tickets.projectId });
+      .returning({ projectId: tickets.projectId, worktreePath: tickets.worktreePath });
     if (!t) throw notFound("Ticket not found");
     await publish(tx, t.projectId, { type: "ticket.deleted", ticketId: id });
+    const [p] = await tx.select().from(projects).where(eq(projects.id, t.projectId));
+    return { ...t, repoPath: p!.repoPath };
+  });
+  // FR-49: the worktree goes with the ticket; the branch stays (it may hold work worth keeping).
+  // shortcut: a cancelled agent may still be stopping inside it; the removal then fails and the folder stays until the M4 nightly cleanup.
+  if (t.worktreePath && t.repoPath)
+    await git(t.repoPath, ["worktree", "remove", "--force", t.worktreePath]).catch((e: Error) =>
+      console.warn(`Could not remove worktree ${t.worktreePath}: ${e.message}`),
+    );
+}
+
+/** The branch diff vs the default branch (FR-41), with the review's line comments for the Diff tab. */
+export async function getDiff(id: string) {
+  const [row] = await db
+    .select({
+      branch: tickets.branchName,
+      repoPath: projects.repoPath,
+      base: projects.defaultBranch,
+    })
+    .from(tickets)
+    .innerJoin(projects, eq(projects.id, tickets.projectId))
+    .where(eq(tickets.id, id));
+  if (!row) throw notFound("Ticket not found");
+  const lineComments = await db
+    .select()
+    .from(comments)
+    .where(and(eq(comments.ticketId, id), isNotNull(comments.file)))
+    .orderBy(asc(comments.createdAt));
+  if (!row.branch || !row.repoPath)
+    return {
+      branch: row.branch,
+      base: row.base,
+      diff: "",
+      truncated: false,
+      comments: lineComments,
+    };
+  const full = await git(row.repoPath, ["diff", `${row.base}...${row.branch}`]);
+  const truncated = full.length > DIFF_CAP;
+  return {
+    branch: row.branch,
+    base: row.base,
+    diff: truncated ? full.slice(0, DIFF_CAP) : full,
+    truncated,
+    comments: lineComments,
+  };
+}
+const DIFF_CAP = 1_000_000;
+
+/**
+ * The §9 overlap check before In Progress: tickets in flight whose touch set or hotspot groups overlap
+ * this one's. Advisory: the owner can start anyway. A ticket with no touch set yet overlaps nothing.
+ */
+async function overlapping(
+  tx: Tx,
+  ticket: { id: string; projectId: string; touchPaths: string[] },
+) {
+  if (!ticket.touchPaths.length) return [];
+  const [p] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
+  const { hotspots } = p!.repoPath
+    ? await loadProjectConfig(p!.repoPath, p!.defaultBranch)
+    : { hotspots: [] };
+  const others = await tx
+    .select({ number: tickets.number, touchPaths: tickets.touchPaths })
+    .from(tickets)
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .where(
+      and(
+        eq(tickets.projectId, ticket.projectId),
+        ne(tickets.id, ticket.id),
+        inArray(columns.slug, IN_FLIGHT_COLUMNS),
+      ),
+    );
+  return others.flatMap((o) => {
+    const { files, hotspots: groups } = overlap(ticket.touchPaths, o.touchPaths, hotspots);
+    const what = [
+      ...(files.length ? [`${files.length} file${files.length > 1 ? "s" : ""}`] : []),
+      ...groups.map((g) => `hotspot ${g}`),
+    ];
+    return what.length ? [`${p!.keyPrefix}-${o.number} (${what.join(", ")})`] : [];
   });
 }
 
@@ -144,11 +225,12 @@ export function deleteTicket(id: string) {
  * Manual move (requirements §3 "Manual moves"): any column to any column. Moving to another column
  * cancels the active run (only with confirmCancel, FR-24), clears the status flag (dropping on Ready
  * is the plan approval) and starts the target column's agent. Reordering within a column changes nothing else.
- * M3 adds the Ship/Done confirmations and bounce-count reset.
+ * Entering In Progress runs the overlap check (409 `overlap` unless startAnyway); entering Planning
+ * resets the bounce count. Ship/Done confirmations arrive with their agents (M4).
  */
 export function moveTicket(
   id: string,
-  { toColumnId, position, confirmCancel }: In<typeof moveTicketBody>,
+  { toColumnId, position, confirmCancel, startAnyway }: In<typeof moveTicketBody>,
 ) {
   try {
     generateKeyBetween(position, null); // throws on a malformed fractional-index key
@@ -157,7 +239,12 @@ export function moveTicket(
   }
   return db.transaction(async (tx) => {
     const [t] = await tx
-      .select({ projectId: tickets.projectId, columnId: tickets.columnId })
+      .select({
+        id: tickets.id,
+        projectId: tickets.projectId,
+        columnId: tickets.columnId,
+        touchPaths: tickets.touchPaths,
+      })
       .from(tickets)
       .where(eq(tickets.id, id))
       .for("update");
@@ -168,11 +255,13 @@ export function moveTicket(
     if (!to) throw new HttpError(400, "invalid_column", "Column is not on this ticket's board");
     const changesColumn = from.id !== to.id;
 
+    if (changesColumn && to.slug === "in_progress" && !startAnyway) {
+      const hits = await overlapping(tx, t);
+      if (hits.length)
+        throw new HttpError(409, "overlap", `Overlaps tickets in flight: ${hits.join("; ")}`);
+    }
     if (changesColumn) {
-      const [active] = await tx
-        .select({ agentSlug: runs.agentSlug })
-        .from(runs)
-        .where(and(eq(runs.ticketId, id), inArray(runs.state, [...activeRunStates])));
+      const active = await activeRun(tx, id);
       if (active && !confirmCancel)
         throw new HttpError(409, "run_active", `${active.agentSlug} is working on this ticket`);
       await cancelActiveRun(tx, t.projectId, id);
@@ -184,6 +273,8 @@ export function moveTicket(
         position,
         updatedAt: new Date(),
         ...(changesColumn && { statusFlag: "none" as const }),
+        // Re-planning starts the build loop over (§3 Manual moves, FR-23).
+        ...(changesColumn && to.slug === "planning" && { bounceCount: 0 }),
       })
       .where(eq(tickets.id, id));
     // Reordering within a column is not worth a timeline entry.

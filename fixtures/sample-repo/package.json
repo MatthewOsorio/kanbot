@@ -1,0 +1,12 @@
+{
+  "name": "sample-todo",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --test"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "events": [
+    { "type": "assistant", "payload": { "text": "Comparing with the other ticket in flight." } }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "The change itself is fine, but it collides with RISK-2.",
+    "artifacts": [
+      { "kind": "review", "title": "Review", "markdown": "Fine alone; clashes with RISK-2." }
+    ],
+    "crossTicketRisks": [
+      {
+        "ticket": "RISK-2",
+        "kind": "conflict",
+        "severity": "blocking",
+        "description": "Both tickets rewrite TodoStore.remove."
+      }
+    ]
+  },
+  "costUsd": 0.1
+}

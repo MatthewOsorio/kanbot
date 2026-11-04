@@ -49,7 +49,7 @@ test("moving a ticket to Planning runs Plan B: plan artifact, criteria, Plan rea
   await expect(page.getByLabel("Criterion", { exact: true })).toHaveCount(2); // written by the plan
 
   await page.getByRole("tab", { name: /Artifacts/ }).click();
-  const plan = page.getByRole("article", { name: "Plan v1" });
+  const plan = page.getByRole("article", { name: "Plan: Add a filter v1" });
   await expect(plan.getByRole("heading", { name: "Problem" })).toBeVisible(); // Markdown rendered
 
   await page.getByRole("tab", { name: "Live" }).click();
@@ -62,8 +62,8 @@ test("moving a ticket to Planning runs Plan B: plan artifact, criteria, Plan rea
   await page.getByRole("tab", { name: /Artifacts/ }).click();
   await page.getByLabel("Requested plan changes").fill("Use SQLite, not Postgres");
   await page.getByRole("button", { name: "Revise plan" }).click();
-  await expect(page.getByRole("article", { name: "Plan v2" })).toBeVisible();
-  await expect(page.getByText("Plan v1 ·")).toBeVisible(); // v1 kept, collapsed
+  await expect(page.getByRole("article", { name: "Plan: Add a filter v2" })).toBeVisible();
+  await expect(page.getByText("Plan: Add a filter v1 ·")).toBeVisible(); // v1 kept, collapsed
   await page.getByRole("tab", { name: "Activity" }).click();
   await expect(page.getByText('requested plan changes: "Use SQLite, not Postgres"')).toBeVisible();
 });
@@ -104,4 +104,12 @@ test("moving a ticket while its agent works asks first, then cancels the run", a
   await card(page, "Slow plan").click();
   await expect(page.getByLabel("Latest run")).toContainText("plan-b · cancelled");
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+
+  // FR-35: Retry takes the ticket back to the run's column and starts a fresh run there.
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByLabel("Latest run")).toContainText(/plan-b · (queued|running)/);
+  // The drawer is modal (the board behind it is hidden), so read the column from its header.
+  await expect(page.getByRole("dialog").getByText(/-1 · Planning$/)).toBeVisible();
+  await page.getByRole("button", { name: "Cancel run" }).click(); // leave no slow run behind
+  await expect(page.getByLabel("Latest run")).toContainText("plan-b · cancelled");
 });

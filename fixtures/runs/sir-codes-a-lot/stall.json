@@ -1,0 +1,71 @@
+{
+  "events": [
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t",
+        "name": "Bash",
+        "input": {
+          "command": "node --test"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t",
+        "isError": false,
+        "content": "fail"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t",
+        "name": "Bash",
+        "input": {
+          "command": "node --test"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t",
+        "isError": false,
+        "content": "fail"
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t",
+        "name": "Bash",
+        "input": {
+          "command": "node --test"
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t",
+        "isError": false,
+        "content": "fail"
+      }
+    },
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "never reached"
+      }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "unreachable"
+  },
+  "costUsd": 0.1,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

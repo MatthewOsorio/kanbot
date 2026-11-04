@@ -1,7 +1,7 @@
 import { EVENTS_CHANNEL, type EventEnvelope } from "@kanbot/shared";
 import { createDb } from "@kanbot/shared/db";
 import { Client } from "pg";
-import { claimNext, executeRun, LIMITS, recoverInterrupted } from "./run";
+import { afterPrevious, claimNext, executeRun, LIMITS, recoverInterrupted } from "./run";
 import { ReplayRuntime } from "./runtime/replay";
 import { SdkRuntime } from "./runtime/sdk";
 import type { AgentRuntime } from "./runtime/types";
@@ -39,7 +39,10 @@ async function pump() {
         const ac = new AbortController();
         active.set(run.id, ac);
         console.log(`run ${run.id} (${run.agentSlug}) started`);
-        executeRun(db, runtime, run, ac.signal)
+        // Cancelled while waiting for the ticket's previous run: the web app already wrote `cancelled`.
+        afterPrevious(run.ticketId, async () => {
+          if (!ac.signal.aborted) await executeRun(db, runtime, run, ac.signal);
+        })
           .catch((e) => console.error(`run ${run.id} crashed`, e))
           .finally(() => {
             active.delete(run.id);
@@ -77,6 +80,21 @@ async function listen() {
     console.error("LISTEN failed", e);
     reconnect();
   }
+}
+
+// One worker per database: crash recovery below would mark a live worker's runs interrupted.
+const lock = new Client({ connectionString: url, application_name: "kanbot-worker" });
+// shortcut: if this connection drops, the lock goes with it and a second worker could start; fine for one dev machine, revisit with deployment (M4).
+lock.on("error", (e) => console.warn("worker lock connection lost", e.message));
+await lock.connect();
+const { rows } = await lock.query<{ ok: boolean }>(
+  "select pg_try_advisory_lock(hashtext('kanbot_worker')) as ok",
+);
+if (!rows[0]?.ok) {
+  console.error(
+    "Another Kanbot worker is already running on this database. Not starting a second.",
+  );
+  process.exit(1);
 }
 
 const recovered = await recoverInterrupted(db);

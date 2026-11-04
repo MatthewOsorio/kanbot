@@ -1,0 +1,19 @@
+{
+  "events": [{ "type": "assistant", "payload": { "text": "Running the suite." } }],
+  "report": {
+    "verdict": "failed",
+    "summary": "Criterion 2 fails: DELETE of an unknown todo still returns 204.",
+    "artifacts": [
+      {
+        "kind": "test_report",
+        "title": "Test report: Deleting an unknown todo removes the last one",
+        "markdown": "| Criterion | Result |\n| --- | --- |\n| 1 | pass |\n| 2 | fail |"
+      }
+    ],
+    "criteriaResults": [
+      { "criterionId": "$criterion1", "status": "pass" },
+      { "criterionId": "$criterion2", "status": "fail", "note": "204, expected 404" }
+    ]
+  },
+  "costUsd": 0.2
+}

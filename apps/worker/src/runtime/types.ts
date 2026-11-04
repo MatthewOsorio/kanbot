@@ -6,10 +6,19 @@ export type RuntimeEvent = { type: RunEventType; payload: Record<string, unknown
 
 export type RunRequest = {
   agent: AgentConfig;
+  /** The agent's tools with `{test}`-style placeholders expanded from the project's commands. */
+  tools: string[];
+  /** Repo-relative path → may Edit/Write touch it (requirements §14 edit scope). Absent = anywhere in cwd. */
+  canEdit?: (rel: string) => boolean;
+  /** Absolute plugin folders to load (requirements §8 plugins). */
+  plugins: string[];
+  /** Extra environment for the agent (e.g. PONYTAIL_DEFAULT_MODE). */
+  env: Record<string, string>;
   prompt: string; // the assembled context bundle
   cwd: string;
   signal: AbortSignal; // aborted on cancel or timeout
   scenario: string; // replay only: which fixture to play (ticket label `replay:<name>`, else "default")
+  attempt: number; // this agent's nth run on the ticket (1-based); replay picks <scenario>.<n>.json
 };
 
 /** API errors that end a run (requirements §8 failure handling). */

@@ -17,7 +17,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/client";
 import type { TicketDetail } from "@/lib/tickets";
 
-type Comment = { id: string; bodyMd: string; createdAt: string };
+type Comment = {
+  id: string;
+  bodyMd: string;
+  createdAt: string;
+  authorKind: "user" | "agent";
+  agentSlug: string | null;
+  file: string | null;
+  line: number | null;
+  resolved: boolean;
+};
 type Activity = {
   id: string;
   actor: string;
@@ -93,8 +102,20 @@ export function TicketDrawer(props: {
         ) : (
           <div className="space-y-6 p-4">
             <SheetHeader className="p-0">
-              <SheetDescription>
+              <SheetDescription className="pr-8">
                 {ticket.key} · {ticket.columnName}
+                {ticket.branchName && (
+                  <>
+                    {" "}
+                    · <code>{ticket.branchName}</code>
+                  </>
+                )}
+                {ticket.bounceCount > 0 && (
+                  <>
+                    {" "}
+                    · ↩ {ticket.bounceCount} bounce{ticket.bounceCount > 1 && "s"}
+                  </>
+                )}
               </SheetDescription>
               <SheetTitle className="sr-only">{ticket.title}</SheetTitle>
               <Input
@@ -234,12 +255,12 @@ export function TicketDrawer(props: {
               </p>
             )}
 
-            {/* Diff tab arrives with branches in M3. */}
             <Tabs defaultValue={isActive(latest) ? "live" : "activity"}>
               <TabsList>
                 <TabsTrigger value="activity">Activity</TabsTrigger>
                 <TabsTrigger value="live">Live</TabsTrigger>
                 <TabsTrigger value="artifacts">Artifacts ({ticket.artifacts.length})</TabsTrigger>
+                <TabsTrigger value="diff">Diff</TabsTrigger>
                 <TabsTrigger value="comments">Comments ({comments.length})</TabsTrigger>
               </TabsList>
 
@@ -322,10 +343,15 @@ export function TicketDrawer(props: {
                 )}
               </TabsContent>
 
+              <TabsContent value="diff">
+                <DiffView ticketId={ticket.id} refresh={change} />
+              </TabsContent>
+
               <TabsContent value="comments" className="space-y-2">
                 <ul className="space-y-2">
                   {comments.map((c) => (
                     <li key={c.id} className="rounded-md border p-2 text-sm">
+                      <CommentByline c={c} />
                       <Markdown>{c.bodyMd}</Markdown>
                       <time className="text-xs text-muted-foreground">
                         {new Date(c.createdAt).toLocaleString()}
@@ -487,6 +513,8 @@ function describe(a: Activity): string {
       return "commented";
     case "edited":
       if (d.change === "replaced by plan") return `wrote ${String(d.count)} acceptance criteria`;
+      if (d.change === "checked by QA")
+        return `checked ${(d.results as unknown[]).length} acceptance criteria`;
       return d.change
         ? `${String(d.change)} criterion "${String(d.text)}"`
         : `edited ${(d.fields as string[]).join(", ")}`;
@@ -495,8 +523,124 @@ function describe(a: Activity): string {
         ? `requested plan changes: "${String(d.request)}"`
         : `started ${String(d.agent)}`;
     case "run_finished":
-      return `finished ${String(d.agent)}: ${String(d.state).replace("_", " ")}${d.error ? ` (${String(d.error)})` : ""}`;
+      return `finished ${String(d.agent)}: ${String(d.state).replace("_", " ")}${d.error ? ` (${String(d.error)})` : ""}${d.bounce ? `, bounce ${String(d.bounce)}` : ""}${d.reason ? `. ${String(d.reason)}` : ""}`;
     default:
       return a.action;
   }
+}
+
+/** Who wrote a comment: the agent (avatar + name) or the owner, plus file:line for review comments. */
+function CommentByline({ c }: { c: Comment }) {
+  return (
+    <p className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+      {c.agentSlug ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element -- tiny local SVG */}
+          <img src={`/api/agents/${c.agentSlug}/avatar`} alt="" className="size-4 rounded-full" />
+          <span>{c.agentSlug}</span>
+        </>
+      ) : (
+        <span>owner</span>
+      )}
+      {c.file && (
+        <code>
+          {c.file}
+          {c.line ? `:${c.line}` : ""}
+        </code>
+      )}
+      {c.resolved && <span>· resolved</span>}
+    </p>
+  );
+}
+
+type Diff = {
+  branch: string | null;
+  base: string;
+  diff: string;
+  truncated: boolean;
+  comments: Comment[];
+};
+
+/**
+ * The branch diff vs the default branch (FR-41), unified, with review comments under their line.
+ * shortcut: unified only; the spec's side-by-side view is M5 polish.
+ */
+function DiffView({ ticketId, refresh }: { ticketId: string; refresh: unknown }) {
+  const [d, setD] = useState<Diff | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let stale = false;
+    api<Diff>(`/api/tickets/${ticketId}/diff`).then(
+      (x) => !stale && setD(x),
+      (e: Error) => !stale && setError(e.message),
+    );
+    return () => {
+      stale = true;
+    };
+  }, [ticketId, refresh]);
+  if (error) return <p className="text-sm text-red-700">{error}</p>;
+  if (!d) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (!d.branch)
+    return (
+      <p className="text-sm text-muted-foreground">
+        No branch yet: one is created when the ticket enters In Progress.
+      </p>
+    );
+  if (!d.diff)
+    return (
+      <p className="text-sm text-muted-foreground">
+        {d.branch} has no changes against {d.base}.
+      </p>
+    );
+
+  return (
+    <div
+      aria-label={`Diff of ${d.branch} against ${d.base}`}
+      className="overflow-x-auto font-mono text-xs"
+    >
+      {diffRows(d.diff, d.comments).map((r, i) => (
+        <div key={i}>
+          <div className={`whitespace-pre ${r.cls}`}>{r.text || " "}</div>
+          {r.notes.map((c) => (
+            <div
+              key={c.id}
+              role="note"
+              className="my-1 whitespace-normal rounded border bg-background p-2 font-sans"
+            >
+              <CommentByline c={c} />
+              <Markdown>{c.bodyMd}</Markdown>
+            </div>
+          ))}
+        </div>
+      ))}
+      {d.truncated && <p className="font-sans text-muted-foreground">Diff truncated at 1 MB.</p>}
+    </div>
+  );
+}
+
+/** Splits a unified diff into styled lines, attaching each review comment under its new-file line. */
+function diffRows(diff: string, comments: Comment[]) {
+  let file = "";
+  let line = 0;
+  let inHunk = false;
+  return diff.split("\n").map((text) => {
+    let at: number | null = null;
+    if (text.startsWith("diff ")) inHunk = false;
+    else if (text.startsWith("+++ ")) file = text.slice(4).replace(/^b\//, "");
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(text);
+    if (hunk) {
+      line = Number(hunk[1]) - 1;
+      inHunk = true;
+    } else if (inHunk && (text.startsWith("+") || text.startsWith(" "))) at = ++line;
+    const cls =
+      inHunk && text.startsWith("+")
+        ? "bg-green-50 text-green-900"
+        : inHunk && text.startsWith("-")
+          ? "bg-red-50 text-red-900"
+          : !inHunk || hunk
+            ? "text-muted-foreground"
+            : "";
+    const notes = at === null ? [] : comments.filter((c) => c.file === file && c.line === at);
+    return { text, cls, notes };
+  });
 }
