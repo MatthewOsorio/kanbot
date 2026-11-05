@@ -25,6 +25,7 @@ import {
   runs,
   spendToday,
   startColumnAgent,
+  ticketLinks,
   tickets,
   updateSettings,
   type Db,
@@ -702,26 +703,57 @@ async function storeResults(tx: Tx, ticket: TicketRef, run: Run, v: VerdictPaylo
   for (const c of v.comments)
     await agentComment(tx, ticket, run.agentSlug, { bodyMd: c.body, file: c.file, line: c.line });
 
-  if (v.crossTicketRisks.length) {
+  const proposals: { other: TicketRef; kind: "blocks" | "blocked_by" | "relates" }[] = [];
+  if (v.crossTicketRisks.length || v.relatedTickets.length) {
     const [me] = await tx
       .select({ number: tickets.number, keyPrefix: projects.keyPrefix })
       .from(tickets)
       .innerJoin(projects, eq(projects.id, tickets.projectId))
       .where(eq(tickets.id, ticket.id));
     const myKey = `${me!.keyPrefix}-${me!.number}`;
-    for (const r of v.crossTicketRisks) {
-      const note = `**Cross-ticket risk (${r.severity}, ${r.kind})**: ${r.description}`;
-      await agentComment(tx, ticket, run.agentSlug, { bodyMd: `${r.ticket}: ${note}` });
-      // The note goes on the other ticket too (§9); a key from another project is ignored.
-      const n = r.ticket.startsWith(`${me!.keyPrefix}-`) ? Number(r.ticket.split("-").pop()) : NaN;
+    // A key from another project, or this ticket itself, resolves to nothing.
+    const find = async (key: string) => {
+      const n = key.startsWith(`${me!.keyPrefix}-`) ? Number(key.split("-").pop()) : NaN;
       const [other] = Number.isInteger(n)
         ? await tx
             .select({ id: tickets.id, projectId: tickets.projectId })
             .from(tickets)
             .where(and(eq(tickets.projectId, ticket.projectId), eq(tickets.number, n)))
         : [];
-      if (other && other.id !== ticket.id)
-        await agentComment(tx, other, run.agentSlug, { bodyMd: `${myKey}: ${note}` });
+      return other && other.id !== ticket.id ? other : undefined;
+    };
+    for (const r of v.crossTicketRisks) {
+      const note = `**Cross-ticket risk (${r.severity}, ${r.kind})**: ${r.description}`;
+      await agentComment(tx, ticket, run.agentSlug, { bodyMd: `${r.ticket}: ${note}` });
+      // The note goes on the other ticket too (§9).
+      const other = await find(r.ticket);
+      if (!other) continue;
+      await agentComment(tx, other, run.agentSlug, { bodyMd: `${myKey}: ${note}` });
+      // Merging both would break: propose that the other ticket goes first, for the owner to confirm.
+      if (r.severity === "blocking") proposals.push({ other, kind: "blocked_by" });
+    }
+    for (const r of v.relatedTickets) {
+      const other = await find(r.ticket);
+      if (other) proposals.push({ other, kind: r.kind });
+    }
+  }
+  for (const { other, kind } of proposals) {
+    const [row] = await tx
+      .insert(ticketLinks)
+      .values({
+        projectId: ticket.projectId,
+        // "blocks" runs from the blocker to the blocked ticket.
+        fromTicketId: kind === "blocked_by" ? other.id : ticket.id,
+        toTicketId: kind === "blocked_by" ? ticket.id : other.id,
+        kind: kind === "relates" ? "relates" : "blocks",
+        source: "agent",
+      })
+      .onConflictDoNothing()
+      .returning({ id: ticketLinks.id });
+    if (!row) continue; // already proposed or confirmed
+    for (const t of [ticket, other]) {
+      await logActivity(tx, t.id, "edited", { fields: ["links"], change: "proposed", kind }, actor);
+      await publish(tx, t.projectId, { type: "ticket.updated", ticketId: t.id, fields: ["links"] });
     }
   }
 

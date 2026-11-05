@@ -93,3 +93,74 @@ test("moving an overlapping ticket to In Progress asks to start anyway", async (
   });
   expect((await move(b, "in_progress", { startAnyway: true })).status()).toBe(204);
 });
+
+// §9 / FR-14: a confirmed "blocked by" link holds a ticket out of In Progress until the blocker is Done.
+test("a confirmed blocker stops In Progress until it is Done", async ({
+  request,
+}) => {
+  const prefix = `K${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const project = await (
+    await request.post("/api/projects", { data: { name: "Links", keyPrefix: prefix } })
+  ).json();
+  const ticket = async (title: string) =>
+    (await (await request.post(`/api/projects/${project.id}/tickets`, { data: { title } })).json())
+      .id as string;
+  const board = async () => (await request.get(`/api/projects/${project.id}/board`)).json();
+  const move = async (id: string, slug: string, extra = {}) => {
+    const toColumnId = (await board()).columns.find((c: { slug: string }) => c.slug === slug).id;
+    return request.post(`/api/tickets/${id}/move`, {
+      data: { toColumnId, position: "a0", ...extra },
+    });
+  };
+  const blocker = await ticket("Blocker");
+  const blocked = await ticket("Blocked");
+
+  const link = await request.post(`/api/tickets/${blocked}/links`, {
+    data: { toKey: `${prefix}-1`, kind: "blocked_by" },
+  });
+  expect(link.status()).toBe(201);
+  const { id: linkId } = await link.json();
+  expect(
+    (
+      await request.post(`/api/tickets/${blocked}/links`, {
+        data: { toKey: `${prefix}-1`, kind: "blocked_by" },
+      })
+    ).status(),
+  ).toBe(409);
+  expect(
+    (
+      await request.post(`/api/tickets/${blocked}/links`, {
+        data: { toKey: `${prefix}-2`, kind: "relates" },
+      })
+    ).status(),
+  ).toBe(400);
+
+  const detail = async (id: string) => (await request.get(`/api/tickets/${id}`)).json();
+  expect((await detail(blocked)).links).toEqual([
+    expect.objectContaining({ relation: "blocked_by", key: `${prefix}-1`, confirmed: true }),
+  ]);
+  expect((await detail(blocker)).links).toEqual([
+    expect.objectContaining({ relation: "blocks", key: `${prefix}-2` }),
+  ]);
+
+  await move(blocked, "ready");
+  const cards = async () =>
+    Object.fromEntries((await board()).tickets.map((t: { id: string }) => [t.id, t]));
+  expect((await cards())[blocked].waitingOn).toEqual([`${prefix}-1`]);
+
+  const refused = await move(blocked, "in_progress");
+  expect(refused.status()).toBe(409);
+  expect((await refused.json()).error).toEqual({
+    code: "overlap",
+    message: `Waiting on ${prefix}-1`,
+  });
+
+  // Once the blocker is Done, the dependency no longer holds the ticket.
+  await move(blocker, "done");
+  expect((await cards())[blocked].waitingOn).toEqual([]);
+  expect((await move(blocked, "in_progress")).status()).toBe(204);
+
+  // Dismissing removes the link from both tickets.
+  expect((await request.delete(`/api/links/${linkId}`)).status()).toBe(204);
+  expect((await detail(blocked)).links).toEqual([]);
+});

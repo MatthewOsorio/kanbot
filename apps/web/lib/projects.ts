@@ -1,8 +1,9 @@
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { DEFAULT_COLUMNS, createProjectBody } from "@kanbot/shared";
+import { DEFAULT_COLUMNS, IN_FLIGHT_COLUMNS, createProjectBody } from "@kanbot/shared";
 import { loadAgent } from "@kanbot/shared/agents";
-import { columns, projects, tickets } from "@kanbot/shared/db";
+import { columns, projects, ticketLinks, tickets } from "@kanbot/shared/db";
+import { loadProjectConfig, overlap } from "@kanbot/shared/repo";
 import { asc, eq, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { HttpError, isUniqueViolation, notFound } from "./api";
@@ -46,7 +47,7 @@ export async function createProject(input: z.output<typeof createProjectBody>) {
 export async function getBoard(projectId: string) {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) throw notFound("Project not found");
-  const [cols, cards] = await Promise.all([
+  const [cols, cards, links] = await Promise.all([
     db
       .select()
       .from(columns)
@@ -64,15 +65,51 @@ export async function getBoard(projectId: string) {
         position: tickets.position,
         statusFlag: tickets.statusFlag,
         bounceCount: tickets.bounceCount,
+        touchPaths: tickets.touchPaths,
       })
       .from(tickets)
       .where(eq(tickets.projectId, projectId))
       .orderBy(sql`${tickets.position} collate "C"`, asc(tickets.id)),
+    db
+      .select({ from: ticketLinks.fromTicketId, to: ticketLinks.toTicketId })
+      .from(ticketLinks)
+      .where(
+        sql`${ticketLinks.projectId} = ${projectId} and ${ticketLinks.kind} = 'blocks' and ${ticketLinks.confirmed}`,
+      ),
   ]);
+  const slugOf = new Map(cols.map((c) => [c.id, c.slug]));
+  const key = (t: { number: number }) => `${project.keyPrefix}-${t.number}`;
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  // shortcut: reads project.yml from git on every board fetch; P5 moves the hotspots into the database.
+  const { hotspots } = project.repoPath
+    ? await loadProjectConfig(project.repoPath, project.defaultBranch).catch(() => ({
+        hotspots: [],
+      }))
+    : { hotspots: [] };
+  const inFlight = cards.filter((c) =>
+    (IN_FLIGHT_COLUMNS as readonly string[]).includes(slugOf.get(c.columnId)!),
+  );
   return {
     project,
     columns: cols.map((c) => ({ ...c, agent: columnAgent(c.agentSlug) })),
-    tickets: cards,
+    tickets: cards.map((c) => {
+      const slug = slugOf.get(c.columnId)!;
+      const active = slug === "ready" || (IN_FLIGHT_COLUMNS as readonly string[]).includes(slug);
+      if (!active) return { ...c, waitingOn: [] as string[], overlaps: [] as string[] };
+      const waitingOn = links
+        .filter((l) => l.to === c.id)
+        .map((l) => byId.get(l.from)!)
+        .filter((b) => slugOf.get(b.columnId) !== "done")
+        .map(key);
+      const overlaps = inFlight
+        .filter((o) => o.id !== c.id)
+        .filter((o) => {
+          const x = overlap(c.touchPaths, o.touchPaths, hotspots);
+          return x.files.length || x.hotspots.length;
+        })
+        .map(key);
+      return { ...c, waitingOn, overlaps };
+    }),
   };
 }
 

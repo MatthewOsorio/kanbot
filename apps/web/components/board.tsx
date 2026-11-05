@@ -21,7 +21,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { BoardEvent, StatusFlag } from "@kanbot/shared";
-import { AlertTriangle, Hand, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Clock, Hand, Loader2 } from "lucide-react";
 import { generateKeyBetween } from "fractional-indexing";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -544,6 +544,21 @@ function CardBody({ card, cardKey }: { card: Card; cardKey: string }) {
             title={`Bounced back ${card.bounceCount} time${card.bounceCount > 1 ? "s" : ""}`}
           >
             ↩ {card.bounceCount}
+          </span>
+        )}
+        {card.waitingOn.length > 0 && (
+          <span className="mt-2 text-xs text-amber-800" title="Confirmed blockers that aren't Done">
+            <Clock className="mr-1 inline size-3" aria-hidden />
+            waiting on {card.waitingOn.join(", ")}
+          </span>
+        )}
+        {card.overlaps.length > 0 && (
+          <span
+            className="mt-2 text-xs text-muted-foreground"
+            title="Touches the same files or hotspots"
+          >
+            <ArrowLeftRight className="mr-1 inline size-3" aria-hidden />
+            overlaps {card.overlaps.join(", ")}
           </span>
         )}
       </div>

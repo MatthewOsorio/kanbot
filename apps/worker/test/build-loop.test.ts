@@ -15,6 +15,7 @@ import {
   projects,
   runs,
   startColumnAgent,
+  ticketLinks,
   tickets,
 } from "@kanbot/shared/db";
 import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
@@ -300,6 +301,22 @@ describe("build loop (M3 done criterion)", () => {
       expect.objectContaining({
         agentSlug: "nitpick-nancy",
         bodyMd: expect.stringMatching(/^RISK-1: \*\*Cross-ticket risk \(blocking, conflict\)/),
+      }),
+    ]);
+  });
+
+  it("proposes the other ticket as a blocker when Nancy reports a blocking risk", async () => {
+    const { ticket, move, addTicket } = await setup("risk", undefined, "RISK");
+    const other = await addTicket(2, "default", "Rewrite TodoStore.remove");
+    await move("in_progress");
+    await drain();
+    const links = await db.select().from(ticketLinks).where(eq(ticketLinks.toTicketId, ticket.id));
+    expect(links).toEqual([
+      expect.objectContaining({
+        fromTicketId: other.id,
+        kind: "blocks",
+        confirmed: false,
+        source: "agent",
       }),
     ]);
   });

@@ -142,6 +142,9 @@ export async function buildContext(
           ),
         ]
       : []),
+    ...(run.columnSlug === "planning"
+      ? [section("open_tickets", await openTickets(db, ticket))]
+      : []),
     ...(blocked ? await blockerSections(db, ticket.id) : []),
     ...(done ? await retroSections(db, ticket, prior, repo, review, testReport) : []),
     section(
@@ -222,9 +225,11 @@ async function retroSections(
   // The worktree is gone by now; the branch is still in the checkout.
   const stat =
     repo.cwd && ticket.branchName
-      ? await git(repo.cwd, ["diff", "--stat", `${repo.defaultBranch}...${ticket.branchName}`]).catch(
-          () => "",
-        )
+      ? await git(repo.cwd, [
+          "diff",
+          "--stat",
+          `${repo.defaultBranch}...${ticket.branchName}`,
+        ]).catch(() => "")
       : "";
   return [
     section(
@@ -301,6 +306,45 @@ async function blockerSections(db: Db, ticketId: string) {
         .slice(-CAP),
     ),
   ];
+}
+
+/** Plan B's view of the board (§9): every other unfinished ticket, so it can name related or dependent ones. */
+async function openTickets(db: Db, ticket: Ticket) {
+  const others = await db
+    .select({
+      id: tickets.id,
+      number: tickets.number,
+      title: tickets.title,
+      column: columns.name,
+      touchPaths: tickets.touchPaths,
+      keyPrefix: projects.keyPrefix,
+    })
+    .from(tickets)
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .innerJoin(projects, eq(projects.id, tickets.projectId))
+    .where(
+      and(
+        eq(tickets.projectId, ticket.projectId),
+        ne(tickets.id, ticket.id),
+        ne(columns.slug, "done"),
+      ),
+    )
+    .orderBy(asc(tickets.number))
+    .limit(100); // shortcut: first 100 by number, when a board outgrows that rank by relevance
+  const parts: string[] = [];
+  for (const o of others) {
+    const plan = await latest(db, o.id, "plan");
+    parts.push(
+      [
+        `### ${o.keyPrefix}-${o.number}: ${o.title} (${o.column})`,
+        `Touches: ${o.touchPaths.join(", ") || "(unknown)"}`,
+        plan ? `Plan (start):\n${plan.contentMd.slice(0, 500)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+  return clip(parts.join("\n\n"), "the board");
 }
 
 /**
