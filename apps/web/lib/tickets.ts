@@ -147,7 +147,7 @@ export async function deleteTicket(id: string) {
     return { ...t, repoPath: p!.repoPath };
   });
   // FR-49: the worktree goes with the ticket; the branch stays (it may hold work worth keeping).
-  // shortcut: a cancelled agent may still be stopping inside it; the removal then fails and the folder stays until the M4 nightly cleanup.
+  // shortcut: a cancelled agent may still be stopping inside it; the removal then fails and the folder stays until the M5 nightly cleanup.
   if (t.worktreePath && t.repoPath)
     await git(t.repoPath, ["worktree", "remove", "--force", t.worktreePath]).catch((e: Error) =>
       console.warn(`Could not remove worktree ${t.worktreePath}: ${e.message}`),
@@ -232,7 +232,7 @@ async function overlapping(
  * Entering In Progress runs the overlap check (409 `overlap` unless startAnyway); entering Planning
  * resets the bounce count. Entering Planning with a plan already there asks first (409 `has_plan`):
  * keepPlan keeps it (Plan ready, no run), requestMd has Plan B revise it.
- * Ship/Done confirmations arrive with their agents (M4).
+ * Ship/Done confirmations arrive with Ship-It (M5).
  */
 export function moveTicket(
   id: string,
@@ -305,7 +305,9 @@ export function moveTicket(
       actor: "owner",
     });
     if (changesColumn && !keep)
-      await startColumnAgent(tx, t.projectId, id, to, OWNER, hasPlan ? requestMd : undefined);
+      await startColumnAgent(tx, t.projectId, id, to, OWNER, {
+        requestMd: hasPlan ? requestMd : undefined,
+      });
   });
 }
 

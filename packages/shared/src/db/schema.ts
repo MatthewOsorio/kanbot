@@ -3,6 +3,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -165,9 +166,13 @@ export const runs = pgTable(
     // The owner's "Request changes" text this run answers (UC-3); null for runs started by a move.
     requestMd: text("request_md"),
     sessionId: text("session_id"),
+    // The agent session this run continues (Resume, or a bounce back to the same agent; FR-35).
+    resumeSessionId: text("resume_session_id"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     costUsd: numeric("cost_usd", { precision: 10, scale: 4, mode: "number" }).notNull().default(0),
+    // What this run may spend, set when it is claimed: the agent's budget, capped by what's left of the day.
+    budgetUsd: numeric("budget_usd", { precision: 10, scale: 4, mode: "number" }),
     error: text("error"),
     createdAt: createdAt(),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -177,7 +182,7 @@ export const runs = pgTable(
     // One active run per ticket (requirements §11); keep in sync with activeRunStates.
     uniqueIndex("runs_one_active_per_ticket")
       .on(t.ticketId)
-      .where(sql`${t.state} in ('queued', 'running', 'awaiting_input')`),
+      .where(sql`${t.state} in ('queued', 'running')`),
     index().on(t.state, t.createdAt),
     index().on(t.ticketId, t.createdAt),
   ],
@@ -214,4 +219,20 @@ export const artifacts = pgTable(
     createdAt: createdAt(),
   },
   (t) => [unique().on(t.ticketId, t.kind, t.version)],
+);
+
+/** Global settings (requirements §11): one row, id 1; a missing row means the defaults. */
+export const settings = pgTable(
+  "settings",
+  {
+    id: integer("id").primaryKey().default(1),
+    paused: boolean("paused").notNull().default(false),
+    // Set when Kanbot paused itself (auth or billing error); null when the owner paused.
+    pausedReason: text("paused_reason"),
+    dailyBudgetUsd: numeric("daily_budget_usd", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(5),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("settings_single_row", sql`${t.id} = 1`)],
 );

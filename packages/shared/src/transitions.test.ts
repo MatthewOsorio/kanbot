@@ -21,8 +21,10 @@ describe("afterRun", () => {
     expect(afterRun("planning", "interrupted")).toEqual(stay("failed"));
     expect(afterRun("planning", "cancelled")).toEqual(stay("none"));
   });
-  it("does not move a ticket already in Blocked", () => {
-    expect(afterRun("blocked", "failed")).toEqual(stay("failed"));
+  it("keeps a ticket in Blocked, waiting for the owner, however Duckworth's run ends", () => {
+    for (const o of ["succeeded", "failed", "timed_out", "budget_exceeded"] as const)
+      expect(afterRun("blocked", o)).toEqual(stay("needs_input"));
+    expect(afterRun("blocked", "interrupted")).toEqual(stay("failed"));
   });
   it("stays put for columns with no rule", () => {
     expect(afterRun("ship", "succeeded")).toEqual(stay("none"));

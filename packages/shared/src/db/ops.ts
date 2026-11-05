@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import { agentFileExists } from "../agents";
 import { activeRunStates } from "../schemas";
-import { runs, tickets } from "./schema";
+import { runs, settings, tickets } from "./schema";
 import { logActivity, OWNER, publish, type Actor, type Tx } from "./write";
 
 type Column = { id: string; slug: string; name: string; agentSlug: string | null };
@@ -55,19 +55,31 @@ export async function startColumnAgent(
   ticketId: string,
   column: Column,
   actor: Actor = OWNER,
-  requestMd?: string,
+  /** requestMd: the owner's words the run answers; resumeSessionId: the agent session it continues. */
+  { requestMd, resumeSessionId }: { requestMd?: string; resumeSessionId?: string | null } = {},
 ) {
   if (!column.agentSlug || !agentFileExists(column.agentSlug)) return null;
   const [r] = await tx
     .insert(runs)
-    .values({ ticketId, agentSlug: column.agentSlug, columnSlug: column.slug, requestMd })
+    .values({
+      ticketId,
+      agentSlug: column.agentSlug,
+      columnSlug: column.slug,
+      requestMd,
+      resumeSessionId,
+    })
     .returning();
   await tx.update(tickets).set({ statusFlag: "running" }).where(eq(tickets.id, ticketId));
   await logActivity(
     tx,
     ticketId,
     "run_started",
-    { runId: r!.id, agent: r!.agentSlug, ...(requestMd && { request: requestMd }) },
+    {
+      runId: r!.id,
+      agent: r!.agentSlug,
+      ...(requestMd && { request: requestMd }),
+      ...(resumeSessionId !== undefined && { resumed: true }), // null: Resume, but no session to continue
+    },
     actor,
   );
   await publish(tx, projectId, {
@@ -77,6 +89,46 @@ export async function startColumnAgent(
     agentSlug: r!.agentSlug,
     state: "queued",
   });
+  return r!;
+}
+
+export type Settings = typeof settings.$inferSelect;
+
+export async function getSettings(tx: Pick<Tx, "select">): Promise<Settings> {
+  const [s] = await tx.select().from(settings);
+  return (
+    s ?? { id: 1, paused: false, pausedReason: null, dailyBudgetUsd: 5, updatedAt: new Date() }
+  );
+}
+
+/** Updates the settings row (creating it on first use) and tells the web app and worker. */
+export async function updateSettings(
+  tx: Tx,
+  patch: Partial<Pick<Settings, "paused" | "pausedReason" | "dailyBudgetUsd">>,
+) {
+  const values = { ...patch, updatedAt: new Date() };
+  const [s] = await tx
+    .insert(settings)
+    .values({ id: 1, ...values })
+    .onConflictDoUpdate({ target: settings.id, set: values })
+    .returning();
+  await publish(tx, "*", { type: "settings.updated", paused: s!.paused });
+  return s!;
+}
+
+/**
+ * Today's spend for the daily cap (requirements §14): the cost of runs that ended since local midnight,
+ * plus `reserved`, the budgets of runs still going (their cost is only known when they end).
+ */
+export async function spendToday(tx: Pick<Tx, "select">) {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const [r] = await tx
+    .select({
+      spent: sql<number>`coalesce(sum(${runs.costUsd}) filter (where ${runs.endedAt} >= ${midnight}), 0)::float8`,
+      reserved: sql<number>`coalesce(sum(${runs.budgetUsd}) filter (where ${runs.state} = 'running'), 0)::float8`,
+    })
+    .from(runs);
   return r!;
 }
 

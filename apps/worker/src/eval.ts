@@ -14,6 +14,8 @@ import {
   moveToColumnEnd,
   projects,
   runs,
+  settings,
+  spendToday,
   startColumnAgent,
   tickets,
 } from "@kanbot/shared/db";
@@ -61,6 +63,11 @@ type Result = {
 
 await prepareTestDatabase();
 const db = createDb(TEST_DATABASE_URL, "kanbot-eval");
+// The normal $5 daily cap (§17), counted from now: replay tests' made-up costs share this database.
+await db
+  .update(settings)
+  .set({ dailyBudgetUsd: (await spendToday(db)).spent + 5 })
+  .where(eq(settings.id, 1));
 // claimNext is global: don't pick up leftovers from tests.
 await db
   .update(runs)

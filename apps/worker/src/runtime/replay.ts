@@ -53,7 +53,15 @@ const IDENTITY = ["-c", "user.name=Kanbot replay", "-c", "user.email=replay@kanb
 
 export class ReplayRuntime implements AgentRuntime {
   async run(
-    { agent, scenario, attempt, cwd, signal, prompt }: Parameters<AgentRuntime["run"]>[0],
+    {
+      agent,
+      scenario,
+      attempt,
+      cwd,
+      signal,
+      prompt,
+      resumeSessionId,
+    }: Parameters<AgentRuntime["run"]>[0],
     emit: Parameters<AgentRuntime["run"]>[1],
   ): Promise<RuntimeResult> {
     // An agent with no script for this scenario plays its default (e.g. golden tickets not recorded yet).
@@ -64,7 +72,13 @@ export class ReplayRuntime implements AgentRuntime {
     const s = script.parse(JSON.parse(await readFile(file, "utf8")));
     await emit({
       type: "system",
-      payload: { subtype: "init", model: agent.model, replay: scenario },
+      payload: {
+        subtype: "init",
+        model: agent.model,
+        replay: scenario,
+        sessionId: `replay-${agent.slug}-${scenario}.${attempt}`,
+        ...(resumeSessionId && { resumed: resumeSessionId }),
+      },
     });
     for (let i = 1; i <= s.apiRetries; i++) {
       signal.throwIfAborted();
@@ -99,7 +113,7 @@ export class ReplayRuntime implements AgentRuntime {
       stop: s.stop,
       apiError: s.apiError,
       error: s.error,
-      sessionId: `replay-${scenario}`,
+      sessionId: `replay-${agent.slug}-${scenario}.${attempt}`,
       costUsd: s.costUsd,
       inputTokens: s.inputTokens,
       outputTokens: s.outputTokens,

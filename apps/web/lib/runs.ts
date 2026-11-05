@@ -1,4 +1,4 @@
-import { activeRunStates } from "@kanbot/shared";
+import { activeRunStates, resumableRunStates } from "@kanbot/shared";
 import {
   activeRun,
   artifacts,
@@ -11,7 +11,7 @@ import {
   startColumnAgent,
   tickets,
 } from "@kanbot/shared/db";
-import { and, asc, desc, eq, gt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
 import { HttpError, notFound } from "./api";
 import { db } from "./db";
 import type { Tx } from "./events";
@@ -59,7 +59,9 @@ export function cancelRun(runId: string) {
 export function revisePlan(ticketId: string, requestMd: string) {
   return db.transaction(async (tx) => {
     const { ticket, column } = await plannedTicket(tx, ticketId, "revised");
-    const next = await startColumnAgent(tx, ticket.projectId, ticketId, column, OWNER, requestMd);
+    const next = await startColumnAgent(tx, ticket.projectId, ticketId, column, OWNER, {
+      requestMd,
+    });
     if (!next) throw new HttpError(409, "no_agent", "Planning has no agent file");
     return next;
   });
@@ -113,15 +115,59 @@ async function plannedTicket(tx: Tx, ticketId: string, verb: string) {
 export function retryRun(runId: string) {
   return db.transaction(async (tx) => {
     const { run, ticket } = await runWithTicket(tx, runId);
-    if (await activeRun(tx, ticket.id))
-      throw new HttpError(409, "run_active", "This ticket already has an active run");
-    const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
-    const from = cols.find((c) => c.id === ticket.columnId)!;
-    const to = cols.find((c) => c.slug === run.columnSlug);
-    if (!to) throw new HttpError(409, "column_gone", `Column ${run.columnSlug} no longer exists`);
-    if (to.id !== from.id) await moveToColumnEnd(tx, ticket, from, to, OWNER);
-    const next = await startColumnAgent(tx, ticket.projectId, ticket.id, to);
-    if (!next) throw new HttpError(409, "no_agent", `${run.agentSlug} has no agent file`);
-    return next;
+    return restart(tx, run, ticket);
   });
+}
+
+/**
+ * Resume (UC-7): the blocked run's agent continues its session in the run's column, with the owner's
+ * answer, or none (UC-13: the owner raised the cap). A later run, other than Duckworth's, wins.
+ */
+export function resumeRun(runId: string, answer: string) {
+  return db.transaction(async (tx) => {
+    const { run, ticket } = await runWithTicket(tx, runId);
+    if (!resumableRunStates.includes(run.state))
+      throw new HttpError(409, "not_resumable", `A ${run.state} run can't be resumed`);
+    const [later] = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.ticketId, ticket.id),
+          ne(runs.columnSlug, "blocked"),
+          // In SQL: a JS Date drops the microseconds, so the run would count as later than itself.
+          sql`${runs.createdAt} > (select created_at from runs where id = ${run.id})`,
+        ),
+      )
+      .limit(1);
+    if (later) throw new HttpError(409, "stale", "A later run has replaced this one");
+    return restart(tx, run, ticket, {
+      requestMd: answer || undefined,
+      resumeSessionId: run.sessionId,
+    });
+  });
+}
+
+/**
+ * Moves the ticket back to the run's column (if it left) and starts that column's agent again.
+ * Rubber Duckworth, if still diagnosing, is cancelled; any other active run wins.
+ */
+async function restart(
+  tx: Tx,
+  run: typeof runs.$inferSelect,
+  ticket: typeof tickets.$inferSelect,
+  opts?: Parameters<typeof startColumnAgent>[5],
+) {
+  const active = await activeRun(tx, ticket.id);
+  if (active && active.columnSlug !== "blocked")
+    throw new HttpError(409, "run_active", "This ticket already has an active run");
+  if (active) await cancelActiveRun(tx, ticket.projectId, ticket.id);
+  const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
+  const from = cols.find((c) => c.id === ticket.columnId)!;
+  const to = cols.find((c) => c.slug === run.columnSlug);
+  if (!to) throw new HttpError(409, "column_gone", `Column ${run.columnSlug} no longer exists`);
+  if (to.id !== from.id) await moveToColumnEnd(tx, ticket, from, to, OWNER);
+  const next = await startColumnAgent(tx, ticket.projectId, ticket.id, to, OWNER, opts);
+  if (!next) throw new HttpError(409, "no_agent", `${run.agentSlug} has no agent file`);
+  return next;
 }

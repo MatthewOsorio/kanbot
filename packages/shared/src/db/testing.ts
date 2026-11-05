@@ -4,6 +4,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
 import { git } from "../repo";
 import { createDb } from "./index";
+import { settings } from "./schema";
 
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgres://kanbot:kanbot@localhost:5432/kanbot_test";
@@ -24,6 +25,12 @@ export async function prepareTestDatabase(url = TEST_DATABASE_URL) {
   await migrate(db, {
     migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
   });
+  // Replay runs record made-up costs, so a test database would hit the $5 daily cap within a day of runs.
+  const reset = { paused: false, pausedReason: null, dailyBudgetUsd: 1_000 };
+  await db
+    .insert(settings)
+    .values({ id: 1, ...reset })
+    .onConflictDoUpdate({ target: settings.id, set: reset });
   await db.$client.end();
 }
 

@@ -1,10 +1,12 @@
 import {
   createSdkMcpServer,
+  getSessionInfo,
   query,
   tool,
   type HookCallback,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { verdictShape } from "@kanbot/shared";
@@ -35,6 +37,7 @@ export class SdkRuntime implements AgentRuntime {
       cwd,
       signal,
       env: extraEnv,
+      resumeSessionId,
     }: Parameters<AgentRuntime["run"]>[0],
     emit: (e: RuntimeEvent) => Promise<void>,
   ): Promise<RuntimeResult> {
@@ -110,6 +113,11 @@ export class SdkRuntime implements AgentRuntime {
               : [],
           ),
           mcpServers: { kanbot },
+          // Sessions are files on this machine, under the cwd; one that is gone means a cold start.
+          resume:
+            resumeSessionId && (await getSessionInfo(resumeSessionId, { dir: cwd }))
+              ? resumeSessionId
+              : undefined,
           maxTurns: agent.maxTurns,
           maxBudgetUsd: agent.maxBudgetUsd,
           settingSources: [], // no user or project settings from the host machine
@@ -154,6 +162,16 @@ export class SdkRuntime implements AgentRuntime {
   }
 }
 
+/** The health probe behind automatic resume (§8): listing models is free and needs a working API. */
+export async function anthropicReachable() {
+  try {
+    await new Anthropic({ maxRetries: 0, timeout: 10_000 }).models.list({ limit: 1 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Maps SDK messages to the run_event types the Live tab shows; everything else is dropped. */
 function toEvents(m: SDKMessage): RuntimeEvent[] {
   if (m.type === "system" && m.subtype === "init")
@@ -163,6 +181,7 @@ function toEvents(m: SDKMessage): RuntimeEvent[] {
         payload: {
           subtype: "init",
           model: m.model,
+          sessionId: m.session_id, // kept on the run even if it is stopped, for Resume (§8)
           tools: m.tools,
           plugins: m.plugins.map((p) => p.name), // proves a plugin actually loaded
           skills: m.skills,

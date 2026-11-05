@@ -7,7 +7,7 @@ export type Verdict = (typeof verdicts)[number];
 /**
  * The `report_result` payload (requirements §8). Each milestone adds the fields its agents use:
  * M2 Plan B's, M3 touchPaths (Plan B), comments + crossTicketRisks (Nancy), criteriaResults (Testy).
- * M5 adds proposedTickets.
+ * M6 adds proposedTickets.
  */
 export const verdictShape = {
   verdict: z.enum(verdicts),

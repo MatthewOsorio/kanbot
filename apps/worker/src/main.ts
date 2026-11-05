@@ -1,9 +1,18 @@
 import { EVENTS_CHANNEL, type EventEnvelope } from "@kanbot/shared";
 import { createDb } from "@kanbot/shared/db";
 import { Client } from "pg";
-import { afterPrevious, claimNext, executeRun, LIMITS, recoverInterrupted } from "./run";
+import {
+  afterPrevious,
+  claimNext,
+  executeRun,
+  finish,
+  LIMITS,
+  PAUSED_ERROR,
+  recoverInterrupted,
+  resumeInterrupted,
+} from "./run";
 import { ReplayRuntime } from "./runtime/replay";
-import { SdkRuntime } from "./runtime/sdk";
+import { anthropicReachable, SdkRuntime } from "./runtime/sdk";
 import type { AgentRuntime } from "./runtime/types";
 
 try {
@@ -42,6 +51,8 @@ async function pump() {
         // Cancelled while waiting for the ticket's previous run: the web app already wrote `cancelled`.
         afterPrevious(run.ticketId, async () => {
           if (!ac.signal.aborted) await executeRun(db, runtime, run, ac.signal);
+          else if (ac.signal.reason === PAUSED_ERROR)
+            await finish(db, run.id, { state: "interrupted", error: PAUSED_ERROR });
         })
           .catch((e) => console.error(`run ${run.id} crashed`, e))
           .finally(() => {
@@ -58,6 +69,13 @@ async function pump() {
   }
 }
 
+const reachable = runtime instanceof ReplayRuntime ? async () => true : anthropicReachable;
+/** Restarts runs an outage or Pause all interrupted (§8); every minute, and when agents are unpaused. */
+const resume = () =>
+  resumeInterrupted(db, reachable)
+    .then((n) => n && console.log(`resumed ${n} interrupted run(s)`))
+    .catch((e) => console.error("resuming interrupted runs failed", e));
+
 /** New runs wake the worker; a run.finished for a run we hold means it was cancelled. */
 async function listen() {
   const client = new Client({ connectionString: url, application_name: "kanbot-worker" });
@@ -72,6 +90,10 @@ async function listen() {
     const { event } = JSON.parse(msg.payload) as EventEnvelope;
     if (event.type === "run.started") void pump();
     if (event.type === "run.finished") active.get(event.runId)?.abort();
+    // Pause all (FR-63): running agents stop now and restart on their own when unpaused.
+    if (event.type === "settings.updated" && event.paused)
+      for (const ac of active.values()) ac.abort(PAUSED_ERROR);
+    if (event.type === "settings.updated" && !event.paused) void resume().then(pump);
   });
   try {
     await client.connect();
@@ -84,7 +106,7 @@ async function listen() {
 
 // One worker per database: crash recovery below would mark a live worker's runs interrupted.
 const lock = new Client({ connectionString: url, application_name: "kanbot-worker" });
-// shortcut: if this connection drops, the lock goes with it and a second worker could start; fine for one dev machine, revisit with deployment (M4).
+// shortcut: if this connection drops, the lock goes with it and a second worker could start; fine for one dev machine, revisit with deployment (M5).
 lock.on("error", (e) => console.warn("worker lock connection lost", e.message));
 await lock.connect();
 const { rows } = await lock.query<{ ok: boolean }>(
@@ -101,6 +123,7 @@ const recovered = await recoverInterrupted(db);
 if (recovered) console.log(`marked ${recovered} run(s) interrupted after a restart`);
 await listen();
 setInterval(() => void pump(), 5_000);
+setInterval(() => void resume(), 60_000);
 void pump();
 console.log(`kanbot worker up (runtime: ${runtime instanceof ReplayRuntime ? "replay" : "sdk"})`);
 
