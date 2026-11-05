@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { activeRunStates, DEFAULT_COLUMNS } from "@kanbot/shared";
 import {
+  acceptanceCriteria,
   columns,
-  comments,
   createDb,
   logActivity,
   moveToColumnEnd,
@@ -57,8 +57,11 @@ type Golden = {
   title: string;
   type: "feature" | "bug";
   description: string;
-  /** An owner comment posted when the ticket first enters Code Review, so a real bounce is exercised. */
-  reviewComment?: string;
+  /**
+   * An acceptance criterion the owner adds when the ticket first enters Code Review. The plan and the
+   * code can't cover it yet, so the reviewer should request changes: a real bounce, and a resumed session.
+   */
+  reviewCriterion?: string;
 };
 type Result = {
   slug: string;
@@ -105,7 +108,7 @@ const slugs = readdirSync(goldenDir)
   // --only=bug,ui runs a subset (a smoke run); a subset never becomes the baseline.
   .filter((slug) => !only || only.includes(slug));
 const ids = new Map<string, string>();
-const reviewComments = new Map<string, string>(); // ticket id → late owner comment, posted once
+const reviewCriteria = new Map<string, string>(); // ticket id → late criterion, added once
 for (const [i, slug] of slugs.entries()) {
   const g = JSON.parse(readFileSync(join(goldenDir, `${slug}.json`), "utf8")) as Golden;
   const [t] = await db
@@ -122,7 +125,7 @@ for (const [i, slug] of slugs.entries()) {
     })
     .returning();
   ids.set(slug, t!.id);
-  if (g.reviewComment) reviewComments.set(t!.id, g.reviewComment);
+  if (g.reviewCriterion) reviewCriteria.set(t!.id, g.reviewCriterion);
   await db.transaction((tx) => startColumnAgent(tx, project!.id, t!.id, col("planning"), owner));
 }
 
@@ -134,19 +137,24 @@ for (;;) {
     console.log(
       `→ ${run.agentSlug} on ticket ${[...ids].find(([, id]) => id === run.ticketId)?.[0]}`,
     );
-    const late = reviewComments.get(run.ticketId);
+    const late = reviewCriteria.get(run.ticketId);
     if (late && run.agentSlug === "nitpick-nancy") {
-      reviewComments.delete(run.ticketId);
+      reviewCriteria.delete(run.ticketId);
+      // As addCriterion in the web app does: appended last, with an activity row and an event.
       await db.transaction(async (tx) => {
-        const [c] = await tx
-          .insert(comments)
-          .values({ ticketId: run.ticketId, bodyMd: late })
-          .returning();
-        await logActivity(tx, run.ticketId, "commented", { commentId: c!.id }, owner);
+        const n = await tx.$count(
+          acceptanceCriteria,
+          eq(acceptanceCriteria.ticketId, run.ticketId),
+        );
+        await tx
+          .insert(acceptanceCriteria)
+          .values({ ticketId: run.ticketId, text: late, position: n });
+        const data = { fields: ["criteria"], change: "added", text: late };
+        await logActivity(tx, run.ticketId, "edited", data, owner);
         await publish(tx, project!.id, {
-          type: "comment.created",
+          type: "ticket.updated",
           ticketId: run.ticketId,
-          commentId: c!.id,
+          fields: ["criteria"],
         });
       });
     }

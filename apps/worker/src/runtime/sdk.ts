@@ -172,6 +172,10 @@ export class SdkRuntime implements AgentRuntime {
           else if (m.is_error) result.error = m.result;
         }
       }
+    } catch (e) {
+      // After an error result (max budget, max turns) the SDK also throws "Claude Code returned an error
+      // result". The result (only it sets sessionId) already holds the stop reason and the cost, so keep it.
+      if (!result.sessionId || signal.aborted) throw e;
     } finally {
       signal.removeEventListener("abort", onAbort);
     }

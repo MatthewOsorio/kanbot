@@ -769,7 +769,7 @@ Agents run real commands on the server, so every agent is boxed in by its worktr
 | --- | --- | --- |
 | Per-run budget | From agent frontmatter (e.g. $1.50) | Run stops with `budget_exceeded`; ticket to Blocked. |
 | Per-ticket budget | $3 (M6) | No new runs start for that ticket until raised. Not built: M4 shows each ticket's total cost only. |
-| Daily budget (global) | $5 | Nothing new starts until midnight local time (the worker's clock) or the cap is raised. Today's spend is the cost of runs that ended today plus the budgets of runs still going; a run started late in the day gets only what is left, and ends `budget_exceeded` if it needs more. |
+| Daily budget (global) | $5 | Nothing new starts until midnight local time (the worker's clock) or the cap is raised. Today's spend is the cost of runs that ended today plus the budgets of runs still going; a run started late in the day gets only what is left, and ends `budget_exceeded` if it needs more. The SDK checks a run's budget between turns, so the last turn can overshoot it (seen: $0.06 spent on a $0.035 budget), and the cap with it. |
 | Max turns | From frontmatter | Run stops with `failed` and a summary. |
 | Wall-clock timeout | From frontmatter (e.g. 20 min) | Run stops with `timed_out`. |
 | Bounce-back limit | 3 per ticket | Ticket to Blocked with Duckworth's summary. |
@@ -826,7 +826,6 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Commit trailers `Kanbot-Agent` / `Kanbot-Ticket` and the bot identity | FR-42 | With the GitHub App. Agent commits use the host's git identity until then. |
 | SDK `sandbox` | §7, §14 | Linux/macOS only (dev is Windows; the Droplet is Linux). |
 | GitHub status in `/api/health`; "PR ready for review" notification | §8, FR-60 | Health reports GitHub `unknown` until then. |
-| A golden ticket that reliably makes Nancy request changes, so the eval covers a real bounce (and the bounce-back session resume) | §8, FR-35 | M4 added a late owner comment (`reviewComment`) to `review.json`, but in the 2026-11-05 eval Plan B already rejected the bad hint, so the comment asked for nothing new and Nancy approved. The comment must add a requirement the plan couldn't anticipate. Bounces are covered by replay tests meanwhile. Moved from M4 on 2026-11-05. |
 | SSE `Last-Event-ID` replay | §12 | Only if needed: the board refetches on reconnect and the Live tab pages `/api/runs/:id/events?after=seq`. Revisit when running over real networks. Marked with a `shortcut:` comment. |
 
 **M6**
@@ -840,7 +839,7 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Agent config hash on runs | FR-37 | With the Agents page. |
 | Side-by-side diff view | §13 | The Diff tab is unified. |
 | `columns.wip_limit`, `auto_advance`; WIP display and enforcement | FR-20, FR-22 | The only approval gate so far (QA → Ship) stays a gate; the concurrency limits already cap parallel runs. WIP limits matter most with auto-pull (M6). Moved from M4 on 2026-11-03. |
-| Running cost while a run works | UC-8, §13 | The SDK reports cost only when a run ends (per-turn messages carry tokens, not dollars), so a live figure needs Kanbot's own price table. The drawer shows elapsed time live and cost at the end; today's spend counts a running run's budget. Moved from M4 on 2026-11-03. Marked with a `shortcut:` comment. |
+| Running cost while a run works | UC-8, §13 | The SDK reports cost only when a run ends (per-turn messages carry tokens, not dollars), so a live figure needs Kanbot's own price table. The drawer shows elapsed time live and cost at the end; today's spend counts a running run's budget. A cancelled or interrupted run never gets the SDK's final result, so it records $0 for what it spent; the same price table would fix that. Moved from M4 on 2026-11-03. Marked with a `shortcut:` comment. |
 | Playwright-based QA (browser exploration, Playwright MCP, per-ticket `PORT`, headless Chromium in the worker) | §4 "How QA runs" | Testy runs the suite and writes tests in the project's framework; the browser steps arrive with the Playwright plugin. Moved from M4 on 2026-11-03: each plugin needs its own eval spend. |
 | TypeScript LSP, Context7, Security Guidance and Playwright plugins | §8 | Each adds context to every turn, so each is added once the golden-ticket eval can compare it on and off. Moved from M4 on 2026-11-03. |
 | Stall detection: repeated feedback (same issue raised on a second bounce) | §8 | Needs fuzzy matching; the bounce limit already stops the loop. Moved from M4 on 2026-11-03. |

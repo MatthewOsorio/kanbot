@@ -35,7 +35,7 @@ pnpm dev
 
 To check it, run:
 - `pnpm typecheck` and `pnpm lint`;
-- `pnpm test`: 32 shared unit tests, plus 93 worker tests (1 skipped off Windows);
+- `pnpm test`: 32 shared unit tests, plus 95 worker tests (1 skipped off Windows);
 - `pnpm test:e2e` (11 tests) and `pnpm build`.
 
 None of them calls the Anthropic API. GitHub Actions CI now runs typecheck, lint, test and test:e2e on every push and PR, with the replay runtime.
@@ -65,7 +65,7 @@ New endpoints:
 
 New SSE events: `notification` and `settings.updated`.
 
-Tests grew from 26 + 75 + 6 to 32 + 93 + 11 (shared, worker, e2e).
+Tests grew from 26 + 75 + 6 to 32 + 95 + 11 (shared, worker, e2e).
 
 ## Key decisions
 
@@ -76,7 +76,7 @@ Tests grew from 26 + 75 + 6 to 32 + 93 + 11 (shared, worker, e2e).
 - **The database is the source of project settings.** `.kanbot/project.yml` seeds a project once, on its first read; the file is still read only from the default branch. An empty command from the form is dropped before storing (`""` would fail `projectConfig` and break every read).
 - **Costs per ticket: total only.** The per-ticket $3 budget moved to M6 (decided 2026-11-05).
 - **Resume at the bounce limit resets the count.** Otherwise the resumed reviewer's next change request would send the ticket straight back to Blocked. It is logged as an `edited` activity, since a new activity enum value would need a migration.
-- **The golden bounce comes from a late owner comment.** `eval.ts` posts `reviewComment` when the review ticket enters Code Review. In M3's real runs, a bad hint in the description was simply ignored by Sir Codes-a-Lot.
+- **The golden bounce comes from a late acceptance criterion.** `eval.ts` adds the review ticket's `reviewCriterion` ("PATCH with a title longer than 100 characters returns 400…") when it first enters Code Review. Bad hints in the description didn't work: in M3 Sir Codes-a-Lot ignored them, and in M4 Plan B rejected them while planning. A late owner *comment* (P6's first try) asked only for what was already built, and Nancy treats comments as background. Criteria she checks.
 - **Bundled plugins are switched off by name.** `settings.enabledPlugins` sets the three `@builtin` ids to false; a real session aborted at init then listed only `ponytail`.
 
 ## Changes to the spec (`requirements.md`)
@@ -111,8 +111,7 @@ Every departure from the spec is edited into the spec itself. This list says whe
 
 Everything cut from M4 is in "Still to build" in `requirements.md` §16, with its milestone:
 - the per-ticket budget, a running cost while a run works, WIP limits, Playwright QA, the four extra plugins, the repeated-feedback stall and the dark theme (M6);
-- `blockWritesOutsideWorkingDirectories` and the SDK sandbox (M5);
-- a golden ticket that really bounces (M5). P6's late-comment approach didn't trigger one with real agents (see below).
+- `blockWritesOutsideWorkingDirectories` and the SDK sandbox (M5).
 
 Settings doesn't yet edit QA settings, the repo path or global concurrency.
 
@@ -138,25 +137,22 @@ Settings doesn't yet edit QA settings, the repo path or global concurrency.
 
   - **Related tickets work.** Plan B proposed 6 unconfirmed `relates` links between the four tickets, e.g. the due-date and rename tickets both touch `src/todos.ts` and the PATCH tests. Two pairs were proposed in both directions (A→B and B→A); that is harmless, but the drawer shows both.
   - **Archie ran on all four**, e.g. "Retro written: PATCH now renames a todo from a `title` body (trimmed, validated, owner's mass-assignment hint rejected), with 5 tests. Cost $0.38 over 4 runs, 0 bounce-backs."
-  - **The golden bounce did not happen.** Plan B rejected the `Object.assign` hint while planning, so Sir Codes-a-Lot copied only `title` and wrote tests. The late owner comment reached Code Review as designed, but it asked for what was already done, and Nancy approved. A real bounce is still covered only by replay tests. The ticket needs a review comment that adds a requirement the plan couldn't have anticipated. That is back on "Still to build" (M5).
+  - **The golden bounce did not happen.** Plan B rejected the `Object.assign` hint while planning, so Sir Codes-a-Lot copied only `title` and wrote tests. The late owner comment reached Code Review as designed, but it asked for what was already done, and Nancy approved. Fixed the same day with a late criterion (below).
   - Nancy raised `test_conflict` warnings (not blocking) between the due-date and rename tickets, as in M3.
-- M4's real spend: $1.45 (P2 eval) + $1.43 (final eval) + a few cents for the plugin init check.
+- **Session resume after Blocked (2026-11-05, ~$0.40 over two runs).** A script drove the real web app and worker on a throwaway database. It set the daily cap a few cents above today's spend and moved a ticket to Planning. Plan B ran out of budget, the ticket went to Blocked and Duckworth diagnosed it. The script then raised the cap and clicked Resume. **Pass:** the resumed Plan B run had `session_id` = `resume_session_id` = the blocked run's session, and it finished the plan.
+  - **Bug found and fixed:** the first run ended `failed` ("Claude Code returned an error result: Reached maximum budget"), not `budget_exceeded`, and recorded **$0.00** although it spent $0.04. The SDK sends the error result, then throws; the worker's catch threw the result away. `sdk.ts` now keeps the result when one arrived (test: `apps/worker/test/sdk.test.ts`, which fails without the fix). Max-turns runs took the same path. The second run, on the fixed worker, ended `budget_exceeded` with its $0.06 recorded.
+  - Seen, not fixed (spec §14 and the M6 "Running cost" row): the SDK checks the budget between turns, so a run can overshoot it ($0.06 on $0.035), and a cancelled run (Duckworth, cancelled by Resume) records $0.
+- **Real bounce and bounce-back resume (2026-11-05, `pnpm eval:agents --only=review`, $0.80).** With the late criterion, Nancy requested changes ("the owner's open criterion is not implemented: a title longer than 100 characters should return 400"). The ticket bounced to In Progress, where Sir Codes-a-Lot's run **resumed his first session** (`resume_session_id` = `session_id` = his first run's) and added the check and two tests. Then Nancy approved, Testy passed it and Archie wrote the retro. The resumed run cost $0.34 against $0.22 for the first: the resumed session carries the whole earlier transcript.
+  - The eval reports "total bounces rose from 0 to 1", because `evals/baseline.json` predates the new ticket. Re-saving it needs a full run (`pnpm eval:agents --baseline`, about $1.80); until then every full eval flags that one bounce.
+- M4's real spend: $1.45 (P2 eval) + $1.43 (final eval) + $0.40 (resume check) + $0.80 (bounce check) + a few cents for the plugin init check, about $4.10.
 
-## Manual check for you: SDK session resume
+## Repeating the session-resume checks
 
-No real run has blocked and been resumed yet; replay can't prove the SDK picks the session back up. Run this check once (about $0.20–0.50):
-
-1. `pnpm dev` (real runtime). Create a ticket in a project with a linked repo, e.g. the sample repo: "Add a `priority` field to todos. Ask me which values to allow before you start."
-2. Drag it to Planning. Plan B should return `needs_input` and the ticket goes to Blocked; Duckworth posts his questions.
-3. In the Blocked panel answer "low, medium, high" and click **Resume**.
-4. Pass if the plan uses your three values and the new run continued the old session:
-   `docker compose exec -T db psql -U kanbot -d kanbot -c "select agent_slug, state, session_id, resume_session_id from runs order by created_at desc limit 3"`
-   On the resumed Plan B row, `session_id` equals `resume_session_id`. If they differ, the session file wasn't found and the run started cold (`sdk.ts` falls back silently). The ticket still works, but FR-35 isn't working.
-   If Plan B plans without asking, the check didn't trigger. Use the ticket's Retry, or word the ticket so the plan can't be written without an answer.
+- **After Blocked:** run the real web app and worker on a throwaway database. Set the daily cap a few cents above today's spend, move a ticket to Planning, wait for Blocked, raise the cap and click Resume. On the resumed run, `session_id` must equal `resume_session_id`. If they differ, the session file wasn't found and the run started cold, which `sdk.ts` does silently.
+- **On a bounce:** `pnpm eval:agents --only=review` (about $0.80). Sir Codes-a-Lot's second run must have `resume_session_id` = his first run's `session_id`.
 
 ## Known risks
 
-- **Session resume is unproven with real agents** until the check above. That includes the bounce-back resume (FR-35), since no real run has bounced yet.
 - **Agents run real commands on your machine**, as in M3. The write block is the permission hook's alone until M5.
 - **Test globs from Settings are Testy's edit scope.** A broad glob (e.g. `**/*`) lets him edit source files; Settings checks only that each glob is non-empty.
 - **Tested only on Windows** locally; CI runs on Linux.

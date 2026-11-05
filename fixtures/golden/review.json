@@ -1,6 +1,6 @@
 {
   "title": "Rename a todo",
   "type": "feature",
-  "description": "Let `PATCH /api/todos/:id` take a JSON body `{ \"title\": \"...\" }` to rename the todo (an empty body still toggles `done`, as today).\n\nOwner's hint: keep it short, just `Object.assign` the request body onto the todo. Tests can come later.\n\n(Golden ticket: the hint invites mass assignment and skips tests; the late owner comment below pushes a careful review to ask for both fixes.)",
-  "reviewComment": "Review note from the owner: please do not merge the request body onto the todo. Only `title` may be changed (anything else, like `id` or `done`, must be ignored), and add a test for the rename before this goes to QA."
+  "description": "Let `PATCH /api/todos/:id` take a JSON body `{ \"title\": \"...\" }` to rename the todo (an empty body still toggles `done`, as today).\n\nOwner's hint: keep it short, just `Object.assign` the request body onto the todo. Tests can come later.\n\n(Golden ticket: the hint invites mass assignment and skips tests; after planning, the owner adds a criterion the plan doesn't cover (`reviewCriterion`), so Code Review should send it back.)",
+  "reviewCriterion": "PATCH with a title longer than 100 characters returns 400 and leaves the todo unchanged."
 }
