@@ -138,13 +138,29 @@ for (;;) {
     });
 }
 
+// Archie's retro (§4) is part of the loop too: tickets that reached QA move to Done, as the owner would.
+for (const id of ids.values()) {
+  const [t] = await db.select().from(tickets).where(eq(tickets.id, id));
+  if (t!.columnId !== col("qa").id) continue;
+  await db.transaction(async (tx) => {
+    await moveToColumnEnd(tx, t!, col("qa"), col("done"), owner);
+    await startColumnAgent(tx, project!.id, id, col("done"), owner);
+  });
+}
+for (let run = await claimNext(db); run; run = await claimNext(db)) {
+  console.log(`→ ${run.agentSlug}`);
+  await executeRun(db, runtime, run, new AbortController().signal);
+}
+
 const results: Result[] = [];
 for (const [slug, id] of ids) {
   const [t] = await db.select().from(tickets).where(eq(tickets.id, id));
   const done = await db.select().from(runs).where(eq(runs.ticketId, id));
   results.push({
     slug,
-    reachedQa: t!.columnId === col("qa").id && t!.statusFlag === "awaiting_approval",
+    reachedQa:
+      (t!.columnId === col("qa").id && t!.statusFlag === "awaiting_approval") ||
+      t!.columnId === col("done").id,
     column: cols.find((c) => c.id === t!.columnId)!.slug,
     bounces: t!.bounceCount,
     costUsd: Number(done.reduce((n, r) => n + r.costUsd, 0).toFixed(4)),

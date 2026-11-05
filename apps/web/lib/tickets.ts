@@ -22,7 +22,7 @@ import {
   startColumnAgent,
   tickets,
 } from "@kanbot/shared/db";
-import { git, loadProjectConfig, overlap } from "@kanbot/shared/repo";
+import { git, loadProjectConfig, overlap, removeWorktree } from "@kanbot/shared/repo";
 import { and, asc, desc, eq, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
@@ -148,10 +148,7 @@ export async function deleteTicket(id: string) {
   });
   // FR-49: the worktree goes with the ticket; the branch stays (it may hold work worth keeping).
   // shortcut: a cancelled agent may still be stopping inside it; the removal then fails and the folder stays until the M5 nightly cleanup.
-  if (t.worktreePath && t.repoPath)
-    await git(t.repoPath, ["worktree", "remove", "--force", t.worktreePath]).catch((e: Error) =>
-      console.warn(`Could not remove worktree ${t.worktreePath}: ${e.message}`),
-    );
+  if (t.worktreePath && t.repoPath) await removeWorktree(t.repoPath, t.worktreePath);
 }
 
 /** The branch diff vs the default branch (FR-41), with the review's line comments for the Diff tab. */

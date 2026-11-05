@@ -30,7 +30,7 @@ packages/shared/     shared by web and worker
   src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd
   src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
   drizzle/             generated SQL migrations (commit them)
-agents/              one <slug>.md per agent (YAML frontmatter + system prompt) and avatars/: plan-b, sir-codes-a-lot, nitpick-nancy, testy-mctestface
+agents/              one <slug>.md per agent (YAML frontmatter + system prompt) and avatars/: plan-b, sir-codes-a-lot, nitpick-nancy, testy-mctestface, rubber-duckworth, archie-the-archivist
 plugins/ponytail/    vendored, pinned Ponytail (see VENDORED.md); agents list plugins in frontmatter
 fixtures/runs/       replay scripts: <agent>/<scenario>[.<n>].json; a ticket label `replay:<scenario>` picks one, n = the agent's nth run
 fixtures/sample-repo/ zero-dependency todo app (with .kanbot/project.yml) copied into fresh git repos by prepareSampleRepo()

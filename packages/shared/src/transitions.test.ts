@@ -76,4 +76,9 @@ describe("build loop", () => {
       "bounce_limit",
     );
   });
+  it("keeps a finished ticket in Done however Archie's run ends", () => {
+    expect(afterRun("done", "succeeded")).toEqual({ to: null, flag: "none", bounce: false });
+    for (const o of ["failed", "timed_out", "budget_exceeded", "awaiting_input"] as const)
+      expect(afterRun("done", o)).toEqual({ to: null, flag: "failed", bounce: false });
+  });
 });

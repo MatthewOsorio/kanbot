@@ -30,7 +30,13 @@ import {
   type Db,
   type Tx,
 } from "@kanbot/shared/db";
-import { git, loadProjectConfig, projectConfig, type ProjectConfig } from "@kanbot/shared/repo";
+import {
+  git,
+  loadProjectConfig,
+  projectConfig,
+  removeWorktree,
+  type ProjectConfig,
+} from "@kanbot/shared/repo";
 import { and, count, desc, eq, isNotNull, max, ne, sql } from "drizzle-orm";
 import { buildContext } from "./context";
 import { EDIT_TOOLS } from "./runtime/fence";
@@ -300,6 +306,10 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       ? await loadProjectConfig(project.repoPath, project.defaultBranch)
       : projectConfig.parse({});
     testCommand = config.commands.test;
+    // FR-49: a ticket reaching Done loses its worktree (the branch stays) before Archie reads the checkout.
+    if (run.columnSlug === "done" && ticket.worktreePath && project.repoPath)
+      if (await removeWorktree(project.repoPath, ticket.worktreePath))
+        await db.update(tickets).set({ worktreePath: null }).where(eq(tickets.id, ticket.id));
     if (WORKTREE_COLUMNS.has(run.columnSlug)) {
       if (!project.repoPath) throw new Error("Link a local repo to this project before building");
       wt = await ensureWorktree(
