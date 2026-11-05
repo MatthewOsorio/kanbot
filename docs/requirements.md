@@ -1,10 +1,10 @@
 # Kanbot — Technical Requirements
 
-Last updated 2026-11-03.
+Last updated 2026-11-05.
 
 ## Where things stand
 
-- **Built (M1–M3, merged):**
+- **Built (M1–M4):**
   - The board: projects, tickets, criteria, comments, activity, drag and drop, live updates over SSE.
   - The worker: a runs-table queue, the Claude Agent SDK runtime behind a permission-hook fence, and a replay runtime for tests.
   - Four agents work the build loop:
@@ -12,16 +12,12 @@ Last updated 2026-11-03.
     - Sir Codes-a-Lot (In Progress), in a worktree per ticket;
     - Nitpick Nancy (Code Review), with cross-ticket review;
     - Testy McTestface (QA).
-  - Bounce-backs and the bounce limit, the overlap check, stall detection (repetition rule), Ponytail, and the golden-ticket eval.
+  - Bounce-backs and the bounce limit, the overlap check, stall detection, Ponytail, and the golden-ticket eval.
+  - Unblocking (M4): Blocked with Rubber Duckworth, Resume with an answer, session resume on bounce-backs, in-app notifications; the daily cap, Pause all and automatic resume after an outage; Archie's retro and worktree removal at Done; ticket links; project Settings; the cost total on each ticket; CI.
 - **How it runs:** locally only, bound to 127.0.0.1, with no login. Tested on Windows only. Project commands, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
-- **Next: M4 (unblock, still local).**
-  - Built so far: the daily cap, Pause all, automatic resume after an outage, CI; Blocked with Rubber Duckworth, Resume with an answer, session resume on bounce-backs, in-app notifications, the no-progress and recurring-block stall rules.
-  - Also built: Archie's retro and the worktree removal when a ticket reaches Done; ticket links (`blocks` and `relates`, proposed by Plan B and Nancy and confirmed by the owner, blockers in the overlap check, "waiting on" and overlap pills on cards).
-  - Also built: project Settings in the database (commands, test globs, hotspots, bounce limit, per-project concurrency; seeded once from `project.yml`) and the cost total on each ticket.
-  - Still to come: the smaller items in "Still to build" below.
-- **Then M5 (ship and deploy):** the server and login, the GitHub App, Captain Ship-It, CI and the PR Review gate.
+- **Next: M5 (ship and deploy):** the server and login, the GitHub App, Captain Ship-It, CI status tracking and the PR Review gate.
 
-The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it. What each milestone built, and why, is in `docs/m1-report.md`, `m2-report.md` and `m3-report.md`.
+The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it. What each milestone built, and why, is in `docs/m1-report.md`, `m2-report.md`, `m3-report.md` and `m4-report.md`.
 
 ## 1. Overview
 
@@ -799,12 +795,12 @@ Kanbot is a single-user, self-hosted tool, so the targets favor responsiveness, 
 
 ## 16. MVP scope and milestones
 
-Build in five milestones, each ending in something usable, so agents are added onto a board that already works rather than all at once.
+Build in six milestones, each ending in something usable, so agents are added onto a board that already works rather than all at once.
 
 1. **M1 — Board without agents.** *(Done; `docs/m1-report.md`.)* Monorepo scaffold, Docker Compose, Postgres + Drizzle schema and migrations, project creation, tickets with criteria and comments, drag-and-drop board with the default columns, activity log, SSE for moves. *Done when:* tickets can be created and moved and the board updates live in two browser tabs.
 2. **M2 — Orchestrator and Plan B.** *(Done; `docs/m2-report.md`.)* Runs-table queue, worker process, `AgentRuntime` adapter on the Claude Agent SDK, agent file loader, context assembly, `report_result` tool, run events streamed to the Live tab, cancel and retry, per-run budget, the replay runtime for tests, API retry with backoff, and the health indicator. *Done when:* moving a ticket to Planning produces a plan artifact and a "Plan ready" flag.
 3. **M3 — Build loop.** *(Done; `docs/m3-report.md`.)* Worktree manager, Sir Codes-a-Lot, Nitpick Nancy, Testy McTestface, transition table with auto-moves and bounce-backs, bounce limit, diff viewer, post-run path checks, touch sets, hotspot groups, the serialize overlap check, Nancy's cross-ticket review, stall detection (repetition), the plugin loader with Ponytail, the sample repo, recorded runs and the golden-ticket quality check. *Done when:* a small feature goes Ready → In Progress → Review → QA on its own, including at least one bounce-back.
-4. **M4 — Unblock (local).** Blocked column with Rubber Duckworth, resume with answer, Archie's retro and worktree cleanup, in-app notifications, cost tracking and daily cap, Pause all, project Settings in the database, ticket links. Still local: no GitHub, no deployment. Also owns its rows in "Still to build" below. *Done when:* a `needs_input` run can be answered and resumed, Pause all and the daily cap stop new runs, and a ticket moved to Done gets Archie's retro and loses its worktree.
+4. **M4 — Unblock (local).** *(Done; `docs/m4-report.md`.)* Blocked column with Rubber Duckworth, resume with answer, Archie's retro and worktree cleanup, in-app notifications, cost tracking and daily cap, Pause all, project Settings in the database, ticket links. Still local: no GitHub, no deployment. Also owns its rows in "Still to build" below. *Done when:* a `needs_input` run can be answered and resumed, Pause all and the daily cap stop new runs, and a ticket moved to Done gets Archie's retro and loses its worktree.
 5. **M5 — Ship and deploy.** DigitalOcean deployment (section 7) with Sign in with GitHub and the nightly disk cleanup, the onboarding walkthrough (section 10) with GitHub App connection and branch-protection check, Captain Ship-It with PR creation, CI status tracking, the PR Review gate with review-comment bounce-backs, merge detection, auto-rebase when main moves. Also owns its rows in "Still to build" below. *Done when:* a ticket goes from Backlog to a human-approved, merged PR.
 6. **M6 — Polish (Later items).** Dr. Rabbit Hole and spikes, epics with child tickets, auto-pull from Ready, Marge Conflict, stacked branches, Agents and Costs pages, editable workflow columns, webhooks, container mode, approving from a phone (plans, ship, Blocked answers, pause all), and the kanbot CLI.
 
@@ -813,11 +809,6 @@ MVP = M1 through M5. M1 to M4 run locally; M5 moves Kanbot to the DigitalOcean s
 ### Still to build
 
 Everything the spec describes that isn't built yet, with the milestone that builds it. Whoever builds that milestone owns the row. Anything deferred, cut or moved goes here in the same change. Finished rows are deleted; what each milestone built is in its report (`docs/m<n>-report.md`).
-
-**M4**
-
-| Item | Spec | Notes |
-| --- | --- | --- |
 
 **M5**
 
@@ -835,6 +826,7 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Commit trailers `Kanbot-Agent` / `Kanbot-Ticket` and the bot identity | FR-42 | With the GitHub App. Agent commits use the host's git identity until then. |
 | SDK `sandbox` | §7, §14 | Linux/macOS only (dev is Windows; the Droplet is Linux). |
 | GitHub status in `/api/health`; "PR ready for review" notification | §8, FR-60 | Health reports GitHub `unknown` until then. |
+| A golden ticket that reliably makes Nancy request changes, so the eval covers a real bounce (and the bounce-back session resume) | §8, FR-35 | M4 added a late owner comment (`reviewComment`) to `review.json`, but in the 2026-11-05 eval Plan B already rejected the bad hint, so the comment asked for nothing new and Nancy approved. The comment must add a requirement the plan couldn't anticipate. Bounces are covered by replay tests meanwhile. Moved from M4 on 2026-11-05. |
 | SSE `Last-Event-ID` replay | §12 | Only if needed: the board refetches on reconnect and the Live tab pages `/api/runs/:id/events?after=seq`. Revisit when running over real networks. Marked with a `shortcut:` comment. |
 
 **M6**

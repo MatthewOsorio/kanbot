@@ -2,7 +2,7 @@
 
 Self-hosted Kanban board where AI agents work the columns. The spec is `docs/requirements.md`: build to it, and update it in the same change whenever a decision or behavior changes. Work milestone by milestone (§16) and stop at the end of each for review.
 
-**Status: M3 (build loop) is done; M1 (board) and M2 (orchestrator, Plan B) before it.** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md`, `docs/m2-report.md` and `docs/m3-report.md`.
+**Status: M4 (unblock, local) is done; M1 (board), M2 (orchestrator, Plan B) and M3 (build loop) before it. Next is M5 (ship and deploy).** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md`.
 
 ## Layout
 
