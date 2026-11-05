@@ -226,6 +226,74 @@ export function TicketDrawer(props: {
               </details>
             )}
 
+            <section aria-labelledby="links-h" className="space-y-2">
+              <h3 id="links-h" className="text-sm font-medium">
+                Links
+              </h3>
+              <ul className="space-y-1">
+                {ticket.links.map((l) => (
+                  <li
+                    key={l.id}
+                    className={`flex items-center gap-2 text-sm ${l.confirmed ? "" : "opacity-70"}`}
+                  >
+                    <span className="w-20 shrink-0 text-muted-foreground">
+                      {
+                        { blocked_by: "blocked by", blocks: "blocks", relates: "relates to" }[
+                          l.relation
+                        ]
+                      }
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {l.key} {l.title}
+                    </span>
+                    {!l.confirmed && (
+                      <>
+                        <span className="shrink-0 text-xs text-muted-foreground">proposed</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            run(() =>
+                              api(`/api/links/${l.id}`, {
+                                method: "PATCH",
+                                body: { confirmed: true },
+                              }),
+                            )
+                          }
+                        >
+                          Confirm
+                        </Button>
+                      </>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`${l.confirmed ? "Remove" : "Dismiss"} link to ${l.key}`}
+                      onClick={() => run(() => api(`/api/links/${l.id}`, { method: "DELETE" }))}
+                    >
+                      {l.confirmed ? "×" : "Dismiss"}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              <form
+                action={(f) =>
+                  run(() =>
+                    api(`/api/tickets/${ticket.id}/links`, {
+                      body: { toKey: f.get("toKey"), kind: "blocked_by" },
+                    }),
+                  )
+                }
+              >
+                <Input
+                  name="toKey"
+                  required
+                  aria-label="Blocked by"
+                  placeholder="Blocked by… (e.g. KB-3)"
+                />
+              </form>
+            </section>
+
             <section aria-labelledby="ac-h" className="space-y-2">
               <h3 id="ac-h" className="text-sm font-medium">
                 Acceptance criteria

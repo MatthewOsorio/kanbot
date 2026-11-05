@@ -31,6 +31,7 @@ const TASK: Record<string, string> = {
   code_review: "Review this ticket's branch against its plan and acceptance criteria.",
   qa: "Test this ticket's branch against its acceptance criteria.",
   blocked: "Explain why this ticket is blocked and what the owner must answer to unblock it.",
+  done: "Write the retro for this finished ticket.",
 };
 
 type Ticket = {
@@ -42,6 +43,7 @@ type Ticket = {
   title: string;
   descriptionMd: string;
   touchPaths: string[];
+  branchName?: string | null;
 };
 
 type Repo = {
@@ -74,7 +76,8 @@ export async function buildContext(
   repo: Repo,
 ): Promise<string> {
   const blocked = run.columnSlug === "blocked";
-  const onBranch = run.columnSlug !== "planning" && !blocked && !!repo.cwd;
+  const done = run.columnSlug === "done";
+  const onBranch = run.columnSlug !== "planning" && !blocked && !done && !!repo.cwd;
   const [criteria, plan, review, testReport, prior, openComments] = await Promise.all([
     db
       .select()
@@ -89,7 +92,7 @@ export async function buildContext(
       .from(runs)
       .where(and(eq(runs.ticketId, ticket.id), ne(runs.id, run.id), isNotNull(runs.endedAt)))
       .orderBy(desc(runs.createdAt))
-      .limit(blocked ? 10 : 3), // Duckworth reads the ticket's history
+      .limit(done ? 100 : blocked ? 10 : 3), // Duckworth and Archie read the ticket's history
     db
       .select()
       .from(comments)
@@ -139,7 +142,11 @@ export async function buildContext(
           ),
         ]
       : []),
+    ...(run.columnSlug === "planning"
+      ? [section("open_tickets", await openTickets(db, ticket))]
+      : []),
     ...(blocked ? await blockerSections(db, ticket.id) : []),
+    ...(done ? await retroSections(db, ticket, prior, repo, review, testReport) : []),
     section(
       "ticket",
       `${ticket.key} · ${ticket.type} · ${ticket.priority}\nTitle: ${ticket.title}\n\n${clip(ticket.descriptionMd, "the ticket")}`,
@@ -200,6 +207,54 @@ export async function buildContext(
   ].join("\n\n");
 }
 
+/** Archie's view of a finished ticket (§4): the totals, every run, the last review and test report, the diff stat. */
+async function retroSections(
+  db: Db,
+  ticket: Ticket,
+  prior: (typeof runs.$inferSelect)[],
+  repo: Repo,
+  review?: typeof artifacts.$inferSelect,
+  testReport?: typeof artifacts.$inferSelect,
+) {
+  const [{ bounceCount } = { bounceCount: 0 }] = await db
+    .select({ bounceCount: tickets.bounceCount })
+    .from(tickets)
+    .where(eq(tickets.id, ticket.id));
+  const history = [...prior].reverse(); // oldest first
+  const cost = history.reduce((n, r) => n + r.costUsd, 0);
+  // The worktree is gone by now; the branch is still in the checkout.
+  const stat =
+    repo.cwd && ticket.branchName
+      ? await git(repo.cwd, [
+          "diff",
+          "--stat",
+          `${repo.defaultBranch}...${ticket.branchName}`,
+        ]).catch(() => "")
+      : "";
+  return [
+    section(
+      "history",
+      [
+        `Total cost: $${cost.toFixed(2)} over ${history.length} runs; bounce-backs counted toward the limit: ${bounceCount}`,
+        ...history.map(
+          (r) =>
+            `- ${r.agentSlug} (${r.columnSlug}): ${r.state}, $${r.costUsd.toFixed(2)}${r.error ? `, error: ${r.error}` : ""}${r.summary ? ` — ${r.summary}` : ""}`,
+        ),
+      ].join("\n"),
+    ),
+    section("latest_review", review ? clip(review.contentMd, `review v${review.version}`) : ""),
+    section(
+      "latest_test_report",
+      testReport ? clip(testReport.contentMd, `test report v${testReport.version}`) : "",
+    ),
+    section(
+      "diff_stat",
+      clip(stat, `git diff --stat ${repo.defaultBranch}...${ticket.branchName}`),
+      ` base="${repo.defaultBranch}"`,
+    ),
+  ];
+}
+
 /**
  * Duckworth's view of the block (§8): the run that sent the ticket here (with the questions it asked),
  * and his summaries from earlier visits to Blocked, so a recurring block is visible.
@@ -251,6 +306,45 @@ async function blockerSections(db: Db, ticketId: string) {
         .slice(-CAP),
     ),
   ];
+}
+
+/** Plan B's view of the board (§9): every other unfinished ticket, so it can name related or dependent ones. */
+async function openTickets(db: Db, ticket: Ticket) {
+  const others = await db
+    .select({
+      id: tickets.id,
+      number: tickets.number,
+      title: tickets.title,
+      column: columns.name,
+      touchPaths: tickets.touchPaths,
+      keyPrefix: projects.keyPrefix,
+    })
+    .from(tickets)
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .innerJoin(projects, eq(projects.id, tickets.projectId))
+    .where(
+      and(
+        eq(tickets.projectId, ticket.projectId),
+        ne(tickets.id, ticket.id),
+        ne(columns.slug, "done"),
+      ),
+    )
+    .orderBy(asc(tickets.number))
+    .limit(100); // shortcut: first 100 by number, when a board outgrows that rank by relevance
+  const parts: string[] = [];
+  for (const o of others) {
+    const plan = await latest(db, o.id, "plan");
+    parts.push(
+      [
+        `### ${o.keyPrefix}-${o.number}: ${o.title} (${o.column})`,
+        `Touches: ${o.touchPaths.join(", ") || "(unknown)"}`,
+        plan ? `Plan (start):\n${plan.contentMd.slice(0, 500)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+  return clip(parts.join("\n\n"), "the board");
 }
 
 /**

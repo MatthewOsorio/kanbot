@@ -60,6 +60,17 @@ export const verdictShape = {
     )
     .max(20)
     .default([]),
+  /** Plan B: related or dependent open tickets; stored as proposals the owner confirms (§9). */
+  relatedTickets: z
+    .array(
+      z.object({
+        ticket: z.string().trim().min(1).max(30),
+        kind: z.enum(["blocks", "blocked_by", "relates"]),
+        reason: z.string().trim().max(1_000).optional(),
+      }),
+    )
+    .max(20)
+    .default([]),
 };
 export const verdictPayload = z.object(verdictShape);
 export type VerdictPayload = z.output<typeof verdictPayload>;

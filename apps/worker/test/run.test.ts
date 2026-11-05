@@ -14,6 +14,7 @@ import {
   settings,
   spendToday,
   startColumnAgent,
+  ticketLinks,
   tickets,
   updateSettings,
 } from "@kanbot/shared/db";
@@ -431,5 +432,42 @@ describe("afterPrevious", () => {
     await Promise.allSettled([stopping, next, other]);
     expect(order).toEqual(["other ticket started", "old stopped", "next started"]);
     await expect(stopping).rejects.toThrow("aborted"); // the caller still sees the failure
+  });
+});
+
+describe("Plan B's related tickets (§9, M4)", () => {
+  it("stores them as unconfirmed links, flipping blocked_by, and ignores unknown keys", async () => {
+    await db.delete(projects).where(eq(projects.keyPrefix, "REL")); // left by an earlier run
+    const { project, ticket, cols } = await plannedTicket("related");
+    await db.update(projects).set({ keyPrefix: "REL" }).where(eq(projects.id, project.id));
+    const planning = cols.find((c) => c.slug === "planning")!;
+    const others = await db
+      .insert(tickets)
+      .values(
+        [2, 3, 4].map((number) => ({
+          projectId: project.id,
+          number,
+          title: `Other ${number}`,
+          columnId: planning.id,
+          position: `b${number}`,
+        })),
+      )
+      .returning();
+    await claimAndRun();
+
+    const links = await db.select().from(ticketLinks).where(eq(ticketLinks.projectId, project.id));
+    const [two, three, four] = others;
+    // "blocked_by REL-2" means REL-2 blocks this ticket; "blocks REL-4" means this one blocks REL-4.
+    expect(
+      links
+        .map((l) => [l.fromTicketId, l.toTicketId, l.kind, l.confirmed, l.source])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual(
+      [
+        [two!.id, ticket.id, "blocks", false, "agent"],
+        [ticket.id, three!.id, "relates", false, "agent"],
+        [ticket.id, four!.id, "blocks", false, "agent"],
+      ].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    );
   });
 });

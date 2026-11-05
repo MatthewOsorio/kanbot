@@ -12,6 +12,8 @@ export const activityActions = [
   "run_finished",
 ] as const;
 export const criterionSources = ["user", "agent"] as const;
+export const linkKinds = ["blocks", "relates"] as const;
+export const linkSources = ["user", "agent"] as const;
 export const authorKinds = ["user", "agent"] as const;
 export const statusFlags = [
   "none",
@@ -139,6 +141,12 @@ export const patchSettingsBody = z
   .refine(nonEmpty, "No fields to update");
 
 export const createCriterionBody = z.object({ text: z.string().trim().min(1).max(1_000) });
+
+export const createLinkBody = z.object({
+  toKey: z.string().trim().min(1).max(30),
+  kind: z.enum(["blocks", "blocked_by", "relates"]),
+});
+export const patchLinkBody = z.object({ confirmed: z.literal(true) });
 
 export const patchCriterionBody = z
   .object({ text: createCriterionBody.shape.text, status: z.enum(criterionStatuses) })

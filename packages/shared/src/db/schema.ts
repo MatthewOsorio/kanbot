@@ -23,6 +23,8 @@ import {
   authorKinds,
   criterionSources,
   criterionStatuses,
+  linkKinds,
+  linkSources,
   priorities,
   runEventTypes,
   runStates,
@@ -42,6 +44,8 @@ export const statusFlag = pgEnum("ticket_status_flag", statusFlags);
 export const runState = pgEnum("run_state", runStates);
 export const runEventType = pgEnum("run_event_type", runEventTypes);
 export const artifactKind = pgEnum("artifact_kind", artifactKinds);
+export const linkKind = pgEnum("link_kind", linkKinds);
+export const linkSource = pgEnum("link_source", linkSources);
 export const authorKind = pgEnum("author_kind", authorKinds);
 
 export const projects = pgTable("projects", {
@@ -114,6 +118,28 @@ export const acceptanceCriteria = pgTable(
     source: criterionSource("source").notNull().default("user"),
   },
   (t) => [index().on(t.ticketId)],
+);
+
+/** `from` blocks `to`; for `relates` the direction is arbitrary. Agent-proposed links stay unconfirmed until the owner confirms. */
+export const ticketLinks = pgTable(
+  "ticket_links",
+  {
+    id: id(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    fromTicketId: uuid("from_ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    toTicketId: uuid("to_ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    kind: linkKind("kind").notNull(),
+    confirmed: boolean("confirmed").notNull().default(false),
+    source: linkSource("source").notNull().default("user"),
+    createdAt: createdAt(),
+  },
+  (t) => [unique().on(t.fromTicketId, t.toTicketId, t.kind), index().on(t.toTicketId)],
 );
 
 export const comments = pgTable(

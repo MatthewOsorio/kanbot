@@ -46,6 +46,15 @@ export const RUN_RULES: readonly {
   ...(["succeeded", "failed", "timed_out", "budget_exceeded", "awaiting_input"] as const).map(
     (outcome) => ({ column: "blocked", outcome, to: null, flag: "needs_input" as const }),
   ),
+  // Archie's retro is a courtesy: however it ends, a finished ticket stays in Done (failed ones get Retry).
+  ...(["succeeded", "failed", "timed_out", "budget_exceeded", "awaiting_input"] as const).map(
+    (outcome) => ({
+      column: "done",
+      outcome,
+      to: null,
+      flag: outcome === "succeeded" ? ("none" as const) : ("failed" as const),
+    }),
+  ),
   { column: "*", outcome: "awaiting_input", to: "blocked", flag: "needs_input" },
   { column: "*", outcome: "failed", to: "blocked", flag: "failed" },
   { column: "*", outcome: "timed_out", to: "blocked", flag: "failed" },

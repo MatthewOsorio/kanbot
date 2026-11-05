@@ -16,7 +16,8 @@ Last updated 2026-11-03.
 - **How it runs:** locally only, bound to 127.0.0.1, with no login. Tested on Windows only. Project commands, test globs and hotspots come from `.kanbot/project.yml`.
 - **Next: M4 (unblock, still local).**
   - Built so far: the daily cap, Pause all, automatic resume after an outage, CI; Blocked with Rubber Duckworth, Resume with an answer, session resume on bounce-backs, in-app notifications, the no-progress and recurring-block stall rules.
-  - Still to come: Archie, costs per ticket, project Settings, ticket links.
+  - Also built: Archie's retro and the worktree removal when a ticket reaches Done; ticket links (`blocks` and `relates`, proposed by Plan B and Nancy and confirmed by the owner, blockers in the overlap check, "waiting on" and overlap pills on cards).
+  - Still to come: costs per ticket, project Settings.
 - **Then M5 (ship and deploy):** the server and login, the GitHub App, Captain Ship-It, CI and the PR Review gate.
 
 The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it. What each milestone built, and why, is in `docs/m1-report.md`, `m2-report.md` and `m3-report.md`.
@@ -81,7 +82,7 @@ The orchestrator applies these rules after every verdict; the human can still dr
 | Planning | `success` | Stays in Planning, flagged "Plan ready" | Yes |
 | Planning | User approves (drags to Ready, or clicks Approve plan on the ticket) | Ready | No (configurable) |
 | Ready | User drags, or auto-pull with a free WIP slot | In Progress (creates worktree, starts Sir Codes-a-Lot) | No by default |
-| Ready | Overlaps an in-flight ticket (section 9) | The move is refused (409 `overlap`) and the ticket stays in Ready; the owner is asked to "Start anyway". Dependencies (`blocks` links) join this check in M4 | Yes; user can "Start anyway" |
+| Ready | Overlaps an in-flight ticket, or has an unfinished confirmed blocker (section 9) | The move is refused (409 `overlap`) and the ticket stays in Ready; the owner is asked to "Start anyway". | Yes; user can "Start anyway" |
 | In Progress | `success` | Code Review | Yes |
 | Code Review | `success` | QA / Testing | Yes |
 | Code Review | `changes_requested` | In Progress, review comments attached, bounce +1 | Yes |
@@ -110,7 +111,7 @@ Dragging a ticket yourself always works and always triggers the target column's 
 | QA / Testing | Testy McTestface runs against the branch as it stands. |
 | Ship | Counts as ship approval; Captain Ship-It opens or updates the PR. Skipping Code Review or QA asks you to confirm first. |
 | PR Review | If a PR exists, the ticket waits for your review; if not, you're asked whether to run Ship first. |
-| Done | If the PR is merged, Archie runs. If not, you confirm closing without merging; the PR is closed, the branch kept, and Archie runs. |
+| Done | If the PR is merged, Archie runs. If not, you confirm closing without merging; the PR is closed, the branch kept, and Archie runs. Until Ship-It exists (M5) there is no PR: the worker removes the worktree and Archie runs at once. However his run ends, the ticket stays in Done (a failed retro shows Failed with Retry). |
 | Blocked | Rubber Duckworth summarizes where things stand, so a parked ticket keeps its context. |
 
 Moving a ticket with an active run cancels that run first (FR-24). No manual move merges code; merging always goes through GitHub's protected path.
@@ -128,7 +129,7 @@ Nine agents ship in v1: one per working column, plus a researcher, an unblocker 
 | **Testy McTestface** — "Breaks things professionally." | QA / Testing | Runs the full test suite, writes integration or end-to-end tests for each acceptance criterion, does exploratory checks (e.g. starts the app and hits endpoints). | Edit test files only (enforced by path globs), shell (allowlisted), a headless browser through Playwright. | Test report: pass/fail per criterion, bug reports with repro steps |
 | **Rubber Duckworth** — "Quack. Tell me where it hurts." | Blocked | Summarizes why a ticket is stuck, what was tried, and the exact questions the human must answer. Suggests options. | Read-only ticket history and repo. | Blocker summary with numbered questions |
 | **Captain Ship-It** — "Fortune favors the merged." | Ship | Re-runs tests on the rebased branch, writes the PR description and changelog entry, updates docs/README if needed, pushes the ticket branch, opens a PR, then waits for CI. | Edit docs and changelog, git push to ticket branch, GitHub PR create. Never pushes to or merges into the default branch. | Pull request link, changelog entry |
-| **Archie the Archivist** — "Remembers everything so you don't have to." | Done | Writes a short retro (what was built, cost, bounce-backs, lessons), suggests additions to the project's CLAUDE.md, cleans up the worktree. | Read ticket history, delete own worktree. | Retro artifact, CLAUDE.md suggestions |
+| **Archie the Archivist** — "Remembers everything so you don't have to." | Done | Writes a short retro (what was built, cost, bounce-backs, lessons), suggests additions to the project's CLAUDE.md. | Read ticket history and the repo. The worker, not Archie, removes the worktree (FR-49), before his run starts. | Retro artifact, CLAUDE.md suggestions |
 | **Marge Conflict** — "Nobody leaves until we all get along." | None: triggered when a rebase onto main conflicts (section 9) | Resolves merge conflicts using both tickets' plans and acceptance criteria, then re-runs build and tests. | Edit conflicted files only, shell (allowlisted), git commit (no push). | Resolution commit and notes, or conflict hunks for the human |
 
 Backlog, Ready and PR Review have no agent; tickets there wait for the human.
@@ -187,7 +188,7 @@ Fourteen use cases define v1; UC-1 through UC-9 are the happy path and its loops
 | UC-6 | QA finds a bug | Testy McTestface returns `failed` with a bug report. | Ticket bounces to In Progress with the bug report; after the fix it goes through Code Review and QA again. |
 | UC-7 | Agent needs input | Any agent returns `needs_input`, or the bounce-back limit is hit. | Ticket moves to Blocked; Rubber Duckworth posts numbered questions; user gets a notification. User types an answer in the Blocked panel and clicks Resume; the ticket returns to its previous column and the agent resumes its session with the answer. |
 | UC-8 | Watch an agent work | User opens a ticket with an active run. | Live stream of the agent's messages, tool calls and command output; elapsed time and running cost shown. |
-| UC-9 | Ship and close | QA passes; user approves Ship (or auto-ship is on). | Captain Ship-It opens a PR; once CI is green the ticket waits in PR Review. When the owner approves and merges, the ticket moves to Done; Archie writes the retro and removes the worktree. |
+| UC-9 | Ship and close | QA passes; user approves Ship (or auto-ship is on). | Captain Ship-It opens a PR; once CI is green the ticket waits in PR Review. When the owner approves and merges, the ticket moves to Done; Archie writes the retro; the worker removes the worktree. |
 | UC-10 | Research spike | User creates a ticket of type `spike` and moves it to Planning. | Dr. Rabbit Hole runs instead of Plan B and returns a recommendation; the user can convert it into feature tickets. |
 | UC-11 | Break down an epic | Plan B plans a ticket of type `epic`. | Plan proposes child tickets; user accepts some or all; children are created in Backlog linked to the epic. Epic shows child progress. |
 | UC-12 | Cancel or redirect | User drags a ticket out of a column while its agent is running. | Confirm dialog; on confirm the run is cancelled, partial commits stay on the branch, and the ticket lands where it was dropped (starting that column's agent if any). |
@@ -215,7 +216,7 @@ Requirements marked MVP must ship in the first usable version; Later items are d
 | FR-11 | Acceptance criteria as a checklist that agents read and QA checks off. | MVP |
 | FR-12 | Comments thread on each ticket, written by the user or by agents (agent comments show the agent avatar). | MVP |
 | FR-13 | Full activity timeline: every move, run, verdict, comment and artifact, with timestamps and actor. | MVP |
-| FR-14 | Parent/child links (epic → children) and "blocked by" dependencies; a ticket blocked by an unfinished ticket cannot enter In Progress. | MVP |
+| FR-14 | Parent/child links (epic → children) and "blocked by" dependencies; a ticket blocked by an unfinished ticket cannot enter In Progress unless the owner chooses "Start anyway" (409 `overlap`, like an overlap). Only confirmed links block; an agent's proposal waits for the owner. | MVP |
 | FR-15 | Quick-add from anywhere (keyboard shortcut) and from a CLI command `kanbot add "idea"`. | Later |
 
 ### Board and transitions
@@ -257,7 +258,7 @@ Requirements marked MVP must ship in the first usable version; Later items are d
 | FR-46 | CI status shown on cards and in the drawer; failing CI bounces the ticket to In Progress with a log excerpt. | MVP |
 | FR-47 | PR Review gate: human review comments are imported, "changes requested" bounces to In Progress, and the Merge button is enabled only after a human approval. | MVP |
 | FR-48 | Commits pushed by the human to a ticket branch are detected and never rewritten; the next run starts from the latest head. | MVP |
-| FR-49 | Remove the worktree when a ticket reaches Done or is deleted; keep the branch until merged. | MVP |
+| FR-49 | Remove the worktree when a ticket reaches Done or is deleted (the worker does it, not Archie); keep the branch until merged. | MVP |
 | FR-50 | Touch set per ticket, project hotspot groups, and an overlap check before In Progress (hotspot overlap always serializes); per-project `overlapPolicy` of `serialize` (default) or `parallel`. | MVP |
 | FR-51 | When main moves, rebase overlapping in-flight branches; clean rebases push with `--force-with-lease` on `kanbot/*` branches only. | MVP |
 | FR-52 | Marge Conflict resolves rebase conflicts; resolved branches go back through Code Review and QA. | Later |
@@ -503,9 +504,9 @@ Kanbot avoids most collisions before code is written by tracking which files eac
 ### How overlap is detected
 
 1. **Touch set.** Plan B's plan must list the files and folders it expects to change (paths or globs). These are stored on the ticket as `touch_paths`. After each Sir Codes-a-Lot run, the worker adds the files the branch actually changed.
-2. **Related tickets.** Plan B receives the titles, plan summaries and touch sets of all open tickets, and its verdict must name related or dependent ones (`relatedTickets`, each `blocks` or `relates`). The user confirms the proposed links.
+2. **Related tickets.** Plan B receives the titles, plan summaries and touch sets of all open tickets, and its verdict must name related or dependent ones (`relatedTickets`, each `blocks` or `relates`). Each one is stored as an unconfirmed proposal (`confirmed = false`, `source = agent`); the drawer shows it with Confirm and Dismiss, and only confirmed links count. Keys from other projects or unknown tickets are ignored.
 3. **Hotspots.** Each project names groups of files where concurrent changes almost always collide, such as the database schema or route definitions. Two tickets touching the same hotspot group overlap even if no individual file matches.
-4. **Overlap check.** Before a ticket enters In Progress, the move compares its touch set and hotspot groups with every ticket between In Progress and PR Review. On overlap the move is refused (409 `overlap`, e.g. "Overlaps tickets in flight: KB-12 (3 files, hotspot database)") and the board asks whether to start anyway. A ticket with no touch set yet overlaps nothing. Showing overlaps on the cards themselves comes with ticket links (M4).
+4. **Overlap check.** Before a ticket enters In Progress, the move compares its touch set and hotspot groups with every ticket between In Progress and PR Review. On overlap the move is refused (409 `overlap`, e.g. "Overlaps tickets in flight: KB-12 (3 files, hotspot database)") and the board asks whether to start anyway. A ticket with no touch set yet overlaps nothing. The same check also refuses a ticket with a confirmed `blocks` link from a ticket that is not yet in Done ("Waiting on KB-3"), even with no touch set. Cards in Ready and the in-flight columns show "waiting on KB-n" and "overlaps KB-n".
 5. **Cross-ticket review.** Nitpick Nancy checks each diff against the other in-flight tickets for contract changes that no file comparison can see, such as an API response shape another ticket depends on.
 
 ### What happens when tickets overlap
@@ -547,7 +548,7 @@ Nancy catches the overlap that file lists miss: one ticket changing a contract t
 - **Extra context.** For every other ticket between In Progress and PR Review: its title, plan summary and branch diff, capped at 1,500 lines in total. Past the cap she gets diff stats and plan summaries only.
 - **What she checks.** Changes to exported function signatures and types, API request and response shapes, database columns, environment variables and event names that another in-flight ticket uses or also changes.
 - **What she reports.** Her verdict adds `crossTicketRisks`, each with the other ticket, the kind of contract, a description and a severity.
-- **Blocking risk.** Treated as `changes_requested` (the worker downgrades a `success` that carries one). The note is posted on both tickets; proposing a `blocks` link for the human to confirm arrives with ticket links (M4).
+- **Blocking risk.** Treated as `changes_requested` (the worker downgrades a `success` that carries one). The note is posted on both tickets, and the other ticket is proposed as a blocker (an unconfirmed `blocks` link) for the human to confirm.
 - **Warning.** A comment on both tickets; no bounce.
 
 ### Keeping in-flight branches current
@@ -647,7 +648,7 @@ Ten tables plus a single-row `settings` table cover v1; all IDs are UUIDv7, all 
 | `columns` | id, project\_id, slug, name, position, agent\_slug (nullable), wip\_limit, auto\_advance (bool) | Seeded with the default workflow per project. |
 | `tickets` | id, project\_id, number, title, description\_md, type, priority, labels\[\], column\_id, position, parent\_id, branch\_name, worktree\_path, bounce\_count, status\_flag (`none`, `running`, `needs_input`, `plan_ready`, `awaiting_approval`, `waiting_on_ticket`, `pr_open`, `failed`), touch\_paths\[\], pr\_number, pr\_url, head\_sha, ci\_state, review\_state, created\_at, updated\_at | `(project_id, number)` unique; `position` is a fractional index for ordering in a column. |
 | `acceptance_criteria` | id, ticket\_id, position, text, status (`open`, `pass`, `fail`), source (`user`, `agent`) | QA updates status. |
-| `ticket_links` | from\_ticket\_id, to\_ticket\_id, kind (`blocks`, `relates`) | Epics use `tickets.parent_id`, not this table. |
+| `ticket_links` | project\_id, from\_ticket\_id, to\_ticket\_id, kind (`blocks`, `relates`), confirmed, source (`user`, `agent`) | Epics use `tickets.parent_id`, not this table. |
 | `runs` | id, ticket\_id, agent\_slug, agent\_config\_hash, column\_slug, state, verdict, summary, request\_md, session\_id, resume\_session\_id, input\_tokens, output\_tokens, cost\_usd, budget\_usd, created\_at, started\_at, ended\_at, error | One active run per ticket enforced with a partial unique index on non-terminal states (`queued`, `running`; `awaiting_input` is terminal, see §8 Resume). `budget_usd` is set when the run is claimed: the agent's budget, capped by what is left of the day; while the run goes, it counts toward today's spend. Also the job queue (§7). Token counts include cache reads and writes. `request_md` is the owner's Revise plan text (UC-3) or Resume answer (UC-7) the run acts on; null otherwise. `resume_session_id` is the agent session the run continues (Resume, bounce-backs). |
 | `run_events` | id, run\_id, seq, type (`assistant`, `tool_call`, `tool_result`, `stdout`, `system`), payload (jsonb), created\_at | Append-only; `(run_id, seq)` unique; pruned after 90 days except the last run per ticket. |
 | `artifacts` | id, ticket\_id, run\_id, kind (`plan`, `research`, `review`, `test_report`, `blocker`, `retro`, `diff_snapshot`), title, version, content\_md, data (jsonb), created\_at | New versions never overwrite old ones. |
@@ -673,6 +674,8 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | GET / POST | `/api/tickets/:id/comments` | List or add comments. | Built |
 | POST | `/api/tickets/:id/criteria` | Body `{text}`. Add an acceptance criterion. | Built |
 | PATCH / DELETE | `/api/criteria/:id` | Body `{text?, status?}`. Edit or remove a criterion. | Built |
+| POST | `/api/tickets/:id/links` | Body `{toKey, kind}`, kind `blocks`, `blocked_by` or `relates`. Adds a confirmed link; 404 for an unknown key, 400 for a self-link, 409 `link_exists`. | Built |
+| PATCH / DELETE | `/api/links/:id` | PATCH body `{confirmed: true}` confirms a proposal; DELETE dismisses or removes a link. | Built |
 | GET | `/api/tickets/:id/activity` | Timeline. | Built |
 | GET | `/api/tickets/:id/diff` | `{branch, base, diff, truncated, comments}`: the unified diff of the ticket branch vs the default branch (`base...branch`, capped at 1 MB) and the review's line comments. | Built |
 | GET | `/api/tickets/:id/runs` | Run history. | Built |
@@ -815,12 +818,9 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Item | Spec | Notes |
 | --- | --- | --- |
 | Project settings in the database (`commands`, `test_globs`, `hotspots`, `settings`) and a Settings page; per-project bounce limit and concurrency | §11, FR-2, FR-23, §14 | `.kanbot/project.yml` on the default branch until then; `BOUNCE_LIMIT` and `LIMITS` are constants. Command detection comes with onboarding (M5); in M4 the owner fills them in, seeded from `project.yml`. |
-| Ticket links: `ticket_links`, "blocked by", Plan B's `relatedTickets`, Nancy's proposed `blocks` links, overlap shown on cards | §9, FR-14 | Needs a confirm-links UI. The overlap check uses touch sets and hotspots only. |
-| Agent file for Archie | §4, §17 | Until it ships, Done is a gate. Locally a ticket reaches Done by a manual move with no PR; Archie runs on it as on an unmerged ticket (§3 Done row, minus closing the PR). |
 | Only the agent's own plugins in its session | §8 | Skills are already limited to our plugins' skills. Claude Code's bundled plugins (`cc-plugin-agents-md`, `cc-plugin-telemetry`, `cc-plugin-plugin-authoring`) still load with `settingSources: []`; find the SDK switch for them. |
 | Install when the lockfile changes (not only when the worktree is created) | §8 step 2 | Agents can run `{install}` themselves. |
 | Per-command timeout for agents' shell commands | §8 failure handling | Found in the 2026-11-03 docs cleanup: only the worker's own install has the 10-minute timeout; an agent's command is bounded by the run's timeout. |
-| Worktree removal when a ticket reaches Done | FR-49 | Archie. Deleting a ticket already removes its worktree. |
 | `blockWritesOutsideWorkingDirectories` | §7, §14 | Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
 | The top bar's agent notice clears when the run ends | §13 | It stays up after the run ends, until the next move. Cosmetic. Marked with a `shortcut:` comment. |
 | A golden ticket that reliably makes Nancy request changes, so the eval covers a real bounce | §8 | With real agents, `review.json`'s bad hint was ignored by Sir Codes-a-Lot, so Nancy approved. Bounces are covered by replay tests; real bounces so far depended on run order. Rewrite the ticket and re-save the baseline. |

@@ -15,6 +15,7 @@ import {
   projects,
   runs,
   startColumnAgent,
+  ticketLinks,
   tickets,
 } from "@kanbot/shared/db";
 import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
@@ -304,6 +305,22 @@ describe("build loop (M3 done criterion)", () => {
     ]);
   });
 
+  it("proposes the other ticket as a blocker when Nancy reports a blocking risk", async () => {
+    const { ticket, move, addTicket } = await setup("risk", undefined, "RISK");
+    const other = await addTicket(2, "default", "Rewrite TodoStore.remove");
+    await move("in_progress");
+    await drain();
+    const links = await db.select().from(ticketLinks).where(eq(ticketLinks.toTicketId, ticket.id));
+    expect(links).toEqual([
+      expect.objectContaining({
+        fromTicketId: other.id,
+        kind: "blocks",
+        confirmed: false,
+        source: "agent",
+      }),
+    ]);
+  });
+
   it("builds two tickets in one repo side by side without mixing their branches", async () => {
     const { project, ticket, repo, col, move, addTicket } = await setup("bounce");
     const other = await addTicket(2, "golden-bug", "Second ticket in flight");
@@ -448,5 +465,51 @@ describe("post-run checks", () => {
     expect(await checkAfterRun(wt, "main", before, undefined)).toMatch(
       /reached the default branch/,
     );
+  });
+});
+
+describe("Done and Archie (FR-49, §4)", () => {
+  /** Builds the ticket through the loop to QA, then moves it to Done as the owner would. */
+  async function toDone(scenario: string) {
+    const s = await setup(scenario);
+    await s.move("in_progress");
+    await drain();
+    const wt = (await ticketNow(s.ticket.id)).worktreePath!;
+    expect(existsSync(wt)).toBe(true);
+    await s.move("done");
+    return { ...s, wt };
+  }
+
+  it("removes the worktree, keeps the branch and stores Archie's retro", async () => {
+    const { ticket, repo, wt, col } = await toDone("default");
+    const [run] = await drain();
+    expect(`${run!.agentSlug}:${run!.state}`).toBe("archie-the-archivist:succeeded");
+    expect(existsSync(wt)).toBe(false);
+    const t = await ticketNow(ticket.id);
+    expect(t.worktreePath).toBeNull();
+    expect(t.columnId).toBe(col("done").id);
+    expect(t.statusFlag).toBe("none");
+    expect((await git(repo, ["branch", "--list", t.branchName!])).trim()).not.toBe("");
+    const retros = await db.select().from(artifacts).where(eq(artifacts.kind, "retro"));
+    expect(retros.filter((a) => a.ticketId === ticket.id)).toHaveLength(1);
+    // Archie's context carries the real totals and the run history.
+    const prompt = await buildContext(
+      db,
+      { ...t, key: "X-1" },
+      { id: uuidv7(), requestMd: null, columnSlug: "done" },
+      { cwd: repo, defaultBranch: "main", hotspots: [] },
+    );
+    expect(prompt).toMatch(/^Write the retro for this finished ticket/);
+    expect(prompt).toMatch(/Total cost: \$[\d.]+ over \d+ runs/);
+    expect(prompt).toMatch(/sir-codes-a-lot \(in_progress\): succeeded/);
+  });
+
+  it("leaves a finished ticket in Done, flagged failed, when Archie's run fails", async () => {
+    const { ticket, col } = await toDone("no-report");
+    const [run] = await drain();
+    expect(run!.state).toBe("failed");
+    const t = await ticketNow(ticket.id);
+    expect(t.columnId).toBe(col("done").id);
+    expect(t.statusFlag).toBe("failed");
   });
 });

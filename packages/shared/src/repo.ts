@@ -23,6 +23,16 @@ export async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
+/** FR-49: removes a ticket's worktree; the branch stays (it may hold work worth keeping). Never throws. */
+export const removeWorktree = (repoPath: string, path: string) =>
+  git(repoPath, ["worktree", "remove", "--force", path]).then(
+    () => true,
+    (e: Error) => {
+      console.warn(`Could not remove worktree ${path}: ${e.message}`);
+      return false;
+    },
+  );
+
 /** `.kanbot/project.yml` (requirements §9). Settings UI and DB columns arrive with Settings (M4). */
 export const projectConfig = z.object({
   commands: z

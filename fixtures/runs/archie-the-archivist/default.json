@@ -1,0 +1,20 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": { "text": "Filing the retro." }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Retro written.",
+    "artifacts": [
+      {
+        "kind": "retro",
+        "title": "Retro: replay ticket",
+        "markdown": "## What was built\nA small change.\n\n## How it went\nNo bounce-backs.\n\n## Suggested CLAUDE.md additions\nNone."
+      }
+    ]
+  },
+  "costUsd": 0.01
+}

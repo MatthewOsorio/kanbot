@@ -20,13 +20,15 @@ import {
   projects,
   runs,
   startColumnAgent,
+  ticketLinks,
   tickets,
 } from "@kanbot/shared/db";
-import { git, loadProjectConfig, overlap } from "@kanbot/shared/repo";
+import { git, loadProjectConfig, overlap, removeWorktree } from "@kanbot/shared/repo";
 import { and, asc, desc, eq, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";
+import { linksOf } from "./links";
 import { planExists } from "./runs";
 import { db } from "./db";
 import { publish, type Tx } from "./events";
@@ -92,7 +94,7 @@ export async function getTicket(id: string) {
     .innerJoin(columns, eq(columns.id, tickets.columnId))
     .where(eq(tickets.id, id));
   if (!row) throw notFound("Ticket not found");
-  const [criteria, runList, artifactList] = await Promise.all([
+  const [criteria, runList, artifactList, links] = await Promise.all([
     db
       .select()
       .from(acceptanceCriteria)
@@ -105,6 +107,7 @@ export async function getTicket(id: string) {
       .from(artifacts)
       .where(eq(artifacts.ticketId, id))
       .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
+    linksOf(id),
   ]);
   return {
     ...row.ticket,
@@ -114,6 +117,7 @@ export async function getTicket(id: string) {
     criteria,
     runs: runList,
     artifacts: artifactList,
+    links,
   };
 }
 
@@ -148,10 +152,7 @@ export async function deleteTicket(id: string) {
   });
   // FR-49: the worktree goes with the ticket; the branch stays (it may hold work worth keeping).
   // shortcut: a cancelled agent may still be stopping inside it; the removal then fails and the folder stays until the M5 nightly cleanup.
-  if (t.worktreePath && t.repoPath)
-    await git(t.repoPath, ["worktree", "remove", "--force", t.worktreePath]).catch((e: Error) =>
-      console.warn(`Could not remove worktree ${t.worktreePath}: ${e.message}`),
-    );
+  if (t.worktreePath && t.repoPath) await removeWorktree(t.repoPath, t.worktreePath);
 }
 
 /** The branch diff vs the default branch (FR-41), with the review's line comments for the Diff tab. */
@@ -190,6 +191,26 @@ export async function getDiff(id: string) {
   };
 }
 const DIFF_CAP = 1_000_000;
+
+/** Confirmed blockers that aren't Done yet, as keys (§9 "blocked by"). */
+export async function unfinishedBlockers(tx: Tx, ticketId: string) {
+  const rows = await tx
+    .select({ number: tickets.number, keyPrefix: projects.keyPrefix })
+    .from(ticketLinks)
+    .innerJoin(tickets, eq(tickets.id, ticketLinks.fromTicketId))
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .innerJoin(projects, eq(projects.id, tickets.projectId))
+    .where(
+      and(
+        eq(ticketLinks.toTicketId, ticketId),
+        eq(ticketLinks.kind, "blocks"),
+        eq(ticketLinks.confirmed, true),
+        ne(columns.slug, "done"),
+      ),
+    )
+    .orderBy(asc(tickets.number));
+  return rows.map((r) => `${r.keyPrefix}-${r.number}`);
+}
 
 /**
  * The §9 overlap check before In Progress: tickets in flight whose touch set or hotspot groups overlap
@@ -269,9 +290,19 @@ export function moveTicket(
     const changesColumn = from.id !== to.id;
 
     if (changesColumn && to.slug === "in_progress" && !startAnyway) {
+      const waiting = await unfinishedBlockers(tx, id);
       const hits = await overlapping(tx, t);
-      if (hits.length)
-        throw new HttpError(409, "overlap", `Overlaps tickets in flight: ${hits.join("; ")}`);
+      if (waiting.length || hits.length)
+        throw new HttpError(
+          409,
+          "overlap",
+          [
+            waiting.length && `Waiting on ${waiting.join(", ")}`,
+            hits.length && `Overlaps tickets in flight: ${hits.join("; ")}`,
+          ]
+            .filter(Boolean)
+            .join(". "),
+        );
     }
     const hasPlan = changesColumn && to.slug === "planning" && (await planExists(tx, id));
     if (hasPlan && !keepPlan && !requestMd)
