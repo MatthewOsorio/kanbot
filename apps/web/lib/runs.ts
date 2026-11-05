@@ -4,8 +4,12 @@ import {
   artifacts,
   cancelActiveRun,
   columns,
+  logActivity,
   moveToColumnEnd,
   OWNER,
+  projectConfigOf,
+  projects,
+  publish,
   runEvents,
   runs,
   startColumnAgent,
@@ -141,6 +145,21 @@ export function resumeRun(runId: string, answer: string) {
       )
       .limit(1);
     if (later) throw new HttpError(409, "stale", "A later run has replaced this one");
+    // At the limit the ticket went to Blocked for bouncing; without a reset the next change request would block it again.
+    const [project] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
+    const { bounceLimit } = await projectConfigOf(tx, project!);
+    if (ticket.bounceCount >= bounceLimit) {
+      await tx.update(tickets).set({ bounceCount: 0 }).where(eq(tickets.id, ticket.id));
+      await logActivity(tx, ticket.id, "edited", {
+        fields: ["bounceCount"],
+        change: "reset on resume",
+      });
+      await publish(tx, ticket.projectId, {
+        type: "ticket.updated",
+        ticketId: ticket.id,
+        fields: ["bounceCount"],
+      });
+    }
     return restart(tx, run, ticket, {
       requestMd: answer || undefined,
       resumeSessionId: run.sessionId,

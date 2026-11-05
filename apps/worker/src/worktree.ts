@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { branchName, git, type ProjectConfig } from "@kanbot/shared/repo";
@@ -33,6 +33,11 @@ export async function ensureWorktree(
   if (existsSync(path)) {
     const head = (await git(path, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
     if (head !== branch) throw new Error(`Worktree ${path} is on ${head}, expected ${branch}`);
+    // Agents can change dependencies; install again when the lockfile differs from the last install (§8 step 2).
+    // A failed reinstall keeps the worktree: it may hold the agent's work.
+    if (config.commands.install && (await lockfileHash(path)) !== (await installedHash(path))) {
+      await install(config.commands.install, path);
+    }
     return { path, branch };
   }
   await git(repoPath, ["worktree", "prune"]); // forget worktrees whose folder was deleted
@@ -47,11 +52,40 @@ export async function ensureWorktree(
   );
   // A failed install removes the worktree again (the branch stays), so the next run installs anew.
   if (config.commands.install)
-    await runCommand(config.commands.install, path).catch(async (e: Error) => {
+    await install(config.commands.install, path).catch(async (e: Error) => {
       await git(repoPath, ["worktree", "remove", "--force", path]).catch(() => {});
-      throw new Error(`Install failed (${config.commands.install}): ${e.message}`);
+      throw e;
     });
   return { path, branch };
+}
+
+const LOCKFILES = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock"];
+
+/** Hash of the lockfiles that exist; "" if there are none. */
+async function lockfileHash(path: string) {
+  const present = LOCKFILES.filter((f) => existsSync(join(path, f)));
+  const hashes = await Promise.all(present.map((f) => git(path, ["hash-object", f])));
+  return hashes.map((h, i) => `${present[i]}:${h.trim()}`).join("\n");
+}
+
+/** The marker lives in the worktree's git dir, so it never shows up as a change in the work tree. */
+const markerPath = async (path: string) =>
+  resolve(path, (await git(path, ["rev-parse", "--git-path", "kanbot-install"])).trim());
+
+async function installedHash(path: string) {
+  try {
+    return readFileSync(await markerPath(path), "utf8");
+  } catch {
+    return null; // worktrees from before this marker existed install once more
+  }
+}
+
+async function install(command: string, path: string) {
+  const hash = await lockfileHash(path);
+  await runCommand(command, path).catch((e: Error) => {
+    throw new Error(`Install failed (${command}): ${e.message}`);
+  });
+  writeFileSync(await markerPath(path), hash);
 }
 
 /** A project command, run by the worker itself (install). Same scrubbed env as agents get. */

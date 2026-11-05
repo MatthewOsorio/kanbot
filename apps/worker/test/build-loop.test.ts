@@ -1,5 +1,5 @@
 // The M3 build loop against the replay runtime, on a real git repo (fixtures/sample-repo): no API calls.
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { activeRunStates, DEFAULT_COLUMNS, uuidv7 } from "@kanbot/shared";
@@ -20,13 +20,13 @@ import {
   tickets,
 } from "@kanbot/shared/db";
 import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
-import { git } from "@kanbot/shared/repo";
+import { git, loadProjectConfig } from "@kanbot/shared/repo";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
 import { claimNext, executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
-import { checkAfterRun, snapshot } from "../src/worktree";
+import { checkAfterRun, ensureWorktree, snapshot } from "../src/worktree";
 
 const db = createDb(TEST_DATABASE_URL);
 const runtime = new ReplayRuntime();
@@ -560,5 +560,25 @@ describe("project settings in the database (M4)", () => {
     expect(await claimNext(db)).not.toBeNull();
     expect(await claimNext(db)).not.toBeNull(); // default 1 would refuse this
     expect(await claimNext(db)).toBeNull(); // the global limit of 2
+  });
+
+  it("installs again only when the lockfile changes", async () => {
+    const repo = await prepareSampleRepo(join(mkdtempSync(join(tmpdir(), "kanbot-lock-")), "repo"));
+    const log = join(mkdtempSync(join(tmpdir(), "kanbot-lock-log-")), "installs");
+    const config = await loadProjectConfig(repo, "main");
+    config.commands.install = `echo x >> "${log}"`;
+    const ticket = { key: "LK-1", title: "Lockfile", branchName: null };
+    const installs = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length - 1 : 0);
+
+    const { path } = await ensureWorktree(repo, "main", ticket, config);
+    expect(installs()).toBe(1);
+    await ensureWorktree(repo, "main", ticket, config);
+    expect(installs()).toBe(1); // reused, nothing changed
+    writeFileSync(join(path, "package-lock.json"), "{}");
+    await ensureWorktree(repo, "main", ticket, config);
+    expect(installs()).toBe(2); // the lockfile appeared
+    await ensureWorktree(repo, "main", ticket, config);
+    expect(installs()).toBe(2);
+    expect(await git(path, ["status", "--porcelain"])).not.toContain("kanbot-install");
   });
 });

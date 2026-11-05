@@ -10,9 +10,12 @@ import { join, resolve } from "node:path";
 import { activeRunStates, DEFAULT_COLUMNS } from "@kanbot/shared";
 import {
   columns,
+  comments,
   createDb,
+  logActivity,
   moveToColumnEnd,
   projects,
+  publish,
   runs,
   settings,
   spendToday,
@@ -50,7 +53,13 @@ const only = process.argv
 if (only && process.argv.includes("--baseline"))
   throw new Error("--baseline needs every golden ticket");
 
-type Golden = { title: string; type: "feature" | "bug"; description: string };
+type Golden = {
+  title: string;
+  type: "feature" | "bug";
+  description: string;
+  /** An owner comment posted when the ticket first enters Code Review, so a real bounce is exercised. */
+  reviewComment?: string;
+};
 type Result = {
   slug: string;
   reachedQa: boolean;
@@ -96,6 +105,7 @@ const slugs = readdirSync(goldenDir)
   // --only=bug,ui runs a subset (a smoke run); a subset never becomes the baseline.
   .filter((slug) => !only || only.includes(slug));
 const ids = new Map<string, string>();
+const reviewComments = new Map<string, string>(); // ticket id → late owner comment, posted once
 for (const [i, slug] of slugs.entries()) {
   const g = JSON.parse(readFileSync(join(goldenDir, `${slug}.json`), "utf8")) as Golden;
   const [t] = await db
@@ -112,6 +122,7 @@ for (const [i, slug] of slugs.entries()) {
     })
     .returning();
   ids.set(slug, t!.id);
+  if (g.reviewComment) reviewComments.set(t!.id, g.reviewComment);
   await db.transaction((tx) => startColumnAgent(tx, project!.id, t!.id, col("planning"), owner));
 }
 
@@ -123,6 +134,22 @@ for (;;) {
     console.log(
       `→ ${run.agentSlug} on ticket ${[...ids].find(([, id]) => id === run.ticketId)?.[0]}`,
     );
+    const late = reviewComments.get(run.ticketId);
+    if (late && run.agentSlug === "nitpick-nancy") {
+      reviewComments.delete(run.ticketId);
+      await db.transaction(async (tx) => {
+        const [c] = await tx
+          .insert(comments)
+          .values({ ticketId: run.ticketId, bodyMd: late })
+          .returning();
+        await logActivity(tx, run.ticketId, "commented", { commentId: c!.id }, owner);
+        await publish(tx, project!.id, {
+          type: "comment.created",
+          ticketId: run.ticketId,
+          commentId: c!.id,
+        });
+      });
+    }
     await executeRun(db, runtime, run, new AbortController().signal);
     continue;
   }

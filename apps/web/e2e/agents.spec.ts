@@ -41,8 +41,8 @@ test("moving a ticket to Planning runs Plan B: plan artifact, criteria, Plan rea
   await addTicket(page, "Add a filter");
 
   await drag(page, "Add a filter", "Planning");
-  await expect(page.getByLabel("Agent notice")).toHaveText("Plan B is on it.");
   await expect(column(page, "Planning").getByText("Plan ready · needs you")).toBeVisible();
+  await expect(page.getByLabel("Agent notice")).toHaveText(""); // cleared when the run ended
   await expect(page.getByRole("button", { name: /Needs me/ })).toContainText("1");
 
   await card(page, "Add a filter").click();
@@ -80,6 +80,7 @@ test("moving a ticket while its agent works asks first, then cancels the run", a
 
   await drag(page, "Slow plan", "Planning");
   await expect(column(page, "Planning").getByText("Working")).toBeVisible();
+  await expect(page.getByLabel("Agent notice")).toHaveText("Plan B is on it."); // stays while the run works
 
   let asked = "";
   page.once("dialog", (d) => {
