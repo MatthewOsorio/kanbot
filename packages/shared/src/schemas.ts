@@ -140,6 +140,42 @@ export const patchSettingsBody = z
   .partial()
   .refine(nonEmpty, "No fields to update");
 
+// The permission hook refuses chained commands, so a project command is one plain command (§8).
+const plainCommand = z
+  .string()
+  .trim()
+  .max(500)
+  .refine(
+    (c) => !/[&;|<>$`\\\n\r]/.test(c),
+    "Must be one plain command: no && ; | < > $ backticks, backslashes or newlines",
+  );
+
+/** Project Settings (§13). An empty command clears it. */
+export const patchProjectBody = z
+  .object({
+    commands: z
+      .object({
+        install: plainCommand,
+        build: plainCommand,
+        test: plainCommand,
+        lint: plainCommand,
+      })
+      .partial(),
+    testGlobs: z.array(z.string().trim().min(1).max(300)).max(100),
+    hotspots: z
+      .array(
+        z.object({
+          name: z.string().trim().min(1).max(100),
+          paths: z.array(z.string().trim().min(1).max(300)).min(1).max(100),
+        }),
+      )
+      .max(50),
+    bounceLimit: z.number().int().min(1).max(10),
+    concurrency: z.number().int().min(1).max(4),
+  })
+  .partial()
+  .refine(nonEmpty, "No fields to update");
+
 export const createCriterionBody = z.object({ text: z.string().trim().min(1).max(1_000) });
 
 export const createLinkBody = z.object({

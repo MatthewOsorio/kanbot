@@ -12,6 +12,7 @@ import {
   comments,
   createDb,
   moveToColumnEnd,
+  projectConfigOf,
   projects,
   runs,
   startColumnAgent,
@@ -391,13 +392,12 @@ describe("build loop (M3 done criterion)", () => {
 
   it("removes the worktree when install fails, so the next run installs again", async () => {
     const { project, repo, move } = await setup("bounce");
-    const setInstall = async (cmd: string) => {
-      writeFileSync(
-        join(repo, ".kanbot/project.yml"),
-        `commands:\n  install: ${cmd}\n  test: node --test\ntestGlobs: ["test/**"]\n`,
-      );
-      await git(repo, ["commit", "-q", "-am", `install: ${cmd}`]);
-    };
+    // project.yml only seeds; the owner's copy lives in the database (Settings).
+    const setInstall = (cmd: string) =>
+      db
+        .update(projects)
+        .set({ commands: { install: cmd, test: "node --test" }, testGlobs: ["test/**"] })
+        .where(eq(projects.id, project.id));
     const runOne = async () => {
       const run = (await claimNext(db))!;
       await executeRun(db, runtime, run, new AbortController().signal);
@@ -511,5 +511,54 @@ describe("Done and Archie (FR-49, §4)", () => {
     const t = await ticketNow(ticket.id);
     expect(t.columnId).toBe(col("done").id);
     expect(t.statusFlag).toBe("failed");
+  });
+});
+
+describe("project settings in the database (M4)", () => {
+  it("seeds from project.yml once; after that the database wins", async () => {
+    const { project, repo } = await setup("bounce");
+    const read = async () => {
+      const [p] = await db.select().from(projects).where(eq(projects.id, project.id));
+      return projectConfigOf(db, p!);
+    };
+    expect((await read()).commands.test).toBe("node --test");
+    // The file changes on the default branch, then the owner edits the database copy: neither the file
+    // nor a second read may overwrite it.
+    writeFileSync(join(repo, ".kanbot/project.yml"), "commands:\n  test: node other.js\n");
+    await git(repo, ["commit", "-am", "change settings"]);
+    expect((await read()).commands.test).toBe("node --test");
+    await db
+      .update(projects)
+      .set({ commands: { test: "pnpm test" }, settings: { bounceLimit: 1, concurrency: 2 } })
+      .where(eq(projects.id, project.id));
+    const c = await read();
+    expect(c).toMatchObject({ bounceLimit: 1, concurrency: 2, commands: { test: "pnpm test" } });
+  });
+
+  it("uses the project's bounce limit", async () => {
+    const { ticket, col, move, project } = await setup("always");
+    await db
+      .update(projects)
+      .set({ settings: { bounceLimit: 1 } })
+      .where(eq(projects.id, project.id));
+    await move("in_progress");
+    await drain();
+    const t = await ticketNow(ticket.id);
+    expect(t.columnId).toBe(col("blocked").id);
+    expect(t.bounceCount).toBe(1);
+  });
+
+  it("claims as many runs of one project at once as its concurrency allows", async () => {
+    const { project, addTicket, move } = await setup("bounce");
+    const b = await addTicket(2, "bounce", "Second");
+    await move("planning", b.id);
+    await db
+      .update(projects)
+      .set({ settings: { concurrency: 2 } })
+      .where(eq(projects.id, project.id));
+    await move("planning"); // restarts Plan B on the first ticket as well
+    expect(await claimNext(db)).not.toBeNull();
+    expect(await claimNext(db)).not.toBeNull(); // default 1 would refuse this
+    expect(await claimNext(db)).toBeNull(); // the global limit of 2
   });
 });

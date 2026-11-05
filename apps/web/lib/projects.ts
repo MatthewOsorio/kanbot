@@ -1,9 +1,14 @@
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { DEFAULT_COLUMNS, IN_FLIGHT_COLUMNS, createProjectBody } from "@kanbot/shared";
+import {
+  DEFAULT_COLUMNS,
+  IN_FLIGHT_COLUMNS,
+  createProjectBody,
+  type patchProjectBody,
+} from "@kanbot/shared";
 import { loadAgent } from "@kanbot/shared/agents";
-import { columns, projects, ticketLinks, tickets } from "@kanbot/shared/db";
-import { loadProjectConfig, overlap } from "@kanbot/shared/repo";
+import { columns, projectConfigOf, projects, ticketLinks, tickets } from "@kanbot/shared/db";
+import { overlap } from "@kanbot/shared/repo";
 import { asc, eq, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { HttpError, isUniqueViolation, notFound } from "./api";
@@ -80,12 +85,7 @@ export async function getBoard(projectId: string) {
   const slugOf = new Map(cols.map((c) => [c.id, c.slug]));
   const key = (t: { number: number }) => `${project.keyPrefix}-${t.number}`;
   const byId = new Map(cards.map((c) => [c.id, c]));
-  // shortcut: reads project.yml from git on every board fetch; P5 moves the hotspots into the database.
-  const { hotspots } = project.repoPath
-    ? await loadProjectConfig(project.repoPath, project.defaultBranch).catch(() => ({
-        hotspots: [],
-      }))
-    : { hotspots: [] };
+  const { hotspots } = await projectConfigOf(db, project);
   const inFlight = cards.filter((c) =>
     (IN_FLIGHT_COLUMNS as readonly string[]).includes(slugOf.get(c.columnId)!),
   );
@@ -133,3 +133,44 @@ function columnAgent(slug: string | null) {
 
 export type Board = Awaited<ReturnType<typeof getBoard>>;
 export type Card = Board["tickets"][number];
+
+/** Settings page data (§13). The first read seeds a project from .kanbot/project.yml. */
+export async function getProjectSettings(id: string) {
+  const [p] = await db.select().from(projects).where(eq(projects.id, id));
+  if (!p) throw notFound("Project not found");
+  const { commands, testGlobs, hotspots, bounceLimit, concurrency } = await projectConfigOf(db, p);
+  return {
+    id,
+    name: p.name,
+    keyPrefix: p.keyPrefix,
+    commands,
+    testGlobs,
+    hotspots,
+    bounceLimit,
+    concurrency,
+  };
+}
+
+export async function patchProject(id: string, input: z.output<typeof patchProjectBody>) {
+  const [p] = await db.select().from(projects).where(eq(projects.id, id));
+  if (!p) throw notFound("Project not found");
+  // Seed first so a partial patch (one command) doesn't hide the rest of project.yml behind nulls.
+  const cur = await projectConfigOf(db, p);
+  const { bounceLimit, concurrency, commands, testGlobs, hotspots } = input;
+  await db
+    .update(projects)
+    .set({
+      // An empty command clears it; never store "" (projectConfig refuses it, and every read would fail).
+      commands: Object.fromEntries(
+        Object.entries({ ...cur.commands, ...commands }).filter(([, v]) => v),
+      ),
+      testGlobs: testGlobs ?? cur.testGlobs,
+      hotspots: hotspots ?? cur.hotspots,
+      settings: {
+        bounceLimit: bounceLimit ?? cur.bounceLimit,
+        concurrency: concurrency ?? cur.concurrency,
+      },
+    })
+    .where(eq(projects.id, id));
+  return getProjectSettings(id);
+}

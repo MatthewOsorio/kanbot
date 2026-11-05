@@ -267,6 +267,12 @@ export function Board({ projectId }: { projectId: string }) {
           cardKey={key}
           onOpen={setOpenId}
         />
+        <Link
+          href={`/p/${projectId}/settings`}
+          className="text-sm underline-offset-4 hover:underline"
+        >
+          Settings
+        </Link>
         {settings && <SpendControls settings={settings} onError={setError} />}
         <HealthDot health={health} />
       </header>

@@ -13,11 +13,12 @@ Last updated 2026-11-03.
     - Nitpick Nancy (Code Review), with cross-ticket review;
     - Testy McTestface (QA).
   - Bounce-backs and the bounce limit, the overlap check, stall detection (repetition rule), Ponytail, and the golden-ticket eval.
-- **How it runs:** locally only, bound to 127.0.0.1, with no login. Tested on Windows only. Project commands, test globs and hotspots come from `.kanbot/project.yml`.
+- **How it runs:** locally only, bound to 127.0.0.1, with no login. Tested on Windows only. Project commands, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
 - **Next: M4 (unblock, still local).**
   - Built so far: the daily cap, Pause all, automatic resume after an outage, CI; Blocked with Rubber Duckworth, Resume with an answer, session resume on bounce-backs, in-app notifications, the no-progress and recurring-block stall rules.
   - Also built: Archie's retro and the worktree removal when a ticket reaches Done; ticket links (`blocks` and `relates`, proposed by Plan B and Nancy and confirmed by the owner, blockers in the overlap check, "waiting on" and overlap pills on cards).
-  - Still to come: costs per ticket, project Settings.
+  - Also built: project Settings in the database (commands, test globs, hotspots, bounce limit, per-project concurrency; seeded once from `project.yml`) and the cost total on each ticket.
+  - Still to come: the smaller items in "Still to build" below.
 - **Then M5 (ship and deploy):** the server and login, the GitHub App, Captain Ship-It, CI and the PR Review gate.
 
 The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it. What each milestone built, and why, is in `docs/m1-report.md`, `m2-report.md` and `m3-report.md`.
@@ -226,7 +227,7 @@ Requirements marked MVP must ship in the first usable version; Later items are d
 | FR-20 | Drag-and-drop board with columns, card counts and WIP limits per column. | MVP |
 | FR-21 | Moving a ticket into a column with an agent enqueues a run for that agent. | MVP |
 | FR-22 | Agent verdicts drive automatic moves per the transition table (section 3). Each auto-move can be switched to "stay and wait for approval" per column. | MVP |
-| FR-23 | Bounce-back limit per ticket (default 3 combined Code Review, QA and CI bounces; the owner's own PR review requests don't count); exceeding it moves the ticket to Blocked. | MVP |
+| FR-23 | Bounce-back limit per ticket (default 3, per project in Settings; combined Code Review, QA and CI bounces; the owner's own PR review requests don't count); exceeding it moves the ticket to Blocked. | MVP |
 | FR-24 | Moving a ticket with an active run asks for confirmation and cancels the run. | MVP |
 | FR-25 | Auto-pull: when In Progress has a free WIP slot, the highest-priority Ready ticket starts automatically (off by default). | Later |
 | FR-26 | Filters and search: by type, priority, label, agent, state ("needs me", "running", "failed"). | Later |
@@ -328,7 +329,7 @@ Every ticket move that lands in an agent column becomes a queued `runs` row; the
 
 Each agent is `agents/<slug>.md`: YAML frontmatter for config, markdown body for the system prompt. Frontmatter is validated with zod each time a run starts; a run whose agent file is invalid fails with the validation error (the Agents page shows it once that page exists, M6). A missing file means the column is a gate.
 
-In `tools`, `{install}`, `{build}`, `{test}` and `{lint}` expand to the project's commands from `.kanbot/project.yml` (an entry whose command the project lacks is dropped). `Bash(cmd:*)` and `Bash(cmd *)` allow `cmd` with any arguments; `Bash(cmd)` allows exactly `cmd`. Project commands must each be one plain command (no `&&`), because the permission hook refuses chained commands.
+In `tools`, `{install}`, `{build}`, `{test}` and `{lint}` expand to the project's commands from Settings (an entry whose command the project lacks is dropped). `Bash(cmd:*)` and `Bash(cmd *)` allow `cmd` with any arguments; `Bash(cmd)` allows exactly `cmd`. Project commands must each be one plain command (no `&&`), because the permission hook refuses chained commands.
 
 ```markdown
 ---
@@ -522,9 +523,9 @@ Overlap checks are advisory, not file locks: the user can override a wait with "
 
 ### Hotspots
 
-Hotspots are declared per project in `.kanbot/project.yml` (checked into the repo) or in Settings, as named groups of globs:
+Hotspots are declared per project in Settings, as named groups of globs (the first read of a project seeds them from `.kanbot/project.yml` in the repo):
 
-Until Settings (M4) and onboarding (M5) exist, `.kanbot/project.yml` is the only source, and it also holds the project's `commands` (install, build, test, lint) and `testGlobs`. Kanbot reads it from the default branch (`git show <default>:.kanbot/project.yml`), never from a worktree, so an agent can't widen its own allowlist; agents may not change it at all (post-run check).
+`commands` (install, build, test, lint) and `testGlobs` live in Settings too. The database is the source of truth. The first time Kanbot reads a project with a linked repo and no settings, it seeds them once from `.kanbot/project.yml` on the default branch (`git show <default>:.kanbot/project.yml`, never a worktree); later edits to the file change nothing. Agents may not change the file at all (post-run check), and they have no way to reach Settings, so they can't widen their own allowlist. Settings refuses a command that isn't one plain command, because the permission hook would refuse it anyway.
 
 ```yaml
 hotspots:
@@ -644,7 +645,7 @@ Ten tables plus a single-row `settings` table cover v1; all IDs are UUIDv7, all 
 
 | Table | Key fields | Notes |
 | --- | --- | --- |
-| `projects` | id, key\_prefix, name, repo\_path, default\_branch, github\_owner, github\_repo, commands (jsonb: install, build, test, lint, QA start command and ready URL), test\_globs, hotspots (jsonb: name and globs per group), baseline (jsonb: tests already failing at onboarding), settings (jsonb: budgets, concurrency, auto-moves), created\_at | `key_prefix` unique; next ticket number tracked in `ticket_seq`. Until M4, commands, test globs and hotspots come from the repo's `.kanbot/project.yml` (section 9) instead of these columns. |
+| `projects` | id, key\_prefix, name, repo\_path, default\_branch, github\_owner, github\_repo, commands (jsonb: install, build, test, lint, QA start command and ready URL), test\_globs, hotspots (jsonb: name and globs per group), baseline (jsonb: tests already failing at onboarding), settings (jsonb: budgets, concurrency, auto-moves), created\_at | `key_prefix` unique; next ticket number tracked in `ticket_seq`. These columns are null until the project's first read seeds them from the repo's `.kanbot/project.yml` (section 9); a project with no repo stays unseeded. `settings` holds `bounceLimit` (default 3, 1–10) and `concurrency` (default 1, 1–4); budgets and auto-moves arrive with their first user. |
 | `columns` | id, project\_id, slug, name, position, agent\_slug (nullable), wip\_limit, auto\_advance (bool) | Seeded with the default workflow per project. |
 | `tickets` | id, project\_id, number, title, description\_md, type, priority, labels\[\], column\_id, position, parent\_id, branch\_name, worktree\_path, bounce\_count, status\_flag (`none`, `running`, `needs_input`, `plan_ready`, `awaiting_approval`, `waiting_on_ticket`, `pr_open`, `failed`), touch\_paths\[\], pr\_number, pr\_url, head\_sha, ci\_state, review\_state, created\_at, updated\_at | `(project_id, number)` unique; `position` is a fractional index for ordering in a column. |
 | `acceptance_criteria` | id, ticket\_id, position, text, status (`open`, `pass`, `fail`), source (`user`, `agent`) | QA updates status. |
@@ -666,7 +667,7 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | Method | Path | Purpose | Milestone |
 | --- | --- | --- | --- |
 | GET / POST | `/api/projects` | List or create projects. | Built |
-| GET / PATCH | `/api/projects/:id` | Read or update project settings. | M4 |
+| GET / PATCH | `/api/projects/:id` | Read or update project settings (commands, test globs, hotspots, bounce limit, concurrency). A GET seeds an unseeded project. | Built |
 | GET | `/api/projects/:id/board` | Columns with ordered ticket cards (one call renders the board). | Built |
 | POST | `/api/projects/:id/tickets` | Create a ticket. | Built |
 | GET / PATCH / DELETE | `/api/tickets/:id` | Read (with criteria, latest artifacts, active run), edit, delete. | Built |
@@ -739,7 +740,7 @@ Spend by day (bar chart), by agent, and by ticket, with token counts; budget set
 
 ### Settings
 
-Projects (repo, commands, test globs, QA settings, hotspots), workflow columns (Later), concurrency, budgets, serious mode, notification and webhook settings. Adding a project runs the onboarding flow (section 10) as a guided wizard.
+Built: a page per project (linked from the board's top bar) with commands, test globs, hotspots, bounce limit and concurrent runs. Still to come: QA settings, repo, workflow columns (Later), global concurrency, budgets, serious mode, notification and webhook settings. Adding a project runs the onboarding flow (section 10) as a guided wizard.
 
 ### General
 
@@ -771,12 +772,12 @@ Agents run real commands on the server, so every agent is boxed in by its worktr
 | Control | Default | Behavior when hit |
 | --- | --- | --- |
 | Per-run budget | From agent frontmatter (e.g. $1.50) | Run stops with `budget_exceeded`; ticket to Blocked. |
-| Per-ticket budget | $3 | No new runs start for that ticket until raised. |
+| Per-ticket budget | $3 (M6) | No new runs start for that ticket until raised. Not built: M4 shows each ticket's total cost only. |
 | Daily budget (global) | $5 | Nothing new starts until midnight local time (the worker's clock) or the cap is raised. Today's spend is the cost of runs that ended today plus the budgets of runs still going; a run started late in the day gets only what is left, and ends `budget_exceeded` if it needs more. |
 | Max turns | From frontmatter | Run stops with `failed` and a summary. |
 | Wall-clock timeout | From frontmatter (e.g. 20 min) | Run stops with `timed_out`. |
 | Bounce-back limit | 3 per ticket | Ticket to Blocked with Duckworth's summary. |
-| Concurrency | 2 global, 1 per project | Extra runs wait in `queued`. |
+| Concurrency | 2 global (a constant), 1 per project (default; Settings) | Extra runs wait in `queued`. |
 
 Dollar defaults start deliberately low for the first real tickets and are raised once costs are known. The Console workspace's monthly spend limit sits above all of these as a final ceiling.
 
@@ -817,7 +818,6 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 
 | Item | Spec | Notes |
 | --- | --- | --- |
-| Project settings in the database (`commands`, `test_globs`, `hotspots`, `settings`) and a Settings page; per-project bounce limit and concurrency | §11, FR-2, FR-23, §14 | `.kanbot/project.yml` on the default branch until then; `BOUNCE_LIMIT` and `LIMITS` are constants. Command detection comes with onboarding (M5); in M4 the owner fills them in, seeded from `project.yml`. |
 | Only the agent's own plugins in its session | §8 | Skills are already limited to our plugins' skills. Claude Code's bundled plugins (`cc-plugin-agents-md`, `cc-plugin-telemetry`, `cc-plugin-plugin-authoring`) still load with `settingSources: []`; find the SDK switch for them. |
 | Install when the lockfile changes (not only when the worktree is created) | §8 step 2 | Agents can run `{install}` themselves. |
 | Per-command timeout for agents' shell commands | §8 failure handling | Found in the 2026-11-03 docs cleanup: only the worker's own install has the 10-minute timeout; an agent's command is bounded by the run's timeout. |
@@ -849,6 +849,7 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Agent files for Dr. Rabbit Hole and Marge Conflict | §4, §9 | Until Marge ships, every conflicting rebase goes to Blocked. |
 | Epics: `tickets.parent_id` and the verdict's `proposedTickets` | §11, UC-11 | |
 | Agents and Costs pages | §13 | |
+| Per-ticket budget ($3): no new runs for a ticket over it | §14 | M4 only shows the ticket's total cost (drawer, Archie's retro). Moved from M4 on 2026-11-05. |
 | Agent config hash on runs | FR-37 | With the Agents page. |
 | Side-by-side diff view | §13 | The Diff tab is unified. |
 | `columns.wip_limit`, `auto_advance`; WIP display and enforcement | FR-20, FR-22 | The only approval gate so far (QA → Ship) stays a gate; the concurrency limits already cap parallel runs. WIP limits matter most with auto-pull (M6). Moved from M4 on 2026-11-03. |

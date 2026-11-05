@@ -4,8 +4,45 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import { agentFileExists } from "../agents";
 import { activeRunStates } from "../schemas";
-import { runs, settings, tickets } from "./schema";
+import { BOUNCE_LIMIT } from "../transitions";
+import { loadProjectConfig, projectConfig } from "../repo";
+import { projects, runs, settings, tickets } from "./schema";
 import { logActivity, OWNER, publish, type Actor, type Tx } from "./write";
+
+/**
+ * A project's commands, test globs, hotspots and limits (§9, §11). The first read of a project with a repo
+ * seeds the columns from .kanbot/project.yml on the default branch; after that the database is the source.
+ */
+export async function projectConfigOf(
+  tx: Pick<Tx, "select" | "update">,
+  p: typeof projects.$inferSelect,
+) {
+  let c = p.commands
+    ? projectConfig.parse({
+        commands: p.commands,
+        testGlobs: p.testGlobs ?? [],
+        hotspots: p.hotspots ?? [],
+      })
+    : projectConfig.parse({});
+  if (!p.commands && p.repoPath) {
+    c = await loadProjectConfig(p.repoPath, p.defaultBranch);
+    // "commands is null" in the WHERE: a racing second seeder changes nothing, and we re-read the winner.
+    const done = await tx
+      .update(projects)
+      .set({ commands: c.commands, testGlobs: c.testGlobs, hotspots: c.hotspots })
+      .where(and(eq(projects.id, p.id), sql`${projects.commands} is null`))
+      .returning({ id: projects.id });
+    if (!done.length) {
+      const [q] = await tx.select().from(projects).where(eq(projects.id, p.id));
+      return projectConfigOf(tx, q!);
+    }
+  }
+  return {
+    ...c,
+    bounceLimit: p.settings?.bounceLimit ?? BOUNCE_LIMIT,
+    concurrency: p.settings?.concurrency ?? 1,
+  };
+}
 
 type Column = { id: string; slug: string; name: string; agentSlug: string | null };
 

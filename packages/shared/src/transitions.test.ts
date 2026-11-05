@@ -76,6 +76,15 @@ describe("build loop", () => {
       "bounce_limit",
     );
   });
+  it("takes the bounce limit from the project", () => {
+    const v = { verdict: "changes_requested" as const, bounces: 1 };
+    expect(afterRun("code_review", "changes_requested", { ...v, bounceLimit: 2 }).to).toBe(
+      "in_progress",
+    );
+    expect(afterRun("code_review", "changes_requested", { ...v, bounceLimit: 1 }).reason).toBe(
+      "bounce_limit",
+    );
+  });
   it("keeps a finished ticket in Done however Archie's run ends", () => {
     expect(afterRun("done", "succeeded")).toEqual({ to: null, flag: "none", bounce: false });
     for (const o of ["failed", "timed_out", "budget_exceeded", "awaiting_input"] as const)

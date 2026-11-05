@@ -123,6 +123,11 @@ export function TicketDrawer(props: {
                   </>
                 )}
               </SheetDescription>
+              {ticket.costUsd > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Cost so far ${ticket.costUsd.toFixed(2)}
+                </p>
+              )}
               <SheetTitle className="sr-only">{ticket.title}</SheetTitle>
               <Input
                 key={ticket.title} // remount so another tab's edit shows up

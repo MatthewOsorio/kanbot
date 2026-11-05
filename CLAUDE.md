@@ -27,7 +27,7 @@ packages/shared/     shared by web and worker
   src/transitions.ts   the transition table as data (afterRun);  src/verdict.ts  report_result schema
   src/agents.ts        agent file loader (server-only export "@kanbot/shared/agents")
   src/repo.ts          git(), .kanbot/project.yml loader, overlap(), branchName() (server-only "@kanbot/shared/repo")
-  src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd
+  src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd, projectConfigOf (settings, seeded once from project.yml)
   src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
   drizzle/             generated SQL migrations (commit them)
 agents/              one <slug>.md per agent (YAML frontmatter + system prompt) and avatars/: plan-b, sir-codes-a-lot, nitpick-nancy, testy-mctestface, rubber-duckworth, archie-the-archivist
@@ -50,7 +50,7 @@ pnpm eval:agents            golden tickets with REAL agents (costs money; ask fi
 
 The worker uses the real Claude Agent SDK unless `KANBOT_RUNTIME=replay` (needs `ANTHROPIC_API_KEY` in `.env`). Tests and CI only ever use replay. A real run costs money: Plan B was about $0.15–0.45 per plan in the M2 smoke test. `KANBOT_RECORD=1` saves real runs as replay scripts (see `.env.example`); `KANBOT_RUNTIME=replay pnpm eval:agents` checks the eval script for free.
 
-Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs and hotspots come from `.kanbot/project.yml` on its default branch (until M4's Settings). The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
+Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs, hotspots, bounce limit and concurrency live in the database (Settings page), seeded once from `.kanbot/project.yml` on its default branch. The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
 
 `pnpm test:e2e` can run while `pnpm dev` is running: it uses `NEXT_DIST_DIR=.next-e2e`, its own database and its own replay worker. Worker tests (`pnpm test`) share `kanbot_test` and cancel any leftover active runs there first.
 

@@ -17,6 +17,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { uuidv7 } from "../ids";
+import type { ProjectConfig } from "../repo";
 import {
   activityActions,
   artifactKinds,
@@ -54,6 +55,11 @@ export const projects = pgTable("projects", {
   name: text("name").notNull(),
   defaultBranch: text("default_branch").notNull().default("main"),
   repoPath: text("repo_path"),
+  // Project settings (§11). null = not seeded yet; projectConfigOf seeds them once from .kanbot/project.yml.
+  commands: jsonb("commands").$type<ProjectConfig["commands"]>(),
+  testGlobs: text("test_globs").array(),
+  hotspots: jsonb("hotspots").$type<ProjectConfig["hotspots"]>(),
+  settings: jsonb("settings").$type<{ bounceLimit?: number; concurrency?: number }>(),
   ticketSeq: integer("ticket_seq").notNull().default(0),
   createdAt: createdAt(),
 });

@@ -17,13 +17,14 @@ import {
   comments,
   logActivity,
   OWNER,
+  projectConfigOf,
   projects,
   runs,
   startColumnAgent,
   ticketLinks,
   tickets,
 } from "@kanbot/shared/db";
-import { git, loadProjectConfig, overlap, removeWorktree } from "@kanbot/shared/repo";
+import { git, overlap, removeWorktree } from "@kanbot/shared/repo";
 import { and, asc, desc, eq, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
@@ -94,7 +95,7 @@ export async function getTicket(id: string) {
     .innerJoin(columns, eq(columns.id, tickets.columnId))
     .where(eq(tickets.id, id));
   if (!row) throw notFound("Ticket not found");
-  const [criteria, runList, artifactList, links] = await Promise.all([
+  const [criteria, runList, artifactList, links, [cost]] = await Promise.all([
     db
       .select()
       .from(acceptanceCriteria)
@@ -108,6 +109,11 @@ export async function getTicket(id: string) {
       .where(eq(artifacts.ticketId, id))
       .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
     linksOf(id),
+    // A SQL sum, not the run list above: that one is capped at 20.
+    db
+      .select({ costUsd: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8` })
+      .from(runs)
+      .where(eq(runs.ticketId, id)),
   ]);
   return {
     ...row.ticket,
@@ -116,6 +122,7 @@ export async function getTicket(id: string) {
     columnSlug: row.columnSlug,
     criteria,
     runs: runList,
+    costUsd: cost?.costUsd ?? 0,
     artifacts: artifactList,
     links,
   };
@@ -222,9 +229,7 @@ async function overlapping(
 ) {
   if (!ticket.touchPaths.length) return [];
   const [p] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
-  const { hotspots } = p!.repoPath
-    ? await loadProjectConfig(p!.repoPath, p!.defaultBranch)
-    : { hotspots: [] };
+  const { hotspots } = await projectConfigOf(tx, p!);
   const others = await tx
     .select({ number: tickets.number, touchPaths: tickets.touchPaths })
     .from(tickets)

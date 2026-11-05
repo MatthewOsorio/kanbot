@@ -77,7 +77,11 @@ export type AfterRun = {
 export function afterRun(
   column: string,
   outcome: RunOutcome,
-  { verdict, bounces = 0 }: { verdict?: Verdict; bounces?: number } = {},
+  {
+    verdict,
+    bounces = 0,
+    bounceLimit = BOUNCE_LIMIT,
+  }: { verdict?: Verdict; bounces?: number; bounceLimit?: number } = {},
 ): AfterRun {
   const rule = RUN_RULES.find(
     (r) =>
@@ -87,7 +91,7 @@ export function afterRun(
   );
   // No rule (e.g. a column whose agent ships later): stay put, clear the flag.
   if (!rule) return { to: null, flag: "none", bounce: false };
-  if (rule.bounce && bounces >= BOUNCE_LIMIT)
+  if (rule.bounce && bounces >= bounceLimit)
     return { to: "blocked", flag: "failed", bounce: false, reason: "bounce_limit" };
   return { to: rule.to === column ? null : rule.to, flag: rule.flag, bounce: !!rule.bounce };
 }
