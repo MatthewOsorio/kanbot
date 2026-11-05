@@ -35,9 +35,14 @@ describe("cwd fence for Read, Grep, Glob", () => {
   it("refuses paths that resolve outside it", () => {
     expect(deny("Read", { file_path: "../secret.txt" })).toMatch(/outside/);
     expect(deny("Read", { file_path: join(root, "secret.txt") })).toMatch(/outside/);
-    expect(deny("Read", { file_path: "C:\\Windows\\win.ini" })).toMatch(/outside/);
     expect(deny("Grep", { pattern: "x", path: ".." })).toMatch(/outside/);
     expect(deny("Glob", { pattern: "*", path: root })).toMatch(/outside/);
+  });
+
+  // On Linux these are ordinary relative file names inside cwd, so the fence rightly allows them.
+  it.runIf(process.platform === "win32")("refuses Windows drive and device paths", () => {
+    expect(deny("Read", { file_path: "C:\\Windows\\win.ini" })).toMatch(/outside/);
+    expect(deny("Read", { file_path: "\\\\?\\C:\\Windows\\win.ini" })).toMatch(/outside/);
   });
 
   it("refuses globs that climb out", () => {
@@ -122,7 +127,6 @@ describe("Bash allowlist and edit scope", () => {
   });
 
   it.each([
-    ["Read", { file_path: "\\\\?\\C:\\Windows\\win.ini" }],
     ["Read", { file_path: "src/../../secret.txt" }],
     ["Read", { file_path: "~/secret.txt" }],
     ["Glob", { pattern: "{..,src}/*" }],
