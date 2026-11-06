@@ -54,6 +54,18 @@ describe("build loop", () => {
     );
     expect(afterRun("qa", "failed", { verdict: "failed" })).toEqual(back);
   });
+  it("reruns Sir Codes-a-Lot in place when the checks gate fails, until the bounce limit", () => {
+    const v = { verdict: "success" as const };
+    expect(afterRun("in_progress", "changes_requested", v)).toEqual({
+      to: null,
+      flag: "none",
+      bounce: true,
+      rerun: true,
+    });
+    expect(
+      afterRun("in_progress", "changes_requested", { ...v, bounces: BOUNCE_LIMIT }),
+    ).toMatchObject({ to: "blocked", reason: "bounce_limit" });
+  });
   it("sends a QA run that failed without reporting to Blocked, not back to In Progress", () => {
     expect(afterRun("qa", "failed")).toEqual({ to: "blocked", flag: "failed", bounce: false });
   });

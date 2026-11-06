@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { artifactKinds, type RunState } from "./schemas";
+import { artifactKinds, priorities, type RunState } from "./schemas";
 
 export const verdicts = ["success", "changes_requested", "failed", "needs_input"] as const;
 export type Verdict = (typeof verdicts)[number];
@@ -7,7 +7,7 @@ export type Verdict = (typeof verdicts)[number];
 /**
  * The `report_result` payload (requirements §8). Each milestone adds the fields its agents use:
  * M2 Plan B's, M3 touchPaths (Plan B), comments + crossTicketRisks (Nancy), criteriaResults (Testy).
- * M6 adds proposedTickets.
+ * M4.5 adds proposedTickets (Plan B on an epic).
  */
 export const verdictShape = {
   verdict: z.enum(verdicts),
@@ -70,6 +70,27 @@ export const verdictShape = {
       }),
     )
     .max(20)
+    .default([]),
+  /** Plan B on an epic: the tickets to split it into, in build order (UC-11); the owner accepts them. */
+  proposedTickets: z
+    .array(
+      z.object({
+        /** A label local to this list ("t1"), used only by `blockedBy`. */
+        ref: z
+          .string()
+          .trim()
+          .regex(/^[A-Za-z0-9_-]{1,20}$/),
+        title: z.string().trim().min(1).max(200),
+        descriptionMd: z.string().max(20_000).default(""),
+        type: z.enum(["feature", "bug", "chore"]).default("feature"),
+        priority: z.enum(priorities).default("P2"),
+        acceptanceCriteria: z.array(z.string().trim().min(1).max(1_000)).max(15).default([]),
+        touchPaths: z.array(z.string().trim().min(1).max(300)).max(100).default([]),
+        /** Refs of proposals that must be built first. */
+        blockedBy: z.array(z.string().trim().min(1).max(20)).max(10).default([]),
+      }),
+    )
+    .max(30)
     .default([]),
 };
 export const verdictPayload = z.object(verdictShape);

@@ -2,14 +2,14 @@
 
 Self-hosted Kanban board where AI agents work the columns. The spec is `docs/requirements.md`: build to it, and update it in the same change whenever a decision or behavior changes. Work milestone by milestone (§16) and stop at the end of each for review.
 
-**Status: M4 (unblock, local) is done; M1 (board), M2 (orchestrator, Plan B) and M3 (build loop) before it. Next is M5 (ship and deploy).** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md`.
+**Status: M4.5 (quality gates and epics, local) is built and its real-agent eval passed, pending review; M1 (board), M2 (orchestrator, Plan B), M3 (build loop) and M4 (unblock) before it. Next is M5 (ship and deploy).** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md` and `docs/m4.5-report.md`.
 
 ## Layout
 
 ```
 apps/web/            Next.js 16 App Router: board UI + REST API + SSE
   app/api/**/route.ts  thin handlers: parse with zod, call lib/, wrap with route() for {error:{code,message}}
-  lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations, overlap check, diff
+  lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations, overlap check, diff, acceptProposals (epics)
   lib/runs.ts          run history, run log paging, cancel, retry, revise plan
   lib/events.ts        one LISTEN client per process fans out to SSE (publish() itself is in shared)
   components/          board.tsx (dnd-kit), ticket-drawer.tsx (tabs, Live log, Diff), markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
@@ -18,7 +18,7 @@ apps/worker/         Node process (tsx): claims queued runs, runs agents, applie
   src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery
   src/run.ts           claimNext (SKIP LOCKED queue), executeRun, outcomeOf, finish (verdict → transition, one tx)
   src/context.ts       the context bundle (prompt) for a run (branch context, in-flight tickets)
-  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks)
+  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate)
   src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
   src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK), replay.ts (fixtures + record()), fence.ts (permission hook logic)
   test/                Vitest against kanbot_test with the replay runtime
@@ -31,7 +31,8 @@ packages/shared/     shared by web and worker
   src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
   drizzle/             generated SQL migrations (commit them)
 agents/              one <slug>.md per agent (YAML frontmatter + system prompt) and avatars/: plan-b, sir-codes-a-lot, nitpick-nancy, testy-mctestface, rubber-duckworth, archie-the-archivist
-plugins/ponytail/    vendored, pinned Ponytail (see VENDORED.md); agents list plugins in frontmatter
+plugins/             vendored, pinned plugins (each has a VENDORED.md); agents list plugins in frontmatter
+  ponytail/            Ponytail;  security-audit/  Cloudflare's security-audit skill, reshaped into one skill for Nancy
 fixtures/runs/       replay scripts: <agent>/<scenario>[.<n>].json; a ticket label `replay:<scenario>` picks one, n = the agent's nth run
 fixtures/sample-repo/ zero-dependency todo app (with .kanbot/project.yml) copied into fresh git repos by prepareSampleRepo()
 fixtures/golden/     the golden tickets for `pnpm eval:agents`

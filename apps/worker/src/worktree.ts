@@ -88,7 +88,31 @@ async function install(command: string, path: string) {
   writeFileSync(await markerPath(path), hash);
 }
 
-/** A project command, run by the worker itself (install). Same scrubbed env as agents get. */
+/** Lines of a failing check's output kept for the report. */
+const CHECK_TAIL_LINES = 200;
+
+/**
+ * The checks gate (§8): the project's build, lint and test commands, in that order, after Sir Codes-a-Lot
+ * reports success. Stops at the first failure and returns it with the tail of its output; null if all pass.
+ */
+export async function runChecks(commands: ProjectConfig["commands"], path: string) {
+  for (const command of [commands.build, commands.lint, commands.test]) {
+    if (!command) continue;
+    try {
+      await runCommand(command, path);
+    } catch (e) {
+      const err = e as Error & { stdout?: string; stderr?: string; killed?: boolean };
+      const text = [err.stdout, err.stderr].filter(Boolean).join("\n").trimEnd();
+      const output =
+        (err.killed ? "Killed after 10 minutes.\n" : "") +
+        (text ? text.split("\n").slice(-CHECK_TAIL_LINES).join("\n") : err.message);
+      return { command, output };
+    }
+  }
+  return null;
+}
+
+/** A project command, run by the worker itself (install, the checks gate). Same scrubbed env as agents get. */
 async function runCommand(command: string, cwd: string) {
   const { DATABASE_URL: _db, ANTHROPIC_API_KEY: _key, ...env } = process.env;
   await sh(command, {

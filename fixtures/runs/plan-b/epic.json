@@ -1,0 +1,80 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Reading the spec the epic names."
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t1",
+        "name": "Read",
+        "input": {
+          "file_path": "src/todos.ts"
+        }
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t1",
+        "isError": false,
+        "content": "(file contents)"
+      },
+      "delayMs": 0
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Split the due-dates epic into three tickets: the store, the API, then the page.",
+    "artifacts": [
+      {
+        "kind": "plan",
+        "title": "Plan: Due dates for todos",
+        "markdown": "## Problem\nTodos have no due date.\n\n## Approach\n- Store first, then the API, then the page, so each lands on working code.\n\n## Out of scope\n- Reminders.\n\n## Risks and open questions\n- Time zones: dates are plain YYYY-MM-DD.\n\n## Size\nM, as three tickets"
+      }
+    ],
+    "acceptanceCriteria": ["A todo can have a due date, set through the API and shown on the page"],
+    "proposedTickets": [
+      {
+        "ref": "t1",
+        "title": "Store a due date on todos",
+        "descriptionMd": "Add an optional `due` (YYYY-MM-DD) to `Todo` in `src/todos.ts`.",
+        "type": "feature",
+        "priority": "P1",
+        "acceptanceCriteria": ["`add(title, due)` stores the due date", "An invalid date throws"],
+        "touchPaths": ["src/todos.ts", "test/todos.test.ts"]
+      },
+      {
+        "ref": "t2",
+        "title": "Accept a due date in POST /api/todos",
+        "descriptionMd": "Pass `due` from the request body to the store.",
+        "acceptanceCriteria": ["POST with an invalid `due` returns 400"],
+        "touchPaths": ["src/server.ts"],
+        "blockedBy": ["t1", "t3"]
+      },
+      {
+        "ref": "t2",
+        "title": "A duplicate ref, dropped",
+        "acceptanceCriteria": []
+      },
+      {
+        "ref": "t3",
+        "title": "Show due dates on the page",
+        "descriptionMd": "Show each todo's due date after its title.",
+        "type": "feature",
+        "priority": "P3",
+        "acceptanceCriteria": ["The page shows a todo's due date"],
+        "touchPaths": ["public/index.html"],
+        "blockedBy": ["t2"]
+      }
+    ]
+  },
+  "costUsd": 0.2,
+  "inputTokens": 9000,
+  "outputTokens": 1500
+}

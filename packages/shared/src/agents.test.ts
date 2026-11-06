@@ -46,7 +46,10 @@ describe("loadAgent", () => {
       expect(DEFAULT_COLUMNS.find((c) => c.agentSlug === slug)?.slug).toBe(a?.column);
     }
     expect(loadAgent("sir-codes-a-lot")?.editScope).toBe("worktree");
-    expect(loadAgent("nitpick-nancy")?.plugins).toEqual([{ name: "ponytail", level: "off" }]);
+    expect(loadAgent("nitpick-nancy")?.plugins).toEqual([
+      { name: "ponytail", level: "off" },
+      { name: "security-audit" },
+    ]);
   });
   it("returns null for agents not shipped yet", () => {
     expect(loadAgent("captain-ship-it")).toBeNull();

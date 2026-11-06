@@ -1,4 +1,6 @@
 import {
+  acceptProposalsBody,
+  type VerdictPayload,
   createCommentBody,
   createCriterionBody,
   createTicketBody,
@@ -48,37 +50,124 @@ async function projectOf(tx: Tx, ticketId: string, lock = false): Promise<string
 }
 
 export function createTicket(projectId: string, input: In<typeof createTicketBody>) {
+  return db.transaction((tx) => insertTicket(tx, projectId, input));
+}
+
+/** A new ticket at the bottom of Backlog, logged and announced. */
+async function insertTicket(
+  tx: Tx,
+  projectId: string,
+  input: In<typeof createTicketBody> & { parentId?: string; touchPaths?: string[] },
+) {
+  // Row lock on the project makes the number allocation atomic.
+  const [seq] = await tx
+    .update(projects)
+    .set({ ticketSeq: sql`${projects.ticketSeq} + 1` })
+    .where(eq(projects.id, projectId))
+    .returning({ number: projects.ticketSeq });
+  if (!seq) throw notFound("Project not found");
+  const [backlog] = await tx
+    .select({ id: columns.id })
+    .from(columns)
+    .where(and(eq(columns.projectId, projectId), eq(columns.slug, "backlog")));
+  const [last] = await tx
+    .select({ position: tickets.position })
+    .from(tickets)
+    .where(eq(tickets.columnId, backlog!.id))
+    .orderBy(desc(sql`${tickets.position} collate "C"`))
+    .limit(1);
+  const [ticket] = await tx
+    .insert(tickets)
+    .values({
+      ...input,
+      projectId,
+      number: seq.number,
+      columnId: backlog!.id,
+      position: generateKeyBetween(last?.position ?? null, null),
+    })
+    .returning();
+  await logActivity(tx, ticket!.id, "created", { title: ticket!.title });
+  await publish(tx, projectId, { type: "ticket.created", ticketId: ticket!.id });
+  return ticket!;
+}
+
+type Proposal = VerdictPayload["proposedTickets"][number];
+type EpicPlanData = { proposedTickets?: Proposal[]; accepted?: Record<string, string> };
+
+/**
+ * Creates the accepted proposals of an epic's latest plan (UC-11) in Backlog, as its children, with their
+ * criteria, touch sets and confirmed "blocks" links between them. Refs already accepted are refused.
+ */
+export function acceptProposals(epicId: string, { refs }: In<typeof acceptProposalsBody>) {
   return db.transaction(async (tx) => {
-    // Row lock on the project makes the number allocation atomic.
-    const [seq] = await tx
-      .update(projects)
-      .set({ ticketSeq: sql`${projects.ticketSeq} + 1` })
-      .where(eq(projects.id, projectId))
-      .returning({ number: projects.ticketSeq });
-    if (!seq) throw notFound("Project not found");
-    const [backlog] = await tx
-      .select({ id: columns.id })
-      .from(columns)
-      .where(and(eq(columns.projectId, projectId), eq(columns.slug, "backlog")));
-    const [last] = await tx
-      .select({ position: tickets.position })
-      .from(tickets)
-      .where(eq(tickets.columnId, backlog!.id))
-      .orderBy(desc(sql`${tickets.position} collate "C"`))
+    const [epic] = await tx.select().from(tickets).where(eq(tickets.id, epicId)).for("update");
+    if (!epic) throw notFound("Ticket not found");
+    if (epic.type !== "epic")
+      throw new HttpError(409, "not_epic", "Only an epic has proposed tickets");
+    const [plan] = await tx
+      .select()
+      .from(artifacts)
+      .where(and(eq(artifacts.ticketId, epicId), eq(artifacts.kind, "plan")))
+      .orderBy(desc(artifacts.version))
       .limit(1);
-    const [ticket] = await tx
-      .insert(tickets)
-      .values({
-        ...input,
-        projectId,
-        number: seq.number,
-        columnId: backlog!.id,
-        position: generateKeyBetween(last?.position ?? null, null),
-      })
-      .returning();
-    await logActivity(tx, ticket!.id, "created", { title: ticket!.title });
-    await publish(tx, projectId, { type: "ticket.created", ticketId: ticket!.id });
-    return ticket!;
+    const data = (plan?.data ?? {}) as EpicPlanData;
+    const proposals = data.proposedTickets ?? [];
+    if (!plan || !proposals.length)
+      throw new HttpError(409, "no_proposals", "The epic's plan proposes no tickets");
+    const accepted = { ...data.accepted };
+    const wanted = new Set(refs);
+    for (const ref of wanted) {
+      if (!proposals.some((p) => p.ref === ref))
+        throw new HttpError(400, "unknown_ref", `The plan proposes no ticket ${ref}`);
+      if (accepted[ref]) throw new HttpError(409, "already_accepted", `${ref} is already a ticket`);
+    }
+    const created = [];
+    // Plan order, so a blocker is always created before the tickets it blocks.
+    for (const p of proposals.filter((p) => wanted.has(p.ref))) {
+      const t = await insertTicket(tx, epic.projectId, {
+        title: p.title,
+        descriptionMd: p.descriptionMd,
+        type: p.type,
+        priority: p.priority,
+        labels: [],
+        parentId: epicId,
+        touchPaths: p.touchPaths,
+      });
+      if (p.acceptanceCriteria.length)
+        await tx.insert(acceptanceCriteria).values(
+          p.acceptanceCriteria.map((text, i) => ({
+            ticketId: t.id,
+            position: i,
+            text,
+            source: "agent" as const,
+          })),
+        );
+      for (const blocker of p.blockedBy.map((r) => accepted[r]).filter(Boolean))
+        await tx
+          .insert(ticketLinks)
+          .values({
+            projectId: epic.projectId,
+            fromTicketId: blocker!,
+            toTicketId: t.id,
+            kind: "blocks",
+            confirmed: true, // the owner accepted the plan that names it
+            source: "agent",
+          })
+          .onConflictDoNothing();
+      accepted[p.ref] = t.id;
+      created.push({ ref: p.ref, id: t.id, number: t.number });
+    }
+    await tx
+      .update(artifacts)
+      .set({ data: { ...data, accepted } })
+      .where(eq(artifacts.id, plan.id));
+    await logActivity(tx, epicId, "edited", { fields: ["children"], accepted: [...wanted] });
+    await publish(tx, epic.projectId, {
+      type: "ticket.updated",
+      ticketId: epicId,
+      fields: ["children"],
+    });
+    return { created };
   });
 }
 
@@ -95,7 +184,7 @@ export async function getTicket(id: string) {
     .innerJoin(columns, eq(columns.id, tickets.columnId))
     .where(eq(tickets.id, id));
   if (!row) throw notFound("Ticket not found");
-  const [criteria, runList, artifactList, links, [cost]] = await Promise.all([
+  const [criteria, runList, artifactList, links, [cost], children, [parent]] = await Promise.all([
     db
       .select()
       .from(acceptanceCriteria)
@@ -114,10 +203,30 @@ export async function getTicket(id: string) {
       .select({ costUsd: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8` })
       .from(runs)
       .where(eq(runs.ticketId, id)),
+    // An epic's children (UC-11), in creation order.
+    db
+      .select({
+        id: tickets.id,
+        number: tickets.number,
+        title: tickets.title,
+        columnName: columns.name,
+        columnSlug: columns.slug,
+      })
+      .from(tickets)
+      .innerJoin(columns, eq(columns.id, tickets.columnId))
+      .where(eq(tickets.parentId, id))
+      .orderBy(asc(tickets.number)),
+    row.ticket.parentId
+      ? db
+          .select({ id: tickets.id, number: tickets.number, title: tickets.title })
+          .from(tickets)
+          .where(eq(tickets.id, row.ticket.parentId))
+      : [],
   ]);
+  const key = (n: number) => `${row.keyPrefix}-${n}`;
   return {
     ...row.ticket,
-    key: `${row.keyPrefix}-${row.ticket.number}`,
+    key: key(row.ticket.number),
     columnName: row.columnName,
     columnSlug: row.columnSlug,
     criteria,
@@ -125,6 +234,8 @@ export async function getTicket(id: string) {
     costUsd: cost?.costUsd ?? 0,
     artifacts: artifactList,
     links,
+    children: children.map((c) => ({ ...c, key: key(c.number) })),
+    parent: parent ? { ...parent, key: key(parent.number) } : null,
   };
 }
 
@@ -283,6 +394,7 @@ export function moveTicket(
         projectId: tickets.projectId,
         columnId: tickets.columnId,
         touchPaths: tickets.touchPaths,
+        type: tickets.type,
       })
       .from(tickets)
       .where(eq(tickets.id, id))
@@ -294,6 +406,9 @@ export function moveTicket(
     if (!to) throw new HttpError(400, "invalid_column", "Column is not on this ticket's board");
     const changesColumn = from.id !== to.id;
 
+    // An epic is planned and split, never built itself (UC-11).
+    if (changesColumn && t.type === "epic" && IN_FLIGHT_COLUMNS.includes(to.slug))
+      throw new HttpError(409, "epic", "An epic isn't built itself: accept its proposed tickets");
     if (changesColumn && to.slug === "in_progress" && !startAnyway) {
       const waiting = await unfinishedBlockers(tx, id);
       const hits = await overlapping(tx, t);

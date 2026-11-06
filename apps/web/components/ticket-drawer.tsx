@@ -122,6 +122,12 @@ export function TicketDrawer(props: {
                     · ↩ {ticket.bounceCount} bounce{ticket.bounceCount > 1 && "s"}
                   </>
                 )}
+                {ticket.parent && (
+                  <>
+                    {" "}
+                    · part of {ticket.parent.key} {ticket.parent.title}
+                  </>
+                )}
               </SheetDescription>
               {ticket.costUsd > 0 && (
                 <p className="text-sm text-muted-foreground">
@@ -229,6 +235,16 @@ export function TicketDrawer(props: {
                 <summary className="cursor-pointer text-muted-foreground">Preview</summary>
                 <Markdown>{ticket.descriptionMd}</Markdown>
               </details>
+            )}
+
+            {ticket.type === "epic" && (
+              <EpicPanel
+                key={ticket.artifacts.find((a) => a.kind === "plan")?.id} // a revised plan resets the picks
+                ticket={ticket}
+                onAccept={(refs) =>
+                  run(() => api(`/api/tickets/${ticket.id}/accept-proposals`, { body: { refs } }))
+                }
+              />
             )}
 
             <section aria-labelledby="links-h" className="space-y-2">
@@ -501,6 +517,129 @@ export function TicketDrawer(props: {
 }
 
 /** Blocked (§13, UC-7): Duckworth's questions, an answer box and Resume for the run that got stuck. */
+type Proposal = {
+  ref: string;
+  title: string;
+  descriptionMd: string;
+  type: string;
+  priority: string;
+  acceptanceCriteria: string[];
+  blockedBy: string[];
+};
+
+/** An epic (UC-11): Plan B's proposed tickets from its latest plan to accept, and the children so far. */
+function EpicPanel({
+  ticket,
+  onAccept,
+}: {
+  ticket: TicketDetail;
+  onAccept: (refs: string[]) => Promise<void>;
+}) {
+  // Artifacts are newest first, so the first plan is the latest.
+  const plan = ticket.artifacts.find((a) => a.kind === "plan");
+  const data = (plan?.data ?? {}) as {
+    proposedTickets?: Proposal[];
+    accepted?: Record<string, string>;
+  };
+  const proposals = data.proposedTickets ?? [];
+  const accepted = data.accepted ?? {};
+  const keyOf = (ref: string) => ticket.children.find((c) => c.id === accepted[ref])?.key;
+  const open = proposals.filter((p) => !accepted[p.ref]);
+  const [picked, setPicked] = useState<string[]>(() => open.map((p) => p.ref));
+  const done = ticket.children.filter((c) => c.columnSlug === "done").length;
+
+  return (
+    <section aria-labelledby="epic-h" className="space-y-3 rounded-md border p-3">
+      <h3 id="epic-h" className="text-sm font-medium">
+        Epic{ticket.children.length > 0 && ` · ${done} of ${ticket.children.length} done`}
+      </h3>
+      {!plan && (
+        <p className="text-sm text-muted-foreground">
+          Move it to Planning: Plan B splits the description (or the file it names) into tickets.
+        </p>
+      )}
+      {proposals.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm text-muted-foreground">Proposed tickets</h4>
+          <ul className="space-y-2">
+            {proposals.map((p) => {
+              const key = keyOf(p.ref);
+              return (
+                <li key={p.ref} className="flex gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    aria-label={`Accept ${p.title}`}
+                    disabled={!!accepted[p.ref]}
+                    checked={!!accepted[p.ref] || picked.includes(p.ref)}
+                    onChange={(e) =>
+                      setPicked((s) =>
+                        e.target.checked ? [...s, p.ref] : s.filter((r) => r !== p.ref),
+                      )
+                    }
+                  />
+                  <details className="min-w-0 flex-1">
+                    <summary className="cursor-pointer">
+                      <span className="text-muted-foreground">{p.ref}</span> {p.title}
+                      <span className="text-xs text-muted-foreground">
+                        {" "}
+                        · {p.type} · {p.priority}
+                        {p.blockedBy.length > 0 && ` · after ${p.blockedBy.join(", ")}`}
+                        {key && (
+                          <>
+                            {" "}
+                            · created as <span className="whitespace-nowrap">{key}</span>
+                          </>
+                        )}
+                      </span>
+                    </summary>
+                    {p.descriptionMd && <Markdown>{p.descriptionMd}</Markdown>}
+                    {p.acceptanceCriteria.length > 0 && (
+                      <ul className="list-disc pl-5 text-muted-foreground">
+                        {p.acceptanceCriteria.map((c) => (
+                          <li key={c}>{c}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </details>
+                </li>
+              );
+            })}
+          </ul>
+          {open.length > 0 && (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={!picked.some((r) => !accepted[r])}
+                onClick={() => onAccept(picked.filter((r) => !accepted[r]))}
+              >
+                Accept selected ({picked.filter((r) => !accepted[r]).length})
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => onAccept(open.map((p) => p.ref))}>
+                Accept all
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+      {ticket.children.length > 0 && (
+        <div className="space-y-1">
+          <h4 className="text-sm text-muted-foreground">Children</h4>
+          <ul className="space-y-1 text-sm">
+            {ticket.children.map((c) => (
+              <li key={c.id} className="flex gap-2">
+                <span className="shrink-0 whitespace-nowrap text-muted-foreground">{c.key}</span>
+                <span className="min-w-0 flex-1 truncate">{c.title}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{c.columnName}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function BlockedPanel({
   ticket,
   onResume,

@@ -40,6 +40,7 @@ import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types"
 import {
   changedSince,
   checkAfterRun,
+  runChecks,
   ensureWorktree,
   snapshot,
   WORKTREE_COLUMNS,
@@ -47,7 +48,7 @@ import {
 
 export type Run = typeof runs.$inferSelect;
 
-/** Requirements §14 concurrency defaults; per-project settings arrive with the settings table in M4. */
+/** Requirements §14 concurrency defaults; a project's settings.concurrency overrides perProject. */
 export const LIMITS = { global: 2, perProject: 1 };
 
 /** Stall detection (§8): this many identical tool calls stop a run. */
@@ -296,8 +297,9 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   let wt: { path: string; branch: string } | null = null;
   let before: Awaited<ReturnType<typeof snapshot>> | null = null;
   let canEdit: ((rel: string) => boolean) | undefined;
+  let config: ProjectConfig | undefined;
   try {
-    const config = await projectConfigOf(db, project);
+    config = await projectConfigOf(db, project);
     testCommand = config.commands.test;
     // FR-49: a ticket reaching Done loses its worktree (the branch stays) before Archie reads the checkout.
     if (run.columnSlug === "done" && ticket.worktreePath && project.repoPath)
@@ -394,6 +396,15 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     if (run.columnSlug === "in_progress") {
       const base = await git(wt.path, ["merge-base", project.defaultBranch, "HEAD"]);
       outcome.touched = await changedSince(wt.path, base.trim());
+      // The checks gate (§8): a branch that doesn't build, lint and test goes back before review.
+      if (outcome.state === "succeeded" && config) {
+        const failed = await runChecks(config.commands, wt.path);
+        if (failed) {
+          outcome.state = "changes_requested";
+          outcome.error = `Kanbot checks: \`${failed.command}\` failed`;
+          outcome.checks = failed;
+        }
+      }
     }
   }
   return finish(db, run.id, outcome, result);
@@ -409,6 +420,8 @@ type Outcome = {
   touched?: string[];
   /** The agent session of a run stopped before it reported (kept for Resume). */
   sessionId?: string;
+  /** The checks gate's failure, stored as a test report for the builder's next run. */
+  checks?: { command: string; output: string };
 };
 
 /** Maps the runtime's result to a run state (requirements §8 report step and failure handling). */
@@ -486,6 +499,12 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
     if (!ticket) return;
     const actor = agentActor(run.agentSlug);
     if (o.verdict) await storeResults(tx, ticket, run, o.verdict);
+    if (o.checks)
+      await storeArtifact(tx, ticket, run, {
+        kind: "test_report",
+        title: `Kanbot checks: \`${o.checks.command}\` failed`,
+        markdown: `Kanbot ran \`${o.checks.command}\` in the worktree after this run, and it failed. Fix it before review.\n\n\`\`\`\n${o.checks.output.replaceAll("```", "'''")}\n\`\`\``,
+      });
 
     const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
     const from = cols.find((c) => c.id === ticket.columnId)!;
@@ -542,8 +561,9 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
       await duckworthFallback(tx, ticket);
     const to = rule.to && cols.find((c) => c.slug === rule.to);
     let started = null;
-    if (to && to.id !== from.id) {
-      await moveToColumnEnd(tx, ticket, from, to, actor);
+    const next = rule.rerun ? from : to && to.id !== from.id ? to : null;
+    if (next) {
+      if (next.id !== from.id) await moveToColumnEnd(tx, ticket, from, next, actor);
       // A bounce resumes the agent's last session there, so it picks up where it left off (FR-35).
       const [last] = rule.bounce
         ? await tx
@@ -552,14 +572,14 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
             .where(
               and(
                 eq(runs.ticketId, ticket.id),
-                eq(runs.columnSlug, to.slug),
+                eq(runs.columnSlug, next.slug),
                 isNotNull(runs.sessionId),
               ),
             )
             .orderBy(desc(runs.createdAt))
             .limit(1)
         : [];
-      started = await startColumnAgent(tx, ticket.projectId, ticket.id, to, actor, {
+      started = await startColumnAgent(tx, ticket.projectId, ticket.id, next, actor, {
         resumeSessionId: last?.sessionId,
       });
     }
@@ -615,6 +635,48 @@ async function agentComment(
   });
 }
 
+/** A new artifact version (never overwriting) and its event. */
+async function storeArtifact(
+  tx: Tx,
+  ticket: TicketRef,
+  run: Run,
+  a: VerdictPayload["artifacts"][number],
+  data: Record<string, unknown> = {},
+) {
+  const [{ last } = { last: null }] = await tx
+    .select({ last: max(artifacts.version) })
+    .from(artifacts)
+    .where(and(eq(artifacts.ticketId, ticket.id), eq(artifacts.kind, a.kind)));
+  const [row] = await tx
+    .insert(artifacts)
+    .values({
+      ticketId: ticket.id,
+      runId: run.id,
+      kind: a.kind,
+      title: a.title,
+      version: (last ?? 0) + 1,
+      contentMd: a.markdown,
+      data,
+    })
+    .returning({ id: artifacts.id });
+  await publish(tx, ticket.projectId, {
+    type: "artifact.created",
+    ticketId: ticket.id,
+    artifactId: row!.id,
+  });
+}
+
+/** Plan B's proposals, cleaned: duplicate refs dropped, `blockedBy` kept only for earlier refs (no cycles). */
+export function proposedTickets(list: VerdictPayload["proposedTickets"]) {
+  const seen = new Set<string>();
+  return list.flatMap((p) => {
+    if (seen.has(p.ref)) return [];
+    const blockedBy = [...new Set(p.blockedBy)].filter((r) => seen.has(r));
+    seen.add(p.ref);
+    return [{ ...p, blockedBy }];
+  });
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -623,28 +685,16 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 async function storeResults(tx: Tx, ticket: TicketRef, run: Run, v: VerdictPayload) {
   const actor = agentActor(run.agentSlug);
-  for (const a of v.artifacts) {
-    const [{ last } = { last: null }] = await tx
-      .select({ last: max(artifacts.version) })
-      .from(artifacts)
-      .where(and(eq(artifacts.ticketId, ticket.id), eq(artifacts.kind, a.kind)));
-    const [row] = await tx
-      .insert(artifacts)
-      .values({
-        ticketId: ticket.id,
-        runId: run.id,
-        kind: a.kind,
-        title: a.title,
-        version: (last ?? 0) + 1,
-        contentMd: a.markdown,
-      })
-      .returning({ id: artifacts.id });
-    await publish(tx, ticket.projectId, {
-      type: "artifact.created",
-      ticketId: ticket.id,
-      artifactId: row!.id,
-    });
-  }
+  // An epic's plan carries its proposed tickets, for the owner to accept (UC-11).
+  const split = v.verdict === "success" ? proposedTickets(v.proposedTickets) : [];
+  for (const a of v.artifacts)
+    await storeArtifact(
+      tx,
+      ticket,
+      run,
+      a,
+      a.kind === "plan" && split.length ? { proposedTickets: split, accepted: {} } : {},
+    );
 
   if (v.verdict === "success" && v.touchPaths)
     await tx.update(tickets).set({ touchPaths: v.touchPaths }).where(eq(tickets.id, ticket.id));
