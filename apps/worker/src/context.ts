@@ -124,7 +124,10 @@ export async function buildContext(
     ? await git(repo.cwd!, ["diff", "--stat", `${repo.defaultBranch}...HEAD`]).catch(() => "")
     : "";
 
-  const task = TASK[run.columnSlug] ?? "Work on this ticket.";
+  const task =
+    ticket.type === "epic" && run.columnSlug === "planning"
+      ? "Plan this epic: split it into tickets (see Epics in your instructions)."
+      : (TASK[run.columnSlug] ?? "Work on this ticket.");
   // requestMd is the owner's own words: a "Revise plan" request (UC-3), or an answer given with Resume (UC-7).
   const revising = !!run.requestMd && run.columnSlug === "planning" && !!plan;
   return [

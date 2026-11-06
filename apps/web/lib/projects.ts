@@ -71,6 +71,7 @@ export async function getBoard(projectId: string) {
         statusFlag: tickets.statusFlag,
         bounceCount: tickets.bounceCount,
         touchPaths: tickets.touchPaths,
+        parentId: tickets.parentId,
       })
       .from(tickets)
       .where(eq(tickets.projectId, projectId))
@@ -92,7 +93,18 @@ export async function getBoard(projectId: string) {
   return {
     project,
     columns: cols.map((c) => ({ ...c, agent: columnAgent(c.agentSlug) })),
-    tickets: cards.map((c) => {
+    tickets: cards.map((card) => {
+      // An epic's progress: its children, and how many of them are Done (UC-11).
+      const kids = card.type === "epic" ? cards.filter((k) => k.parentId === card.id) : [];
+      const c = {
+        ...card,
+        epic: kids.length
+          ? {
+              total: kids.length,
+              done: kids.filter((k) => slugOf.get(k.columnId) === "done").length,
+            }
+          : null,
+      };
       const slug = slugOf.get(c.columnId)!;
       const active = slug === "ready" || (IN_FLIGHT_COLUMNS as readonly string[]).includes(slug);
       if (!active) return { ...c, waitingOn: [] as string[], overlaps: [] as string[] };

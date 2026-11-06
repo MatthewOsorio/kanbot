@@ -540,6 +540,14 @@ function CardBody({ card, cardKey }: { card: Card; cardKey: string }) {
       )}
       <div className="flex flex-wrap items-center gap-2">
         <StatusPill flag={card.statusFlag} />
+        {card.epic && (
+          <span
+            className="mt-2 text-xs text-muted-foreground"
+            title={`${card.epic.done} of ${card.epic.total} child tickets are Done`}
+          >
+            {card.epic.done}/{card.epic.total} done
+          </span>
+        )}
         {card.bounceCount > 0 && (
           <span
             className="mt-2 text-xs text-muted-foreground"

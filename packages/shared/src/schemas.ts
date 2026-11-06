@@ -188,3 +188,8 @@ export const patchCriterionBody = z
   .object({ text: createCriterionBody.shape.text, status: z.enum(criterionStatuses) })
   .partial()
   .refine(nonEmpty, "No fields to update");
+
+/** Accept some of Plan B's proposed tickets for an epic (UC-11), by their refs. */
+export const acceptProposalsBody = z.object({
+  refs: z.array(z.string().trim().min(1).max(20)).min(1).max(30),
+});

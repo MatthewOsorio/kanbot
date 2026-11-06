@@ -4,7 +4,7 @@ import type { Verdict } from "./verdict";
 /** Terminal run states, i.e. what a run can end as. */
 export type RunOutcome = Exclude<RunState, "queued" | "running">;
 
-/** Code Review + QA bounce-backs a ticket may take before it goes to Blocked (FR-23). Per project: M4. */
+/** Bounce-backs (checks gate, Code Review, QA) a ticket may take before Blocked (FR-23); the default, per project in Settings. */
 export const BOUNCE_LIMIT = 3;
 
 /**
@@ -24,6 +24,14 @@ export const RUN_RULES: readonly {
   { column: "planning", outcome: "succeeded", to: null, flag: "plan_ready" },
   // The build loop (M3).
   { column: "in_progress", outcome: "succeeded", to: "code_review", flag: "none" },
+  // The checks gate failed (build, lint or test, run by the worker): Sir Codes-a-Lot goes again (§8).
+  {
+    column: "in_progress",
+    outcome: "changes_requested",
+    to: "in_progress",
+    flag: "none",
+    bounce: true,
+  },
   { column: "code_review", outcome: "succeeded", to: "qa", flag: "none" },
   {
     column: "code_review",
@@ -72,6 +80,8 @@ export type AfterRun = {
   bounce: boolean;
   /** Set when the bounce limit turned a bounce into Blocked. */
   reason?: "bounce_limit";
+  /** A bounce that stays in its column: the column's agent runs again there. */
+  rerun?: true;
 };
 
 export function afterRun(
@@ -93,5 +103,7 @@ export function afterRun(
   if (!rule) return { to: null, flag: "none", bounce: false };
   if (rule.bounce && bounces >= bounceLimit)
     return { to: "blocked", flag: "failed", bounce: false, reason: "bounce_limit" };
+  if (rule.bounce && rule.to === column)
+    return { to: null, flag: rule.flag, bounce: true, rerun: true };
   return { to: rule.to === column ? null : rule.to, flag: rule.flag, bounce: !!rule.bounce };
 }

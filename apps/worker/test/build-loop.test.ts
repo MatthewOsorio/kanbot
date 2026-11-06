@@ -282,6 +282,30 @@ describe("build loop (M3 done criterion)", () => {
     expect(criteria.map((c) => c.status)).toEqual(["pass", "pass"]);
   });
 
+  it("sends a branch whose tests fail back to Sir Codes-a-Lot before review (checks gate)", async () => {
+    const { ticket, col, move } = await setup("checks-fail");
+    await move("in_progress");
+    const done = await drain();
+    expect(done.map((r) => `${r.agentSlug}:${r.state}`)).toEqual([
+      "sir-codes-a-lot:changes_requested",
+      "sir-codes-a-lot:succeeded",
+      "nitpick-nancy:succeeded",
+      "testy-mctestface:succeeded",
+    ]);
+    expect(done[0]!.error).toBe("Kanbot checks: `node --test` failed");
+    expect(done[1]!.resumeSessionId).toBe(done[0]!.sessionId); // he picks up where he left off
+    const t = await ticketNow(ticket.id);
+    expect(t.columnId).toBe(col("qa").id);
+    expect(t.bounceCount).toBe(1);
+    const [report] = await db
+      .select()
+      .from(artifacts)
+      .where(and(eq(artifacts.ticketId, ticket.id), eq(artifacts.kind, "test_report")))
+      .orderBy(asc(artifacts.version));
+    expect(report!.title).toBe("Kanbot checks: `node --test` failed");
+    expect(report!.contentMd).toMatch(/remove deletes the todo/);
+  });
+
   it("turns Nancy's approval with a blocking cross-ticket risk into a bounce, noted on both tickets", async () => {
     const { ticket, col, move, addTicket } = await setup("risk", undefined, "RISK");
     const other = await addTicket(2, "default", "Rewrite TodoStore.remove");
@@ -580,5 +604,48 @@ describe("project settings in the database (M4)", () => {
     await ensureWorktree(repo, "main", ticket, config);
     expect(installs()).toBe(2);
     expect(await git(path, ["status", "--porcelain"])).not.toContain("kanbot-install");
+  });
+});
+
+describe("epics (M4.5)", () => {
+  it("stores Plan B's proposed tickets on an epic's plan, cleaned", async () => {
+    const { ticket, move } = await setup("epic", "Due dates for todos");
+    await db.update(tickets).set({ type: "epic" }).where(eq(tickets.id, ticket.id));
+    await move("planning");
+    const [run] = await drain();
+    expect(run!.state).toBe("succeeded");
+    expect((await ticketNow(ticket.id)).statusFlag).toBe("plan_ready");
+    const [plan] = await db
+      .select()
+      .from(artifacts)
+      .where(and(eq(artifacts.ticketId, ticket.id), eq(artifacts.kind, "plan")));
+    const data = plan!.data as {
+      proposedTickets: { ref: string; blockedBy: string[] }[];
+      accepted: object;
+    };
+    // The duplicate t2 is dropped, and t2's forward reference to t3 with it (no cycles).
+    expect(data.proposedTickets.map((p) => [p.ref, p.blockedBy])).toEqual([
+      ["t1", []],
+      ["t2", ["t1"]],
+      ["t3", ["t2"]],
+    ]);
+    expect(data.accepted).toEqual({});
+  });
+
+  it("tells Plan B to split an epic", async () => {
+    const { ticket, project } = await setup("epic");
+    const [run] = await db
+      .insert(runs)
+      .values({ ticketId: ticket.id, agentSlug: "plan-b", columnSlug: "planning" })
+      .returning();
+    const prompt = (t: string) =>
+      buildContext(db, { ...ticket, type: t, key: `${project.keyPrefix}-1` }, run!, {
+        cwd: null,
+        defaultBranch: "main",
+        hotspots: [],
+      });
+    expect(await prompt("epic")).toMatch(/^Plan this epic: split it into tickets/);
+    expect(await prompt("feature")).toMatch(/^Plan this ticket\./);
+    await db.update(runs).set({ state: "cancelled" }).where(eq(runs.id, run!.id));
   });
 });

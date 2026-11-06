@@ -1,0 +1,6 @@
+{
+  "name": "security-audit",
+  "version": "0.0.0-c1c8a8c",
+  "description": "Security review of a branch diff, built from Cloudflare's security-audit skill (guidance mode).",
+  "author": { "name": "Cloudflare, Inc.", "url": "https://github.com/cloudflare/security-audit-skill" }
+}

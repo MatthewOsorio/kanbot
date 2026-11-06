@@ -221,12 +221,23 @@ try {
 } catch {
   console.log("No evals/baseline.json yet: run with --baseline to save this run as the baseline.");
 }
-if (baseline)
+if (baseline) {
+  // Only tickets the baseline has: a newly added golden ticket has nothing to compare with yet.
+  const comparable = results.filter((r) => baseline!.some((b) => b.slug === r.slug));
+  const fresh = results.filter((r) => !comparable.includes(r)).map((r) => r.slug);
+  if (fresh.length) console.log(`Not in the baseline yet (not compared): ${fresh.join(", ")}`);
   for (const k of ["bounces", "costUsd"] as const) {
-    const [was, now] = [total(baseline, k), total(results, k)];
+    const [was, now] = [
+      total(
+        baseline.filter((b) => comparable.some((r) => r.slug === b.slug)),
+        k,
+      ),
+      total(comparable, k),
+    ];
     if (now > was * (1 + TOLERANCE) && now - was > 0.001)
       problems.push(`total ${k} rose from ${was} to ${now} (more than ${TOLERANCE * 100}%)`);
   }
+}
 
 const report = {
   at: new Date().toISOString(),

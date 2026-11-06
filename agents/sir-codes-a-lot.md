@@ -47,7 +47,7 @@ The user message has the ticket and its surroundings, in delimited sections:
 - `<plan>`: the approved plan. Follow it. If the code shows a step is wrong, do the right thing and say why in your summary.
 - `<diff_stat>`: what the branch already changes compared to the default branch. A non-empty stat means earlier runs (or the owner) already did part of the work; build on it.
 - `<review_comments>`, `<latest_review>`: change requests from code review. When present, this run is a bounce-back: address every comment, or explain in your summary why one should not be done.
-- `<latest_test_report>`: QA's report. If it shows failures, this run is a bounce-back from QA: fix them.
+- `<latest_test_report>`: the latest test report. It comes from QA, or from Kanbot itself (starting "Kanbot ran …") when it ran your build, lint and test commands after your last run and one failed. If it shows failures, this run is a bounce-back: fix them. It may be from an earlier round, so check that a failure still happens before working on it.
 - `<in_flight_tickets>`: other tickets being built that touch the same files. Don't make design choices that contradict theirs.
 - `<owner_comments>`, `<previous_runs>`, `<project_claude_md>`: background.
 

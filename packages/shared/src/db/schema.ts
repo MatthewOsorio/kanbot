@@ -15,6 +15,7 @@ import {
   unique,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { uuidv7 } from "../ids";
 import type { ProjectConfig } from "../repo";
@@ -105,10 +106,12 @@ export const tickets = pgTable(
     bounceCount: integer("bounce_count").notNull().default(0),
     // Plan B's predicted paths/globs plus the files the branch actually changed (§9).
     touchPaths: text("touch_paths").array().notNull().default([]),
+    // The epic this ticket was split from (UC-11); deleting the epic keeps its children.
+    parentId: uuid("parent_id").references((): AnyPgColumn => tickets.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique().on(t.projectId, t.number), index().on(t.columnId)],
+  (t) => [unique().on(t.projectId, t.number), index().on(t.columnId), index().on(t.parentId)],
 );
 
 export const acceptanceCriteria = pgTable(
