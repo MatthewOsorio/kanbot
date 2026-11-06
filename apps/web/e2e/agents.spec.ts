@@ -46,7 +46,7 @@ test("moving a ticket to Planning runs Plan B: plan artifact, criteria, Plan rea
   await expect(page.getByRole("button", { name: /Needs me/ })).toContainText("1");
 
   await card(page, "Add a filter").click();
-  await expect(page.getByLabel("Latest run")).toContainText("plan-b · succeeded");
+  await expect(page.getByLabel("Latest run")).toContainText("Plan B · succeeded");
   await expect(page.getByLabel("Criterion", { exact: true })).toHaveCount(2); // written by the plan
 
   await page.getByRole("tab", { name: /Artifacts/ }).click();
@@ -64,7 +64,10 @@ test("moving a ticket to Planning runs Plan B: plan artifact, criteria, Plan rea
   await page.getByLabel("Requested plan changes").fill("Use SQLite, not Postgres");
   await page.getByRole("button", { name: "Revise plan" }).click();
   await expect(page.getByRole("article", { name: "Plan: Add a filter v2" })).toBeVisible();
-  await expect(page.getByText("Plan: Add a filter v1 ·")).toBeVisible(); // v1 kept, collapsed
+  // v1 kept, collapsed, and says who wrote it
+  await expect(page.locator("summary", { hasText: "Plan: Add a filter v1" })).toContainText(
+    "Plan B",
+  );
   await page.getByRole("tab", { name: "Activity" }).click();
   await expect(page.getByText('requested plan changes: "Use SQLite, not Postgres"')).toBeVisible();
 });
@@ -104,16 +107,16 @@ test("moving a ticket while its agent works asks first, then cancels the run", a
   await expect(column(page, "Backlog").getByText("Working")).toHaveCount(0);
 
   await card(page, "Slow plan").click();
-  await expect(page.getByLabel("Latest run")).toContainText("plan-b · cancelled");
+  await expect(page.getByLabel("Latest run")).toContainText("Plan B · cancelled");
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 
   // FR-35: Retry takes the ticket back to the run's column and starts a fresh run there.
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByLabel("Latest run")).toContainText(/plan-b · (queued|running)/);
+  await expect(page.getByLabel("Latest run")).toContainText(/Plan B · (queued|running)/);
   // The drawer is modal (the board behind it is hidden), so read the column from its header.
   await expect(page.getByRole("dialog").getByText(/-1 · Planning$/)).toBeVisible();
   await page.getByRole("button", { name: "Cancel run" }).click(); // leave no slow run behind
-  await expect(page.getByLabel("Latest run")).toContainText("plan-b · cancelled");
+  await expect(page.getByLabel("Latest run")).toContainText("Plan B · cancelled");
 });
 
 // Moving a planned ticket back to Planning asks before re-planning; Approve plan moves it to Ready.
@@ -151,7 +154,7 @@ test("back to Planning asks before Plan B redoes the plan; Approve plan moves to
   await expect.poll(() => asked).toEqual([expect.stringContaining("already has a plan")]);
   await expect(column(page, "Planning").getByText("Plan ready · needs you")).toBeVisible();
   await card(page, "Add a filter").click();
-  await expect(page.getByLabel("Latest run")).toContainText("plan-b · succeeded");
+  await expect(page.getByLabel("Latest run")).toContainText("Plan B · succeeded");
   await page.getByRole("tab", { name: /Artifacts/ }).click();
   await expect(page.getByRole("article", { name: "Plan: Add a filter v1" })).toBeVisible();
   await page.keyboard.press("Escape");

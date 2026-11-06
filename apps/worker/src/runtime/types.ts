@@ -19,6 +19,8 @@ export type RunRequest = {
   signal: AbortSignal; // aborted on cancel or timeout
   scenario: string; // replay only: which fixture to play (ticket label `replay:<name>`, else "default")
   attempt: number; // this agent's nth run on the ticket (1-based); replay picks <scenario>.<n>.json
+  /** QA runs: the app the worker started; the agent gets an `http_request` tool limited to it (§4). */
+  appUrl?: string;
   /** Continue this agent session instead of starting cold (Resume, bounce-backs; FR-35). */
   resumeSessionId?: string;
 };

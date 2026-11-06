@@ -2,7 +2,7 @@
 
 Self-hosted Kanban board where AI agents work the columns. The spec is `docs/requirements.md`: build to it, and update it in the same change whenever a decision or behavior changes. Work milestone by milestone (§16) and stop at the end of each for review.
 
-**Status: M4.5 (quality gates and epics, local) is built and its real-agent eval passed, pending review; M1 (board), M2 (orchestrator, Plan B), M3 (build loop) and M4 (unblock) before it. Next is M5 (ship and deploy).** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md` and `docs/m4.5-report.md`.
+**Status: M1 (board), M2 (orchestrator, Plan B), M3 (build loop), M4 (unblock) and M4.5 (quality gates and epics, local; PR #8) are done and merged. Since then the `ui-revamp` branch adds the QA rework (Testy checks criteria against a worker-started app) and the UI revamp (themes, agent colors, the drawer as a dialog, per-agent Diff headers); both are at the end of `docs/m4.5-report.md`. Testy's new prompt still needs a real `pnpm eval:agents`. Next is M5 (ship and deploy).** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md` and `docs/m4.5-report.md`.
 
 ## Layout
 
@@ -12,15 +12,16 @@ apps/web/            Next.js 16 App Router: board UI + REST API + SSE
   lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations, overlap check, diff, acceptProposals (epics)
   lib/runs.ts          run history, run log paging, cancel, retry, revise plan
   lib/events.ts        one LISTEN client per process fans out to SSE (publish() itself is in shared)
-  components/          board.tsx (dnd-kit), ticket-drawer.tsx (tabs, Live log, Diff), markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
+  components/          board.tsx (dnd-kit), ticket-drawer.tsx (dialog: tabs, Live log, Diff), home.tsx, brand.tsx (Wordmark, SELECT), theme-toggle.tsx, markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
+  app/globals.css      design tokens (slate + indigo, status colors bg-running/needs/failed/ok), light and .dark; agent colors come from agent frontmatter
   e2e/                 Playwright; starts its own dev server on :3100 and a replay worker, against database kanbot_test
 apps/worker/         Node process (tsx): claims queued runs, runs agents, applies verdicts
   src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery
   src/run.ts           claimNext (SKIP LOCKED queue), executeRun, outcomeOf, finish (verdict → transition, one tx)
   src/context.ts       the context bundle (prompt) for a run (branch context, in-flight tickets)
-  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate)
+  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate), startApp (QA's app on a free PORT)
   src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
-  src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK), replay.ts (fixtures + record()), fence.ts (permission hook logic)
+  src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK; Kanbot's MCP server with report_result and QA's http_request), replay.ts (fixtures + record()), fence.ts (permission hook logic, appRequestUrl)
   test/                Vitest against kanbot_test with the replay runtime
 packages/shared/     shared by web and worker
   src/schemas.ts       zod API bodies + enums;  src/events.ts  SSE event union + NOTIFY channel

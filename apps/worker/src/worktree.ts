@@ -1,4 +1,5 @@
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
+import { createServer, type AddressInfo } from "node:net";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -112,9 +113,72 @@ export async function runChecks(commands: ProjectConfig["commands"], path: strin
   return null;
 }
 
+/** The environment project commands get: the worker's, minus its credentials. */
+function commandEnv() {
+  const { DATABASE_URL: _db, ANTHROPIC_API_KEY: _key, ...env } = process.env;
+  return env;
+}
+
+const APP_READY_MS = 60_000;
+
+/**
+ * Starts the project's app for a QA run (§4) on a free port, and waits until it answers HTTP on
+ * 127.0.0.1. Returns its URL and a stop(), or why it didn't come up (with the output's tail).
+ * shortcut: runs on the worker's own toolchain; M5 runs it in the project's image (§16).
+ */
+export async function startApp(
+  command: string,
+  cwd: string,
+): Promise<{ url: string; stop: () => Promise<void> } | { error: string }> {
+  const port = await freePort();
+  const url = `http://127.0.0.1:${port}`;
+  const child = spawn(command, {
+    cwd,
+    env: { ...commandEnv(), PORT: String(port) },
+    shell: true,
+    windowsHide: true,
+    detached: process.platform !== "win32", // own process group, so stop() reaches the shell's children
+  });
+  let output = "";
+  const keep = (b: Buffer) => (output = (output + b.toString()).slice(-8_000));
+  child.stdout?.on("data", keep);
+  child.stderr?.on("data", keep);
+  let exited = child.exitCode !== null;
+  const done = new Promise<void>((r) => child.once("exit", () => ((exited = true), r())));
+  const stop = async () => {
+    if (exited) return;
+    if (process.platform === "win32")
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+    else process.kill(-child.pid!, "SIGKILL");
+    await done;
+  };
+  const tail = () => output.trimEnd().split("\n").slice(-CHECK_TAIL_LINES).join("\n");
+  for (const end = Date.now() + APP_READY_MS; Date.now() < end;) {
+    if (exited) return { error: `\`${command}\` exited before answering on ${url}:\n${tail()}` };
+    const up = await fetch(url, { signal: AbortSignal.timeout(2_000) })
+      .then(() => true)
+      .catch(() => false);
+    if (up) return { url, stop };
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  await stop();
+  return { error: `\`${command}\` didn't answer on ${url} within 60 s:\n${tail()}` };
+}
+
+function freePort(): Promise<number> {
+  return new Promise((ok, fail) => {
+    const s = createServer();
+    s.once("error", fail);
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address() as AddressInfo;
+      s.close(() => ok(port));
+    });
+  });
+}
+
 /** A project command, run by the worker itself (install, the checks gate). Same scrubbed env as agents get. */
 async function runCommand(command: string, cwd: string) {
-  const { DATABASE_URL: _db, ANTHROPIC_API_KEY: _key, ...env } = process.env;
+  const env = commandEnv();
   await sh(command, {
     cwd,
     env,

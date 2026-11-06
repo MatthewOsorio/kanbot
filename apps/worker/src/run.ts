@@ -41,6 +41,7 @@ import {
   changedSince,
   checkAfterRun,
   runChecks,
+  startApp,
   ensureWorktree,
   snapshot,
   WORKTREE_COLUMNS,
@@ -273,8 +274,13 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     // shortcut: no "repeated feedback" rule yet (M6); the bounce limit bounds those loops meanwhile.
     if (e.type !== "tool_call") return;
     const name = String(e.payload.name);
-    const command = String((e.payload.input as { command?: unknown } | null)?.command ?? "");
-    if (EDIT_TOOLS.has(name)) calls.clear();
+    const input = e.payload.input as { command?: unknown; method?: unknown } | null;
+    const command = String(input?.command ?? "");
+    // A request that changes the app's state is progress too: GET, POST, GET again is not a loop.
+    const http = name === "mcp__kanbot__http_request";
+    const changesApp =
+      http && !["GET", "HEAD", "OPTIONS", undefined].includes(input?.method as string);
+    if (EDIT_TOOLS.has(name) || changesApp) calls.clear();
     else {
       const k = JSON.stringify([name, e.payload.input]);
       const count = (calls.get(k) ?? 0) + 1;
@@ -283,7 +289,8 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         stall.abort(`Stopped: the agent made the same ${name} call ${count} times`);
     }
     // No progress: agents that may edit, this many calls with no edit and no test run.
-    const progress = EDIT_TOOLS.has(name) || (!!testCommand && command.includes(testCommand));
+    const progress =
+      EDIT_TOOLS.has(name) || http || (!!testCommand && command.includes(testCommand));
     idle = progress ? 0 : idle + 1;
     if (agent.editScope !== "none" && idle >= NO_PROGRESS_CALLS)
       stall.abort(`Stopped: ${idle} tool calls with no file change and no test run`);
@@ -298,6 +305,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   let before: Awaited<ReturnType<typeof snapshot>> | null = null;
   let canEdit: ((rel: string) => boolean) | undefined;
   let config: ProjectConfig | undefined;
+  let app: { url: string; stop: () => Promise<void> } | undefined;
   try {
     config = await projectConfigOf(db, project);
     testCommand = config.commands.test;
@@ -322,10 +330,20 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     }
     canEdit = editScope(agent.editScope, config);
     const cwd = wt?.path ?? project.repoPath ?? scratch!;
+    // QA checks the criteria against the running app (§4); one that won't start is for Testy to report.
+    let appError: string | undefined;
+    if (run.columnSlug === "qa" && wt && config.commands.start) {
+      const started = await startApp(config.commands.start, wt.path);
+      if ("url" in started) app = started;
+      else appError = started.error;
+    }
     const prompt = await buildContext(db, { ...ticket, key }, run, {
       cwd: project.repoPath ? cwd : null,
       defaultBranch: project.defaultBranch,
       hotspots: config.hotspots,
+      commands: config.commands,
+      testGlobs: config.testGlobs,
+      app: app ? { url: app.url } : appError ? { error: appError } : undefined,
     });
     const scenario = ticket.labels.find((l) => l.startsWith("replay:"))?.slice(7) ?? "default";
     const [{ attempt } = { attempt: 1 }] = await db
@@ -349,6 +367,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         scenario,
         attempt,
         resumeSessionId: run.resumeSessionId ?? undefined,
+        appUrl: app?.url,
       },
       emit,
     );
@@ -381,6 +400,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       return stop({ state: "awaiting_input", error: String(stall.signal.reason) });
     return stop({ state: "failed", error: (e as Error).message });
   } finally {
+    await app?.stop().catch(() => {});
     if (scratch) await rm(scratch, { recursive: true, force: true });
   }
 
@@ -388,10 +408,19 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   if (dayCapped && outcome.state === "budget_exceeded")
     outcome.error = `Daily budget reached: this run could spend only $${run.budgetUsd!.toFixed(2)} of what was left today`;
   if (wt && before) {
+    // Who changed what (Diff tab); kept even when the checks below fail, since the changes stay on the branch.
+    const mine = await changedSince(wt.path, before.head).catch(() => []);
+    outcome.filesChanged = mine.filter((f) => !before!.dirty.includes(f));
     const broken = await checkAfterRun(wt, project.defaultBranch, before, canEdit).catch(
       (e: Error) => `Post-run check failed: ${e.message}`,
     );
-    if (broken) return finish(db, run.id, { state: "failed", error: broken }, result);
+    if (broken)
+      return finish(
+        db,
+        run.id,
+        { state: "failed", error: broken, filesChanged: outcome.filesChanged },
+        result,
+      );
     // The touch set grows with what the branch really changed (§9).
     if (run.columnSlug === "in_progress") {
       const base = await git(wt.path, ["merge-base", project.defaultBranch, "HEAD"]);
@@ -418,6 +447,8 @@ type Outcome = {
   verdict?: VerdictPayload;
   /** Files the branch changed (In Progress runs), added to the ticket's touch set. */
   touched?: string[];
+  /** Files this run itself changed in the worktree, stored on the run. */
+  filesChanged?: string[];
   /** The agent session of a run stopped before it reported (kept for Resume). */
   sessionId?: string;
   /** The checks gate's failure, stored as a test report for the builder's next run. */
@@ -465,6 +496,7 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         outputTokens: usage.outputTokens,
       }),
       ...(o.sessionId && { sessionId: o.sessionId }),
+      ...(o.filesChanged && { filesChanged: o.filesChanged }),
     };
     // Ticket before run, the order the web app's move, cancel and delete lock in (else they can deadlock).
     await tx.execute(

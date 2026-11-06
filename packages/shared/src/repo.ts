@@ -41,6 +41,8 @@ export const projectConfig = z.object({
       build: z.string().trim().min(1).optional(),
       test: z.string().trim().min(1).optional(),
       lint: z.string().trim().min(1).optional(),
+      /** Starts the app for QA (§4): the worker runs it with PORT set and waits for an HTTP answer. */
+      start: z.string().trim().min(1).optional(),
     })
     .default({}),
   testGlobs: z.array(z.string().min(1)).default([]),

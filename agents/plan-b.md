@@ -3,6 +3,7 @@ slug: plan-b
 name: Plan B
 tagline: Always has a backup plan.
 avatar: avatars/plan-b.svg
+color: "#2563eb"
 column: planning
 model: claude-opus-5-5
 # Read-only repo access. The worker's permission hook refuses every other tool; report_result is added by the runtime.

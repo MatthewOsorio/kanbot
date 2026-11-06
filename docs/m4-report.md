@@ -1,6 +1,6 @@
 # M4 report: unblock (local)
 
-Status: **done, pending review.** Built 2026-11-03 to 2026-11-05 in six phases:
+Status: **done; merged in PRs #5–#7.** Built 2026-11-03 to 2026-11-05 in six phases:
 - P1–P2 merged in PR #5;
 - P3–P4 merged in PR #6;
 - P5–P6 are on `m4-unblock-3`.

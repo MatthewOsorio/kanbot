@@ -141,3 +141,14 @@ export function checkToolCall(
   }
   return null;
 }
+
+/**
+ * The QA app's `http_request` tool (§4) reaches only the app the worker started: `path` must be a path on
+ * `base` (no other host, scheme or port). Returns the URL to fetch, or a refusal.
+ */
+export function appRequestUrl(base: string, path: string): URL | string {
+  if (!path.startsWith("/") || path.startsWith("//"))
+    return `Give a path starting with one "/" (e.g. /api/todos), not a URL`;
+  const url = new URL(path, base);
+  return url.origin === new URL(base).origin ? url : `${path} is not on the app at ${base}`;
+}

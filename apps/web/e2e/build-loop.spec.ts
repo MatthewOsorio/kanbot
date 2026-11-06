@@ -46,8 +46,9 @@ test("the build loop runs to QA with one bounce, and the Diff tab shows the bran
   await page.getByRole("tab", { name: "Diff" }).click();
   const diff = page.getByLabel(/^Diff of kanbot\//);
   await expect(diff).toContainText("if (index === -1) return false;");
+  await expect(diff).toContainText(/Changed by\s*Sir Codes-a-Lot/); // who changed each file
   await expect(diff.getByRole("note")).toContainText("Add a regression test");
-  await expect(diff.getByRole("note")).toContainText("nitpick-nancy");
+  await expect(diff.getByRole("note")).toContainText("Nitpick Nancy");
 });
 
 // §9 overlap check: entering In Progress while an in-flight ticket touches the same files is a 409
@@ -95,9 +96,7 @@ test("moving an overlapping ticket to In Progress asks to start anyway", async (
 });
 
 // §9 / FR-14: a confirmed "blocked by" link holds a ticket out of In Progress until the blocker is Done.
-test("a confirmed blocker stops In Progress until it is Done", async ({
-  request,
-}) => {
+test("a confirmed blocker stops In Progress until it is Done", async ({ request }) => {
   const prefix = `K${Date.now().toString(36).toUpperCase().slice(-6)}`;
   const project = await (
     await request.post("/api/projects", { data: { name: "Links", keyPrefix: prefix } })

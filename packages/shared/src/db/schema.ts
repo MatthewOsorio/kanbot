@@ -209,6 +209,8 @@ export const runs = pgTable(
     // What this run may spend, set when it is claimed: the agent's budget, capped by what's left of the day.
     budgetUsd: numeric("budget_usd", { precision: 10, scale: 4, mode: "number" }),
     error: text("error"),
+    // Files this run changed in the worktree (committed or not), for "who changed what" in the Diff tab.
+    filesChanged: text("files_changed").array().notNull().default([]),
     createdAt: createdAt(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),

@@ -3,6 +3,7 @@ slug: archie-the-archivist
 name: Archie the Archivist
 tagline: Remembers everything so you don't have to.
 avatar: avatars/archie-the-archivist.svg
+color: "#7c3aed"
 column: done
 model: claude-haiku-5-5
 # Writes the retro only (§4): read-only repo access, no shell. report_result is added by the runtime.

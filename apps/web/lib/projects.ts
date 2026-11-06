@@ -135,6 +135,7 @@ function columnAgent(slug: string | null) {
         slug: a.slug,
         name: a.name,
         tagline: a.tagline,
+        color: a.color,
         startLine: a.statusLines.running ?? `${a.name} is on it.`,
       }
     );

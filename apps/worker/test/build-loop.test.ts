@@ -131,6 +131,10 @@ describe("build loop (M3 done criterion)", () => {
     expect(done[0]!.sessionId).toBeTruthy();
     expect(done[2]!.resumeSessionId).toBe(done[0]!.sessionId);
     expect(done[3]!.resumeSessionId).toBeNull(); // Nancy re-reviews with fresh eyes
+    // Each run records only the files it changed (the Diff tab's "Changed by").
+    expect(done[0]!.filesChanged).toEqual(["src/todos.ts"]);
+    expect(done[1]!.filesChanged).toEqual([]);
+    expect(done[4]!.filesChanged.length).toBeGreaterThan(0);
 
     const t = await ticketNow(ticket.id);
     expect(t.columnId).toBe(col("qa").id);
@@ -234,6 +238,49 @@ describe("build loop (M3 done criterion)", () => {
     const t = await ticketNow(ticket.id);
     expect(t.columnId).toBe(col("blocked").id);
     expect(await git(repo, ["log", "-1", "--format=%s", t.branchName!])).toBe("Touch the server\n");
+  });
+
+  it("starts the app for a QA run, tells Testy where it is, and stops it after", async () => {
+    const { ticket, move } = await setup("default");
+    await move("qa");
+    let seen: { url?: string; status?: number; prompt?: string } = {};
+    const probe: typeof runtime = {
+      run: async (req, emit) => {
+        seen = {
+          url: req.appUrl,
+          status: (await fetch(req.appUrl!)).status,
+          prompt: req.prompt,
+        };
+        return runtime.run(req, emit);
+      },
+    };
+    const run = (await claimNext(db))!;
+    await executeRun(db, probe, run, new AbortController().signal);
+    expect(seen.status).toBe(200);
+    expect(seen.prompt).toContain(`App: running at ${seen.url}`);
+    expect(seen.prompt).toContain("Test command: node --test");
+    await expect(fetch(seen.url!)).rejects.toThrow(); // stopped
+    expect((await ticketNow(ticket.id)).statusFlag).not.toBe("failed");
+  });
+
+  it("tells Testy when no app is configured", async () => {
+    const { project, move } = await setup("default");
+    await projectConfigOf(db, project); // seed from project.yml, then drop the start command
+    await db
+      .update(projects)
+      .set({ commands: { test: "node --test" } })
+      .where(eq(projects.id, project.id));
+    await move("qa");
+    let req: Parameters<typeof runtime.run>[0] | undefined;
+    const run = (await claimNext(db))!;
+    await executeRun(
+      db,
+      { run: async (r, emit) => ((req = r), runtime.run(r, emit)) },
+      run,
+      new AbortController().signal,
+    );
+    expect(req!.appUrl).toBeUndefined();
+    expect(req!.prompt).toContain("App: not configured");
   });
 
   it("stops a run that repeats the same tool call three times", async () => {

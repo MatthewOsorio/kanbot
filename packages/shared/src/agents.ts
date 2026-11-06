@@ -12,6 +12,11 @@ export const agentFrontmatter = z.object({
   name: z.string().min(1),
   tagline: z.string().min(1),
   avatar: z.string().min(1),
+  /** Signature color (hex) for the agent's column, cards and avatar (§13). */
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .default("#64748b"),
   column: z.string().min(1),
   model: z.string().min(1),
   tools: z.array(z.string().min(1)),

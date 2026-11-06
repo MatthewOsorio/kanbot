@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { expandTools } from "../src/run";
-import { checkToolCall } from "../src/runtime/fence";
+import { appRequestUrl, checkToolCall } from "../src/runtime/fence";
 
 const root = mkdtempSync(join(tmpdir(), "kanbot-fence-"));
 const cwd = join(root, "repo");
@@ -179,4 +179,15 @@ describe("expandTools", () => {
       "Bash(pnpm install)",
     ]);
   });
+});
+
+describe("http_request reaches only the QA app", () => {
+  const base = "http://127.0.0.1:4123";
+  it("allows paths on the app", () => {
+    expect(String(appRequestUrl(base, "/api/todos?done=1"))).toBe(`${base}/api/todos?done=1`);
+  });
+  it.each(["http://example.com/x", "//example.com/x", "api/todos", "http://127.0.0.1:5432/"])(
+    "refuses %s",
+    (path) => expect(typeof appRequestUrl(base, path)).toBe("string"),
+  );
 });

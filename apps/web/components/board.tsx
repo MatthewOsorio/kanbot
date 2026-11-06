@@ -21,13 +21,30 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { BoardEvent, StatusFlag } from "@kanbot/shared";
-import { AlertTriangle, ArrowLeftRight, Clock, Hand, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  Bug,
+  Clock,
+  FlaskConical,
+  Hand,
+  Layers,
+  Loader2,
+  Pause,
+  Play,
+  Plus,
+  Settings,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { generateKeyBetween } from "fractional-indexing";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SELECT, Wordmark } from "@/components/brand";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { TicketDrawer } from "@/components/ticket-drawer";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/client";
 import type { Board as BoardData, Card } from "@/lib/projects";
@@ -114,7 +131,7 @@ export function Board({ projectId }: { projectId: string }) {
     }),
   );
 
-  if (!board) return <p className="p-8">{error || "Loading…"}</p>;
+  if (!board) return <p className="p-8 text-muted-foreground">{error || "Loading…"}</p>;
 
   const key = (c: Card) => `${board.project.keyPrefix}-${c.number}`;
   const cardsIn = (columnId: string) =>
@@ -221,14 +238,12 @@ export function Board({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2">
-        <Link href="/" className="font-semibold">
-          Kanbot
-        </Link>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-card px-4 py-2.5">
+        <Wordmark />
         <label className="flex items-center gap-2 text-sm">
           <span className="sr-only">Project</span>
           <select
-            className="rounded-md border bg-background px-2 py-1"
+            className={SELECT}
             value={projectId}
             onChange={(e) => router.push(`/p/${e.target.value}`)}
           >
@@ -239,14 +254,18 @@ export function Board({ projectId }: { projectId: string }) {
             ))}
           </select>
         </label>
-        <form action={quickAdd} className="flex-1">
+        <form action={quickAdd} className="relative min-w-48 flex-1">
+          <Plus
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+          />
           <Input
             name="title"
             required
             maxLength={200}
             aria-label="Quick add ticket"
             placeholder="Quick add: type an idea and press Enter"
-            className="max-w-md"
+            className="max-w-md bg-background pl-8"
           />
         </form>
         {/* aria-live without role="status": dnd-kit's live region is the page's one status role. */}
@@ -258,19 +277,23 @@ export function Board({ projectId }: { projectId: string }) {
             {error}
           </p>
         )}
-        <NeedsMe
-          tickets={board.tickets.filter((t) => NEEDS_ME.includes(t.statusFlag))}
-          cardKey={key}
-          onOpen={setOpenId}
-        />
-        <Link
-          href={`/p/${projectId}/settings`}
-          className="text-sm underline-offset-4 hover:underline"
-        >
-          Settings
-        </Link>
-        {settings && <SpendControls settings={settings} onError={setError} />}
-        <HealthDot health={health} />
+        <div className="flex flex-wrap items-center gap-2">
+          <NeedsMe
+            tickets={board.tickets.filter((t) => NEEDS_ME.includes(t.statusFlag))}
+            cardKey={key}
+            onOpen={setOpenId}
+          />
+          {settings && <SpendControls settings={settings} onError={setError} />}
+          <HealthDot health={health} />
+          <Link
+            href={`/p/${projectId}/settings`}
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
+          >
+            <Settings aria-hidden />
+            Settings
+          </Link>
+          <ThemeToggle />
+        </div>
       </header>
       {settings && <Banner settings={settings} health={health} />}
 
@@ -296,6 +319,7 @@ export function Board({ projectId }: { projectId: string }) {
                       key={c.id}
                       card={c}
                       cardKey={key(c)}
+                      agent={col.agent}
                       onOpen={() => setOpenId(c.id)}
                     />
                   ))}
@@ -305,14 +329,31 @@ export function Board({ projectId }: { projectId: string }) {
           })}
         </main>
         <DragOverlay>
-          {dragging && <CardBody card={dragging} cardKey={key(dragging)} />}
+          {dragging && (
+            <CardBody
+              card={dragging}
+              cardKey={key(dragging)}
+              agent={board.columns.find((c) => c.id === dragging.columnId)?.agent ?? null}
+              lifted
+            />
+          )}
         </DragOverlay>
       </DndContext>
 
-      <TicketDrawer key={openId} ticketId={openId} lastEvent={lastEvent} onClose={closeDrawer} />
+      <TicketDrawer
+        key={openId}
+        ticketId={openId}
+        lastEvent={lastEvent}
+        onClose={closeDrawer}
+        agents={Object.fromEntries(
+          board.columns.flatMap((c) => (c.agent ? [[c.agent.slug, c.agent]] : [])),
+        )}
+      />
     </div>
   );
 }
+
+type Agent = ColumnData["agent"];
 
 const FLAG_TEXT: Partial<Record<StatusFlag, string>> = {
   needs_input: "needs your answer",
@@ -335,23 +376,34 @@ function NeedsMe(props: {
   return (
     <div className="relative text-sm">
       <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
-        Needs me: <strong>{tickets.length}</strong>
+        <Hand aria-hidden />
+        Needs me
+        <strong
+          className={`min-w-5 rounded-full px-1.5 text-center text-xs leading-5 ${tickets.length ? "bg-needs text-needs-fg" : "bg-muted text-muted-foreground"}`}
+        >
+          {tickets.length}
+        </strong>
       </Button>
       {open && (
-        <div className="absolute right-0 z-20 mt-1 w-72 space-y-1 rounded-md border bg-background p-2 shadow-md">
-          {tickets.length === 0 && <p className="text-muted-foreground">Nothing needs you.</p>}
+        <div className="absolute right-0 z-20 mt-1 w-80 space-y-1 rounded-lg border bg-popover p-1.5 shadow-lg">
+          {tickets.length === 0 && (
+            <p className="px-2 py-1.5 text-muted-foreground">Nothing needs you.</p>
+          )}
           <ul aria-label="Tickets that need you">
             {tickets.map((t) => (
               <li key={t.id}>
                 <button
-                  className="w-full rounded px-1 py-0.5 text-left hover:bg-muted"
+                  className="w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                   onClick={() => {
                     setOpen(false);
                     onOpen(t.id);
                   }}
                 >
-                  <span className="text-muted-foreground">{cardKey(t)}</span> {t.title}
-                  <span className="block text-xs text-muted-foreground">
+                  <span className="font-mono text-xs text-muted-foreground">{cardKey(t)}</span>{" "}
+                  {t.title}
+                  <span
+                    className={`block text-xs ${t.statusFlag === "failed" ? "text-failed-fg" : "text-muted-foreground"}`}
+                  >
                     {FLAG_TEXT[t.statusFlag]}
                   </span>
                 </button>
@@ -383,6 +435,7 @@ function SpendControls(props: { settings: SettingsView; onError: (m: string) => 
   // No refetch here: the settings.updated event reloads the board and these settings.
   const patch = (body: object) =>
     api("/api/settings", { method: "PATCH", body }).catch((e: Error) => onError(e.message));
+  const used = s.dailyBudgetUsd > 0 ? Math.min(1, s.spentTodayUsd / s.dailyBudgetUsd) : 1;
   return (
     <div className="flex items-center gap-2 text-sm">
       {editing ? (
@@ -411,11 +464,19 @@ function SpendControls(props: { settings: SettingsView; onError: (m: string) => 
       ) : (
         <button
           type="button"
-          className="underline-offset-2 hover:underline"
+          className="flex flex-col gap-1 rounded-md px-2 py-1 text-left transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           title="Change the daily cap"
           onClick={() => setEditing(true)}
         >
-          Today {usd(s.spentTodayUsd)} / {usd(s.dailyBudgetUsd)}
+          <span className="font-mono text-xs tabular-nums">
+            Today {usd(s.spentTodayUsd)} / {usd(s.dailyBudgetUsd)}
+          </span>
+          <span aria-hidden className="h-1 w-full overflow-hidden rounded-full bg-muted">
+            <span
+              className={`block h-full rounded-full ${used >= 1 ? "bg-destructive" : used >= 0.8 ? "bg-amber-500" : "bg-primary"}`}
+              style={{ width: `${used * 100}%` }}
+            />
+          </span>
         </button>
       )}
       <Button
@@ -424,6 +485,7 @@ function SpendControls(props: { settings: SettingsView; onError: (m: string) => 
         aria-pressed={s.paused}
         onClick={() => void patch({ paused: !s.paused })}
       >
+        {s.paused ? <Play aria-hidden /> : <Pause aria-hidden />}
         {s.paused ? "Resume agents" : "Pause all"}
       </Button>
     </div>
@@ -442,10 +504,13 @@ function Banner({ settings: s, health }: { settings: SettingsView; health: Healt
   ].filter(Boolean);
   if (!lines.length) return null;
   return (
-    <div role="alert" className="border-b bg-amber-100 px-4 py-2 text-sm text-amber-950">
-      {lines.map((l) => (
-        <p key={l as string}>{l}</p>
-      ))}
+    <div role="alert" className="flex gap-2 border-b bg-needs px-4 py-2 text-sm text-needs-fg">
+      <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
+      <div>
+        {lines.map((l) => (
+          <p key={l as string}>{l}</p>
+        ))}
+      </div>
     </div>
   );
 }
@@ -456,10 +521,13 @@ function HealthDot({ health }: { health: Health | null }) {
     ? Object.entries(health).filter(([k, v]) => v !== "ok" && !(k === "github" && v === "unknown"))
     : [["web", "unreachable"]];
   return (
-    <span className="flex items-center gap-1 text-sm" title={health ? JSON.stringify(health) : ""}>
+    <span
+      className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
+      title={health ? JSON.stringify(health) : ""}
+    >
       <span
         aria-hidden
-        className={`inline-block size-2 rounded-full ${bad.length ? "bg-amber-500" : "bg-green-600"}`}
+        className={`inline-block size-2 rounded-full ring-2 ${bad.length ? "bg-amber-500 ring-amber-500/25" : "bg-emerald-500 ring-emerald-500/25"}`}
       />
       {bad.length ? bad.map(([k, v]) => `${k} ${v}`).join(", ") : "All systems ok"}
     </span>
@@ -468,25 +536,34 @@ function HealthDot({ health }: { health: Health | null }) {
 
 function Column(props: { column: ColumnData; count: number; children: React.ReactNode }) {
   const { column } = props;
+  const { agent } = column;
   const { setNodeRef } = useDroppable({ id: column.id });
   return (
     <section
       ref={setNodeRef}
       aria-label={column.name}
-      className="flex w-64 shrink-0 flex-col rounded-lg bg-muted/60 p-2"
+      className={`flex w-72 shrink-0 flex-col rounded-xl p-2 ${agent ? "bg-surface" : "border border-dashed bg-surface/50"}`}
+      style={agent ? { boxShadow: `inset 0 3px 0 ${agent.color}` } : undefined}
     >
-      <h2 className="mb-2 flex items-center gap-2 px-1 text-sm font-medium">
-        {column.agent && (
-          // eslint-disable-next-line @next/next/no-img-element -- tiny local SVG, no optimisation needed
-          <img
-            src={`/api/agents/${column.agent.slug}/avatar`}
-            alt={column.agent.name}
-            title={`${column.agent.name}: ${column.agent.tagline}`}
-            className="size-5 rounded-full"
+      <h2 className="mb-2 flex items-center gap-2.5 px-1.5 pt-1.5">
+        {agent && (
+          <AgentAvatar
+            agent={agent}
+            alt={agent.name}
+            title={`${agent.name}: ${agent.tagline}`}
+            className="size-7"
           />
         )}
-        <span className="flex-1">{column.name}</span>
-        <span className="text-muted-foreground" aria-label={`${props.count} tickets`}>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">{column.name}</span>
+          <span className="block truncate text-xs font-normal text-muted-foreground">
+            {agent ? agent.name : "You decide"}
+          </span>
+        </span>
+        <span
+          className="rounded-full bg-background px-2 py-0.5 font-mono text-xs text-muted-foreground tabular-nums"
+          aria-label={`${props.count} tickets`}
+        >
           {props.count}
         </span>
       </h2>
@@ -498,10 +575,12 @@ function Column(props: { column: ColumnData; count: number; children: React.Reac
 function SortableCard({
   card,
   cardKey,
+  agent,
   onOpen,
 }: {
   card: Card;
   cardKey: string;
+  agent: Agent;
   onOpen: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -511,7 +590,7 @@ function SortableCard({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={isDragging ? "opacity-40" : undefined}
+      className={`group rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none ${isDragging ? "opacity-40" : ""}`}
       {...attributes}
       {...listeners}
       aria-label={`${cardKey}: ${card.title}`}
@@ -521,50 +600,105 @@ function SortableCard({
         else listeners?.onKeyDown?.(e);
       }}
     >
-      <CardBody card={card} cardKey={cardKey} />
+      <CardBody card={card} cardKey={cardKey} agent={agent} />
     </div>
   );
 }
 
-function CardBody({ card, cardKey }: { card: Card; cardKey: string }) {
+const TYPE_ICON = {
+  feature: Sparkles,
+  bug: Bug,
+  chore: Wrench,
+  spike: FlaskConical,
+  epic: Layers,
+} as const;
+
+const PRIORITY_CLS: Record<string, string> = {
+  P0: "bg-failed text-failed-fg",
+  P1: "bg-needs text-needs-fg",
+};
+
+function CardBody({
+  card,
+  cardKey,
+  agent,
+  lifted,
+}: {
+  card: Card;
+  cardKey: string;
+  agent: Agent;
+  lifted?: boolean;
+}) {
+  const TypeIcon = TYPE_ICON[card.type];
   return (
-    <article className="cursor-grab rounded-md border bg-card p-2 text-sm shadow-sm">
-      <div className="flex gap-2 text-xs text-muted-foreground">
-        <span>{cardKey}</span>
-        <span>{card.type}</span>
-        <span>{card.priority}</span>
+    <article
+      className={`relative cursor-grab overflow-hidden rounded-lg border bg-card py-2.5 pr-2.5 pl-3.5 text-sm shadow-xs motion-safe:transition-[box-shadow,transform] group-hover:shadow-md motion-safe:group-hover:-translate-y-px ${lifted ? "rotate-1 shadow-lg" : ""}`}
+    >
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-1"
+        style={{ background: agent?.color ?? "var(--border)" }}
+      />
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <TypeIcon aria-hidden className="size-3.5" />
+        <span className="font-mono">{cardKey}</span>
+        <span className="sr-only">{card.type}</span>
+        <span
+          className={`ml-auto rounded px-1.5 font-mono text-[11px] leading-5 font-medium ${PRIORITY_CLS[card.priority] ?? "bg-muted"}`}
+        >
+          {card.priority}
+        </span>
       </div>
-      <p className="mt-1">{card.title}</p>
+      <p className="mt-1.5 leading-snug font-medium">{card.title}</p>
       {card.labels.length > 0 && (
-        <p className="mt-1 text-xs text-muted-foreground">{card.labels.join(", ")}</p>
+        <ul aria-label="Labels" className="mt-2 flex flex-wrap gap-1">
+          {card.labels.map((l) => (
+            <li
+              key={l}
+              className="rounded-full border px-2 text-[11px] leading-5 text-muted-foreground"
+            >
+              {l}
+            </li>
+          ))}
+        </ul>
       )}
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusPill flag={card.statusFlag} />
-        {card.epic && (
-          <span
-            className="mt-2 text-xs text-muted-foreground"
-            title={`${card.epic.done} of ${card.epic.total} child tickets are Done`}
-          >
+      {card.epic && (
+        <div
+          className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"
+          title={`${card.epic.done} of ${card.epic.total} child tickets are Done`}
+        >
+          <span aria-hidden className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+            <span
+              className="block h-full rounded-full bg-ok-fg"
+              style={{
+                width: `${card.epic.total ? (card.epic.done / card.epic.total) * 100 : 0}%`,
+              }}
+            />
+          </span>
+          <span className="tabular-nums">
             {card.epic.done}/{card.epic.total} done
           </span>
-        )}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 empty:hidden [&>*]:mt-2">
+        <StatusPill flag={card.statusFlag} agent={agent} />
         {card.bounceCount > 0 && (
           <span
-            className="mt-2 text-xs text-muted-foreground"
+            className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
             title={`Bounced back ${card.bounceCount} time${card.bounceCount > 1 ? "s" : ""}`}
           >
             ↩ {card.bounceCount}
           </span>
         )}
         {card.waitingOn.length > 0 && (
-          <span className="mt-2 text-xs text-amber-800" title="Confirmed blockers that aren't Done">
+          <span className="text-xs text-needs-fg" title="Confirmed blockers that aren't Done">
             <Clock className="mr-1 inline size-3" aria-hidden />
             waiting on {card.waitingOn.join(", ")}
           </span>
         )}
         {card.overlaps.length > 0 && (
           <span
-            className="mt-2 text-xs text-muted-foreground"
+            className="text-xs text-muted-foreground"
             title="Touches the same files or hotspots"
           >
             <ArrowLeftRight className="mr-1 inline size-3" aria-hidden />
@@ -577,41 +711,62 @@ function CardBody({ card, cardKey }: { card: Card; cardKey: string }) {
 }
 
 /** Card status pill (requirements §13): always an icon plus text, never color alone. */
-function StatusPill({ flag }: { flag: StatusFlag }) {
+function StatusPill({ flag, agent }: { flag: StatusFlag; agent: Agent }) {
   const pill = {
     running: {
       icon: <Loader2 className="size-3 animate-spin" />,
       text: "Working",
-      cls: "bg-blue-100 text-blue-900",
+      cls: "bg-running text-running-fg",
     },
     plan_ready: {
       icon: <Hand className="size-3" />,
       text: "Plan ready · needs you",
-      cls: "bg-amber-100 text-amber-900",
+      cls: "bg-needs text-needs-fg",
     },
     needs_input: {
       icon: <Hand className="size-3" />,
       text: "Needs you",
-      cls: "bg-amber-100 text-amber-900",
+      cls: "bg-needs text-needs-fg",
     },
     awaiting_approval: {
       icon: <Hand className="size-3" />,
       text: "Approve · needs you",
-      cls: "bg-amber-100 text-amber-900",
+      cls: "bg-needs text-needs-fg",
     },
     failed: {
       icon: <AlertTriangle className="size-3" />,
       text: "Failed",
-      cls: "bg-red-100 text-red-900",
+      cls: "bg-failed text-failed-fg",
     },
   }[flag as string];
   if (!pill) return null;
   return (
-    <span
-      className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${pill.cls}`}
-    >
-      {pill.icon}
-      {pill.text}
+    <span className="inline-flex items-center gap-1.5">
+      {/* §13: a running card shows who's working. Decorative: the column header names the agent. */}
+      {flag === "running" && agent && <AgentAvatar agent={agent} alt="" className="size-5" />}
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${pill.cls}`}
+      >
+        {pill.icon}
+        {pill.text}
+      </span>
     </span>
+  );
+}
+
+function AgentAvatar(props: {
+  agent: NonNullable<Agent>;
+  alt: string;
+  title?: string;
+  className: string;
+}) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- tiny local SVG, no optimisation needed
+    <img
+      src={`/api/agents/${props.agent.slug}/avatar`}
+      alt={props.alt}
+      title={props.title}
+      className={`shrink-0 rounded-full ring-2 ring-card ${props.className}`}
+    />
   );
 }

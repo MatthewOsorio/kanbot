@@ -29,7 +29,7 @@ const TASK: Record<string, string> = {
   planning: "Plan this ticket.",
   in_progress: "Implement this ticket in the working directory, following the plan.",
   code_review: "Review this ticket's branch against its plan and acceptance criteria.",
-  qa: "Test this ticket's branch against its acceptance criteria.",
+  qa: "Check that this ticket's branch meets its acceptance criteria.",
   blocked: "Explain why this ticket is blocked and what the owner must answer to unblock it.",
   done: "Write the retro for this finished ticket.",
 };
@@ -51,7 +51,27 @@ type Repo = {
   cwd: string | null;
   defaultBranch: string;
   hotspots: ProjectConfig["hotspots"];
+  commands?: ProjectConfig["commands"];
+  testGlobs?: string[];
+  /** QA runs: the app the worker started, or why it didn't start. */
+  app?: { url: string } | { error: string };
 };
+
+/** What QA can check with (§4): a test setup to write tests in, and the running app. */
+function qaSetup(repo: Repo) {
+  const test = repo.commands?.test;
+  const globs = repo.testGlobs ?? [];
+  return [
+    test && globs.length
+      ? `Test command: ${test}\nTest files you may write: ${globs.join(", ")}`
+      : "Test setup: none (no test command or no test globs). Don't write tests; give other evidence.",
+    !repo.app
+      ? "App: not configured (no start command). Check criteria by reading the code."
+      : "url" in repo.app
+        ? `App: running at ${repo.app.url}. Use the http_request tool to exercise it.`
+        : `App: failed to start.\n${repo.app.error}`,
+  ].join("\n\n");
+}
 
 const latest = (db: Db, ticketId: string, kind: "plan" | "review" | "test_report") =>
   db
@@ -189,6 +209,7 @@ export async function buildContext(
             testReport ? clip(testReport.contentMd, `test report v${testReport.version}`) : "",
           ),
           section("in_flight_tickets", await inFlight(db, ticket, run.columnSlug, repo)),
+          ...(run.columnSlug === "qa" ? [section("qa_setup", qaSetup(repo))] : []),
         ]
       : []),
     section(

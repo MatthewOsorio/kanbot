@@ -27,7 +27,7 @@ import {
   tickets,
 } from "@kanbot/shared/db";
 import { git, overlap, removeWorktree } from "@kanbot/shared/repo";
-import { and, asc, desc, eq, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";
@@ -192,9 +192,11 @@ export async function getTicket(id: string) {
       .orderBy(asc(acceptanceCriteria.position)),
     db.select().from(runs).where(eq(runs.ticketId, id)).orderBy(desc(runs.createdAt)).limit(20),
     // Every version, newest first; the drawer shows the latest and lists the rest (versions are kept).
+    // With the agent whose run produced each one (null for an artifact no run made).
     db
-      .select()
+      .select({ ...getTableColumns(artifacts), agentSlug: runs.agentSlug })
       .from(artifacts)
+      .leftJoin(runs, eq(runs.id, artifacts.runId))
       .where(eq(artifacts.ticketId, id))
       .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
     linksOf(id),
@@ -290,6 +292,18 @@ export async function getDiff(id: string) {
     .from(comments)
     .where(and(eq(comments.ticketId, id), isNotNull(comments.file)))
     .orderBy(asc(comments.createdAt));
+  // Which agents changed each file, in the order they first did (each run records its own files).
+  const fileAgents: Record<string, string[]> = {};
+  const runFiles = await db
+    .select({ agentSlug: runs.agentSlug, files: runs.filesChanged })
+    .from(runs)
+    .where(eq(runs.ticketId, id))
+    .orderBy(asc(runs.createdAt));
+  for (const r of runFiles)
+    for (const f of r.files) {
+      const list = (fileAgents[f] ??= []);
+      if (!list.includes(r.agentSlug)) list.push(r.agentSlug);
+    }
   if (!row.branch || !row.repoPath)
     return {
       branch: row.branch,
@@ -297,6 +311,7 @@ export async function getDiff(id: string) {
       diff: "",
       truncated: false,
       comments: lineComments,
+      fileAgents,
     };
   const full = await git(row.repoPath, ["diff", `${row.base}...${row.branch}`]);
   const truncated = full.length > DIFF_CAP;
@@ -306,6 +321,7 @@ export async function getDiff(id: string) {
     diff: truncated ? full.slice(0, DIFF_CAP) : full,
     truncated,
     comments: lineComments,
+    fileAgents,
   };
 }
 const DIFF_CAP = 1_000_000;
