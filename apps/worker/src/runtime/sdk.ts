@@ -86,6 +86,7 @@ export class SdkRuntime implements AgentRuntime {
       env: extraEnv,
       resumeSessionId,
       appUrl,
+      bash,
     }: Parameters<AgentRuntime["run"]>[0],
     emit: (e: RuntimeEvent) => Promise<void>,
   ): Promise<RuntimeResult> {
@@ -115,11 +116,15 @@ export class SdkRuntime implements AgentRuntime {
       const name = "tool_name" in input ? input.tool_name : "";
       const args = ("tool_input" in input ? input.tool_input : {}) as Record<string, unknown>;
       const reason = checkToolCall(name, args ?? {}, fence);
+      // The fence checks the command as the agent wrote it; only then is it moved into the project's image.
+      const rewritten =
+        !reason && name === "Bash" && bash ? bash(String(args.command ?? "")) : null;
       return {
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: reason ? "deny" : "allow",
           permissionDecisionReason: reason ?? undefined,
+          updatedInput: rewritten ? { ...args, command: rewritten } : undefined,
         },
       };
     };

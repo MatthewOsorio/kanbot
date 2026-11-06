@@ -13,6 +13,7 @@ type Settings = {
   name: string;
   keyPrefix: string;
   commands: { install?: string; build?: string; test?: string; lint?: string; start?: string };
+  image: string;
   testGlobs: string[];
   hotspots: { name: string; paths: string[] }[];
   bounceLimit: number;
@@ -73,6 +74,7 @@ export function SettingsForm({ projectId }: { projectId: string }) {
     const body = {
       // An empty command clears it (the API treats "" as none).
       commands: Object.fromEntries(COMMANDS.map((c) => [c, s.commands[c] ?? ""])),
+      image: s.image,
       testGlobs: globs
         .split("\n")
         .map((l) => l.trim())
@@ -130,6 +132,18 @@ export function SettingsForm({ projectId }: { projectId: string }) {
                 />
               </label>
             ))}
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium">Image</span>
+              <span className="block text-muted-foreground">
+                The Docker image these commands run in, with the worktree mounted, e.g.{" "}
+                <code>node:22-bookworm</code>. Empty runs them on the worker&apos;s own toolchain.
+              </span>
+              <Input
+                className="font-mono"
+                value={s.image}
+                onChange={(e) => setS({ ...s, image: e.target.value })}
+              />
+            </label>
           </fieldset>
           <div className={CARD}>
             <label className="block space-y-1 text-sm">

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { branchName, overlap } from "./repo";
+import { branchName, devcontainerImage, overlap } from "./repo";
+
+describe("devcontainerImage", () => {
+  it("reads the image from JSONC, and nothing it can't trust", () => {
+    const jsonc = `{\n  // the base\n  "image": "mcr.microsoft.com/devcontainers/go:1-1.22",\n  "features": {},\n}`;
+    expect(devcontainerImage(jsonc)).toBe("mcr.microsoft.com/devcontainers/go:1-1.22");
+    expect(devcontainerImage(`{"build": {"dockerfile": "Dockerfile"}}`)).toBeUndefined();
+    expect(devcontainerImage(`{"image": "--privileged"}`)).toBeUndefined(); // would be a docker flag
+    expect(devcontainerImage("")).toBeUndefined();
+  });
+});
 
 const hotspots = [{ name: "database", paths: ["db/schema.ts", "db/migrations/**"] }];
 

@@ -1,4 +1,5 @@
 // The M3 build loop against the replay runtime, on a real git repo (fixtures/sample-repo): no API calls.
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -495,6 +496,62 @@ describe("build loop (M3 done criterion)", () => {
     expect(run!.error).toMatch(/Link a local repo/);
     expect((await ticketNow(ticket.id)).worktreePath).toBeNull();
   });
+});
+
+// Needs Docker (CI's ubuntu runner has it); skipped where none is running.
+const IMAGE = "node:24-alpine";
+const docker = (args: string[]) => execFileSync("docker", args, { encoding: "utf8" });
+const hasDocker = (() => {
+  try {
+    return !!docker(["info", "--format", "{{.ServerVersion}}"]);
+  } catch {
+    return false;
+  }
+})();
+
+describe.skipIf(!hasDocker)("project commands in the project's image (M5, §7)", () => {
+  const useImage = (id: string) =>
+    db.update(projects).set({ image: IMAGE }).where(eq(projects.id, id));
+  const leftovers = () => docker(["ps", "-aq", "--filter", "label=kanbot"]).trim();
+
+  it("runs the checks gate in the image", async () => {
+    const { project, move } = await setup("checks-fail");
+    await projectConfigOf(db, project); // seed from project.yml first, so the image isn't overwritten
+    await useImage(project.id);
+    await move("in_progress");
+    const done = await drain();
+    expect(done[0]!.error).toBe("Kanbot checks: `node --test` failed");
+    const [report] = await db
+      .select()
+      .from(artifacts)
+      .where(and(eq(artifacts.runId, done[0]!.id), eq(artifacts.kind, "test_report")));
+    expect(report!.contentMd).toMatch(/remove deletes the todo/); // the test output, from the container
+    expect(done.at(-1)!.state).toBe("succeeded");
+    expect(leftovers()).toBe("");
+  }, 120_000);
+
+  it("starts the QA app in the image on 127.0.0.1 and removes it after", async () => {
+    const { project, move } = await setup("default");
+    await projectConfigOf(db, project);
+    await useImage(project.id);
+    await move("qa");
+    let seen: { url?: string; status?: number; running?: string } = {};
+    const probe: typeof runtime = {
+      run: async (req, emit) => {
+        seen = {
+          url: req.appUrl,
+          status: (await fetch(req.appUrl!)).status,
+          running: leftovers(),
+        };
+        return runtime.run(req, emit);
+      },
+    };
+    await executeRun(db, probe, (await claimNext(db))!, new AbortController().signal);
+    expect(seen.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(seen.status).toBe(200);
+    expect(seen.running).not.toBe(""); // it really was a container
+    expect(leftovers()).toBe("");
+  }, 120_000);
 });
 
 describe("post-run checks", () => {

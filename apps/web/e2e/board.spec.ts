@@ -110,4 +110,9 @@ test("project settings: seeded as empty, an empty command clears, a chained one 
   const cleared = await patch({ commands: { test: "" } });
   expect((await cleared.json()).commands).toEqual({});
   expect((await (await request.get(url)).json()).bounceLimit).toBe(2);
+  // The image (§7): a docker flag is refused, "" clears it.
+  expect((await patch({ image: "--privileged" })).status()).toBe(400);
+  expect((await (await patch({ image: "node:24-alpine" })).json()).image).toBe("node:24-alpine");
+  expect((await (await patch({ bounceLimit: 3 })).json()).image).toBe("node:24-alpine");
+  expect((await (await patch({ image: "" })).json()).image).toBe("");
 });

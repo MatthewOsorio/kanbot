@@ -22,6 +22,7 @@ export async function projectConfigOf(
         commands: p.commands,
         testGlobs: p.testGlobs ?? [],
         hotspots: p.hotspots ?? [],
+        image: p.image ?? undefined,
       })
     : projectConfig.parse({});
   if (!p.commands && p.repoPath) {
@@ -29,7 +30,12 @@ export async function projectConfigOf(
     // "commands is null" in the WHERE: a racing second seeder changes nothing, and we re-read the winner.
     const done = await tx
       .update(projects)
-      .set({ commands: c.commands, testGlobs: c.testGlobs, hotspots: c.hotspots })
+      .set({
+        commands: c.commands,
+        testGlobs: c.testGlobs,
+        hotspots: c.hotspots,
+        image: c.image ?? null,
+      })
       .where(and(eq(projects.id, p.id), sql`${projects.commands} is null`))
       .returning({ id: projects.id });
     if (!done.length) {

@@ -4,6 +4,7 @@ import { matchesGlob } from "node:path";
 import { promisify } from "node:util";
 import { parse } from "yaml";
 import { z } from "zod";
+import { IMAGE_REF } from "./schemas";
 
 const run = promisify(execFile);
 
@@ -45,6 +46,8 @@ export const projectConfig = z.object({
       start: z.string().trim().min(1).optional(),
     })
     .default({}),
+  /** The container image project commands run in (§7); none = the worker's own toolchain. */
+  image: z.string().trim().regex(IMAGE_REF).optional(),
   testGlobs: z.array(z.string().min(1)).default([]),
   hotspots: z
     .array(z.object({ name: z.string().min(1), paths: z.array(z.string().min(1)) }))
@@ -57,13 +60,33 @@ export type ProjectConfig = z.output<typeof projectConfig>;
  * widen its own allowlist; the change only counts once the owner merges it.
  */
 export async function loadProjectConfig(repoPath: string, defaultBranch: string) {
-  let text: string;
+  const show = (file: string) =>
+    git(repoPath, ["show", `${defaultBranch}:${file}`]).catch(() => "");
+  const [yml, dev] = await Promise.all([
+    show(".kanbot/project.yml"),
+    show(".devcontainer/devcontainer.json"),
+  ]);
+  const c = projectConfig.parse(parse(yml) ?? {});
+  // The repo's devcontainer names the image first, else project.yml's `image:` (§7).
+  return { ...c, image: devcontainerImage(dev) ?? c.image };
+}
+
+/**
+ * The image a devcontainer.json names. JSONC: whole-line `//` comments and trailing commas are dropped.
+ * shortcut: block comments and `build`/Dockerfile devcontainers aren't read; set the image in Settings for those.
+ */
+export function devcontainerImage(text: string): string | undefined {
+  const json = text
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n")
+    .replace(/,(\s*[}\]])/g, "$1");
   try {
-    text = await git(repoPath, ["show", `${defaultBranch}:.kanbot/project.yml`]);
+    const image: unknown = JSON.parse(json).image;
+    return typeof image === "string" && IMAGE_REF.test(image.trim()) ? image.trim() : undefined;
   } catch {
-    return projectConfig.parse({});
+    return undefined;
   }
-  return projectConfig.parse(parse(text) ?? {});
 }
 
 /** Does one touch entry (path or glob) cover another? Folder entries end with "/". */

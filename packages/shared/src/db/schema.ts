@@ -60,6 +60,7 @@ export const projects = pgTable("projects", {
   commands: jsonb("commands").$type<ProjectConfig["commands"]>(),
   testGlobs: text("test_globs").array(),
   hotspots: jsonb("hotspots").$type<ProjectConfig["hotspots"]>(),
+  image: text("image"),
   settings: jsonb("settings").$type<{ bounceLimit?: number; concurrency?: number }>(),
   ticketSeq: integer("ticket_seq").notNull().default(0),
   createdAt: createdAt(),
