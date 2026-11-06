@@ -164,3 +164,61 @@ test("a confirmed blocker stops In Progress until it is Done", async ({
   expect((await request.delete(`/api/links/${linkId}`)).status()).toBe(204);
   expect((await detail(blocked)).links).toEqual([]);
 });
+
+// UC-7 + FR-23: a ticket Blocked at the bounce limit gets a fresh count when the owner resumes the reviewer,
+// so the reviewer's next change request bounces it again instead of blocking it straight away.
+test("resuming a ticket blocked at the bounce limit resets its bounce count", async ({
+  request,
+}) => {
+  const repo = await prepareSampleRepo(join(mkdtempSync(join(tmpdir(), "kanbot-e2e-")), "repo"));
+  const project = await (
+    await request.post("/api/projects", {
+      data: {
+        name: "Resume bounce",
+        keyPrefix: `R${Date.now().toString(36).toUpperCase().slice(-6)}`,
+        repoPath: repo,
+      },
+    })
+  ).json();
+  expect(
+    (await request.patch(`/api/projects/${project.id}`, { data: { bounceLimit: 1 } })).ok(),
+  ).toBe(true);
+  const t = await (
+    await request.post(`/api/projects/${project.id}/tickets`, {
+      data: { title: "Always bounces", labels: ["replay:always"] },
+    })
+  ).json();
+  const columnId = async (slug: string) =>
+    (await (await request.get(`/api/projects/${project.id}/board`)).json()).columns.find(
+      (c: { slug: string }) => c.slug === slug,
+    ).id as string;
+  const ticket = async () => (await request.get(`/api/tickets/${t.id}`)).json();
+  const nancyRuns = async () =>
+    (
+      (await (await request.get(`/api/tickets/${t.id}/runs`)).json()) as {
+        id: string;
+        agentSlug: string;
+      }[]
+    ).filter((r) => r.agentSlug === "nitpick-nancy");
+  const move = async (slug: string) =>
+    request.post(`/api/tickets/${t.id}/move`, {
+      data: { toColumnId: await columnId(slug), position: "a0" },
+    });
+
+  await move("planning");
+  await expect.poll(async () => (await ticket()).statusFlag).toBe("plan_ready");
+  expect((await move("in_progress")).status()).toBe(204);
+  // Nancy #1 bounces (1 of 1), Nancy #2 finds the limit used up.
+  await expect.poll(async () => (await nancyRuns()).length, { timeout: 30_000 }).toBe(2);
+  await expect.poll(async () => (await ticket()).columnId).toBe(await columnId("blocked"));
+  await expect.poll(async () => (await ticket()).bounceCount).toBe(1);
+
+  const [last] = await nancyRuns(); // newest first
+  expect(
+    (await request.post(`/api/runs/${last!.id}/resume`, { data: { answer: "" } })).status(),
+  ).toBe(201);
+  // Reset: Nancy #3 bounces it to In Progress, Sir Codes-a-Lot and Nancy #4 run, then it blocks again.
+  // Without the reset Nancy #3 would block it at once and there would only be 3 runs.
+  await expect.poll(async () => (await nancyRuns()).length, { timeout: 30_000 }).toBe(4);
+  await expect.poll(async () => (await ticket()).columnId).toBe(await columnId("blocked"));
+});

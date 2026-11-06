@@ -9,10 +9,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { activeRunStates, DEFAULT_COLUMNS } from "@kanbot/shared";
 import {
+  acceptanceCriteria,
   columns,
   createDb,
+  logActivity,
   moveToColumnEnd,
   projects,
+  publish,
   runs,
   settings,
   spendToday,
@@ -50,7 +53,16 @@ const only = process.argv
 if (only && process.argv.includes("--baseline"))
   throw new Error("--baseline needs every golden ticket");
 
-type Golden = { title: string; type: "feature" | "bug"; description: string };
+type Golden = {
+  title: string;
+  type: "feature" | "bug";
+  description: string;
+  /**
+   * An acceptance criterion the owner adds when the ticket first enters Code Review. The plan and the
+   * code can't cover it yet, so the reviewer should request changes: a real bounce, and a resumed session.
+   */
+  reviewCriterion?: string;
+};
 type Result = {
   slug: string;
   reachedQa: boolean;
@@ -96,6 +108,7 @@ const slugs = readdirSync(goldenDir)
   // --only=bug,ui runs a subset (a smoke run); a subset never becomes the baseline.
   .filter((slug) => !only || only.includes(slug));
 const ids = new Map<string, string>();
+const reviewCriteria = new Map<string, string>(); // ticket id → late criterion, added once
 for (const [i, slug] of slugs.entries()) {
   const g = JSON.parse(readFileSync(join(goldenDir, `${slug}.json`), "utf8")) as Golden;
   const [t] = await db
@@ -112,6 +125,7 @@ for (const [i, slug] of slugs.entries()) {
     })
     .returning();
   ids.set(slug, t!.id);
+  if (g.reviewCriterion) reviewCriteria.set(t!.id, g.reviewCriterion);
   await db.transaction((tx) => startColumnAgent(tx, project!.id, t!.id, col("planning"), owner));
 }
 
@@ -123,6 +137,27 @@ for (;;) {
     console.log(
       `→ ${run.agentSlug} on ticket ${[...ids].find(([, id]) => id === run.ticketId)?.[0]}`,
     );
+    const late = reviewCriteria.get(run.ticketId);
+    if (late && run.agentSlug === "nitpick-nancy") {
+      reviewCriteria.delete(run.ticketId);
+      // As addCriterion in the web app does: appended last, with an activity row and an event.
+      await db.transaction(async (tx) => {
+        const n = await tx.$count(
+          acceptanceCriteria,
+          eq(acceptanceCriteria.ticketId, run.ticketId),
+        );
+        await tx
+          .insert(acceptanceCriteria)
+          .values({ ticketId: run.ticketId, text: late, position: n });
+        const data = { fields: ["criteria"], change: "added", text: late };
+        await logActivity(tx, run.ticketId, "edited", data, owner);
+        await publish(tx, project!.id, {
+          type: "ticket.updated",
+          ticketId: run.ticketId,
+          fields: ["criteria"],
+        });
+      });
+    }
     await executeRun(db, runtime, run, new AbortController().signal);
     continue;
   }
@@ -203,9 +238,14 @@ const report = {
 await mkdir(join(evalsDir, "results"), { recursive: true });
 const out = join(evalsDir, "results", `${report.at.replace(/[:.]/g, "-")}.json`);
 await writeFile(out, `${JSON.stringify(report, null, 2)}\n`);
-if (process.argv.includes("--baseline"))
-  await writeFile(join(evalsDir, "baseline.json"), `${JSON.stringify(report, null, 2)}\n`);
 console.log(`Saved ${out}`);
+// Rises in bounces or cost are what a re-saved baseline is for; a ticket that never reached QA is not.
+if (process.argv.includes("--baseline")) {
+  if (results.every((r) => r.reachedQa)) {
+    await writeFile(join(evalsDir, "baseline.json"), `${JSON.stringify(report, null, 2)}\n`);
+    console.log("Saved this run as evals/baseline.json.");
+  } else console.log("Not saved as the baseline: every golden ticket must reach QA.");
+}
 if (problems.length) {
   console.log(`Needs the owner's OK before merging:\n- ${problems.join("\n- ")}`);
   process.exitCode = 1;

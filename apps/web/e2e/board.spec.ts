@@ -86,3 +86,28 @@ test("refuses foreign hosts and cross-site writes", async ({ baseURL }) => {
     await send("POST", { host, origin: "http://evil.test", "content-type": "text/plain" }),
   ).toBe(403);
 });
+
+test("project settings: seeded as empty, an empty command clears, a chained one is refused", async ({
+  request,
+}) => {
+  const key = `S${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+  const p = await (
+    await request.post("/api/projects", { data: { name: "Settings", keyPrefix: key } })
+  ).json();
+  const url = `/api/projects/${p.id}`;
+  const patch = (data: object) => request.patch(url, { data });
+  expect((await patch({ commands: { test: "a && b" } })).status()).toBe(400);
+  const ok = await patch({
+    commands: { test: "pnpm test", lint: "" },
+    bounceLimit: 2,
+    concurrency: 2,
+  });
+  expect(await ok.json()).toMatchObject({
+    commands: { test: "pnpm test" },
+    bounceLimit: 2,
+    concurrency: 2,
+  });
+  const cleared = await patch({ commands: { test: "" } });
+  expect((await cleared.json()).commands).toEqual({});
+  expect((await (await request.get(url)).json()).bounceLimit).toBe(2);
+});

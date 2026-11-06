@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join, matchesGlob, resolve } from "node:path";
 import {
   afterRun,
-  BOUNCE_LIMIT,
   stateForVerdict,
   verdictPayload,
   type RunOutcome,
@@ -27,17 +26,12 @@ import {
   startColumnAgent,
   ticketLinks,
   tickets,
+  projectConfigOf,
   updateSettings,
   type Db,
   type Tx,
 } from "@kanbot/shared/db";
-import {
-  git,
-  loadProjectConfig,
-  projectConfig,
-  removeWorktree,
-  type ProjectConfig,
-} from "@kanbot/shared/repo";
+import { git, removeWorktree, type ProjectConfig } from "@kanbot/shared/repo";
 import { and, count, desc, eq, isNotNull, max, ne, sql } from "drizzle-orm";
 import { buildContext } from "./context";
 import { EDIT_TOOLS } from "./runtime/fence";
@@ -85,7 +79,7 @@ export async function claimNext(db: Db): Promise<Run | null> {
         where r.state = 'queued'
           and (select count(*) from runs where state = 'running') < ${LIMITS.global}
           and (select count(*) from runs r2 join tickets t2 on t2.id = r2.ticket_id
-               where r2.state = 'running' and t2.project_id = t.project_id) < ${LIMITS.perProject}
+               where r2.state = 'running' and t2.project_id = t.project_id) < coalesce((select (p.settings->>'concurrency')::int from projects p where p.id = t.project_id), ${LIMITS.perProject})
         order by r.created_at
         limit 1
         for update of r skip locked)
@@ -303,9 +297,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   let before: Awaited<ReturnType<typeof snapshot>> | null = null;
   let canEdit: ((rel: string) => boolean) | undefined;
   try {
-    const config = project.repoPath
-      ? await loadProjectConfig(project.repoPath, project.defaultBranch)
-      : projectConfig.parse({});
+    const config = await projectConfigOf(db, project);
     testCommand = config.commands.test;
     // FR-49: a ticket reaching Done loses its worktree (the branch stays) before Archie reads the checkout.
     if (run.columnSlug === "done" && ticket.worktreePath && project.repoPath)
@@ -497,9 +489,12 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
 
     const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
     const from = cols.find((c) => c.id === ticket.columnId)!;
+    const [project] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
+    const { bounceLimit } = await projectConfigOf(tx, project!);
     const rule = afterRun(run.columnSlug, o.state, {
       verdict: o.verdict?.verdict,
       bounces: ticket.bounceCount,
+      bounceLimit,
     });
     // Re-read: storeResults may have replaced the touch set (Plan B).
     const [{ touchPaths }] = (await tx
@@ -527,7 +522,7 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         error: o.error,
         costUsd: run.costUsd,
         ...(rule.bounce && { bounce: ticket.bounceCount + 1 }),
-        ...(rule.reason && { reason: `Bounce limit (${BOUNCE_LIMIT}) reached` }),
+        ...(rule.reason && { reason: `Bounce limit (${bounceLimit}) reached` }),
       },
       actor,
     );

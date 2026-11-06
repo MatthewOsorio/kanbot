@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProjectBody } from "./schemas";
+import { createProjectBody, patchProjectBody } from "./schemas";
 import { verdictPayload } from "./verdict";
 
 const branch = (defaultBranch: string) =>
@@ -41,5 +41,25 @@ describe("report_result relatedTickets", () => {
       verdictPayload.safeParse({ ...base, relatedTickets: [{ ticket: "KB-1", kind: "x" }] })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("patchProjectBody", () => {
+  const ok = (b: unknown) => patchProjectBody.safeParse(b).success;
+  it("accepts plain commands, an empty command and in-range limits", () => {
+    expect(ok({ commands: { test: "pnpm test", lint: "" }, bounceLimit: 10, concurrency: 1 })).toBe(
+      true,
+    );
+  });
+  it("refuses chained, piped or substituted commands (the fence would)", () => {
+    for (const c of ["a && b", "a; b", "a | b", "a > f", "echo $HOME", "a `b`", "a\nb"])
+      expect(ok({ commands: { test: c } })).toBe(false);
+  });
+  it("refuses out-of-range limits, empty groups and an empty body", () => {
+    expect(ok({ bounceLimit: 0 })).toBe(false);
+    expect(ok({ bounceLimit: 11 })).toBe(false);
+    expect(ok({ concurrency: 5 })).toBe(false);
+    expect(ok({ hotspots: [{ name: "api", paths: [] }] })).toBe(false);
+    expect(ok({})).toBe(false);
   });
 });

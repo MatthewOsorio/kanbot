@@ -26,6 +26,12 @@ const API_ERRORS: readonly ApiError[] = [
 ];
 
 /** Claude Agent SDK adapter (requirements §8 step 4). Checked against @anthropic-ai/claude-agent-sdk 0.3.304. */
+const BUNDLED_PLUGINS = [
+  "cc-plugin-agents-md@builtin",
+  "cc-plugin-telemetry@builtin",
+  "cc-plugin-plugin-authoring@builtin",
+];
+
 export class SdkRuntime implements AgentRuntime {
   async run(
     {
@@ -81,7 +87,14 @@ export class SdkRuntime implements AgentRuntime {
     // The agent never needs our database; DATABASE_URL stays out of its environment. The SDK itself
     // needs the API key, so the subprocesses it starts (Bash, hooks) get credentials scrubbed (§7, §14).
     const { DATABASE_URL: _db, ...base } = process.env;
-    const env = { ...base, ...extraEnv, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" };
+    // Per-command timeout for the agent's Bash tool: the same 10 minutes as the worker's own install.
+    const env = {
+      ...base,
+      ...extraEnv,
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
+      BASH_DEFAULT_TIMEOUT_MS: "600000",
+      BASH_MAX_TIMEOUT_MS: "600000",
+    };
 
     const result: RuntimeResult = {
       report: null,
@@ -104,7 +117,12 @@ export class SdkRuntime implements AgentRuntime {
           permissionMode: "dontAsk", // anything neither the hook nor allowedTools approves is denied
           hooks: { PreToolUse: [{ hooks: [gate] }] },
           // Second layer behind the hook. blockWrites needs Claude Code 2.1.314; this SDK bundles 2.1.304.
-          settings: { permissions: { blockReadsOutsideWorkingDirectories: true } },
+          settings: {
+            permissions: { blockReadsOutsideWorkingDirectories: true },
+            // Claude Code's bundled plugins; checked on the init message (only our plugins load).
+            // shortcut: a fixed list, so a bundled plugin added by a newer SDK loads until it is listed; re-check the init plugins on each SDK upgrade.
+            enabledPlugins: Object.fromEntries(BUNDLED_PLUGINS.map((id) => [id, false])),
+          },
           plugins: plugins.map((path) => ({ type: "local" as const, path })),
           // Only our plugins' skills; Claude Code's bundled ones (deep-research, design…) showed up in the M3 golden run.
           skills: plugins.flatMap((p) =>
@@ -154,6 +172,10 @@ export class SdkRuntime implements AgentRuntime {
           else if (m.is_error) result.error = m.result;
         }
       }
+    } catch (e) {
+      // After an error result (max budget, max turns) the SDK also throws "Claude Code returned an error
+      // result". The result (only it sets sessionId) already holds the stop reason and the cost, so keep it.
+      if (!result.sessionId || signal.aborted) throw e;
     } finally {
       signal.removeEventListener("abort", onAbort);
     }

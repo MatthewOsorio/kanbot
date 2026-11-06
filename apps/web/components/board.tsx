@@ -53,7 +53,8 @@ export function Board({ projectId }: { projectId: string }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [lastEvent, setLastEvent] = useState<BoardEvent | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [notice, setNotice] = useState("");
+  // The start line stays up while that ticket's agent works and clears on its run.finished.
+  const [notice, setNotice] = useState<{ ticketId: string; text: string } | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const loadSeq = useRef(0);
@@ -91,6 +92,8 @@ export function Board({ projectId }: { projectId: string }) {
         Notification.permission === "granted"
       )
         new Notification("Kanbot", { body: event.message });
+      if (event.type === "run.finished")
+        setNotice((n) => (n?.ticketId === event.ticketId ? null : n));
       if (event.type !== "run.event") void load(); // log lines don't change the board
     };
     return () => es.close();
@@ -102,12 +105,6 @@ export function Board({ projectId }: { projectId: string }) {
     const t = setInterval(check, 30_000);
     return () => clearInterval(t);
   }, []);
-
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(""), 4_000);
-    return () => clearTimeout(t);
-  }, [notice]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -205,9 +202,8 @@ export function Board({ projectId }: { projectId: string }) {
           } else throw e;
         }
       }
-      // shortcut: the notice stays until the next move, even after the run ends; clear it on run.finished in M4.
       if (target?.agent && card.columnId !== toColumnId && !flags.keepPlan)
-        setNotice(target.agent.startLine);
+        setNotice({ ticketId: card.id, text: target.agent.startLine });
     } catch (e) {
       setError((e as Error).message);
       void load(); // roll back the optimistic move
@@ -255,7 +251,7 @@ export function Board({ projectId }: { projectId: string }) {
         </form>
         {/* aria-live without role="status": dnd-kit's live region is the page's one status role. */}
         <p aria-live="polite" aria-label="Agent notice" className="text-sm text-muted-foreground">
-          {notice}
+          {notice?.text}
         </p>
         {error && (
           <p role="alert" className="text-sm text-destructive">
@@ -267,6 +263,12 @@ export function Board({ projectId }: { projectId: string }) {
           cardKey={key}
           onOpen={setOpenId}
         />
+        <Link
+          href={`/p/${projectId}/settings`}
+          className="text-sm underline-offset-4 hover:underline"
+        >
+          Settings
+        </Link>
         {settings && <SpendControls settings={settings} onError={setError} />}
         <HealthDot health={health} />
       </header>
