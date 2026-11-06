@@ -490,7 +490,7 @@ Prompts, models and plugins decide how good the agents are, so any change to the
 
 - **Golden tickets.** Four tickets in `fixtures/golden/` on the sample repo (`fixtures/sample-repo`, a zero-dependency Node + TypeScript todo app): a small feature, a bug fix (the bug is planted), a UI change, and one written so Code Review should request changes.
 - **When it runs.** Before merging any change to an agent's prompt, model, plugins or limits, the golden tickets run end to end with real agents (`pnpm eval:agents`).
-- **What it compares.** For each ticket: whether it reached the end of the build loop (QA passed, awaiting approval; PR Review once Ship exists in M5), bounce count, cost, run time and diff size, against `evals/baseline.json`. Results go to `evals/results/`, which is gitignored (run data stays out of the repo), and are summarized in the PR description. The eval runs in the `kanbot_test` database with an in-process worker loop, and approves each plan as soon as it's ready.
+- **What it compares.** For each ticket: whether it reached the end of the build loop (QA passed, awaiting approval; PR Review once Ship exists in M5), bounce count, cost, run time and diff size, against `evals/baseline.json`. `--baseline` saves the run as the new baseline only if every ticket reached the end of the build loop. Results go to `evals/results/`, which is gitignored (run data stays out of the repo), and are summarized in the PR description. The eval runs in the `kanbot_test` database with an in-process worker loop, and approves each plan as soon as it's ready.
 - **Pass bar.** If any golden ticket fails to finish, or total bounces or cost rise by more than 25%, the change needs the owner's explicit OK before merging.
 - **Cost.** A few dollars per check, under the same budget caps as normal runs.
 
@@ -545,7 +545,7 @@ Nancy catches the overlap that file lists miss: one ticket changing a contract t
 - **Extra context.** For every other ticket between In Progress and PR Review: its title, plan summary and branch diff, capped at 1,500 lines in total. Past the cap she gets diff stats and plan summaries only.
 - **What she checks.** Changes to exported function signatures and types, API request and response shapes, database columns, environment variables and event names that another in-flight ticket uses or also changes.
 - **What she reports.** Her verdict adds `crossTicketRisks`, each with the other ticket, the kind of contract, a description and a severity.
-- **Blocking risk.** Treated as `changes_requested` (the worker downgrades a `success` that carries one). The note is posted on both tickets, and the other ticket is proposed as a blocker (an unconfirmed `blocks` link) for the human to confirm.
+- **Blocking risk.** Merging both would break, and the fix belongs on this ticket's branch. When the fix belongs on the other branch, or on whichever merges second, it is a warning: the bounce would go to a builder who can't change the other branch. Treated as `changes_requested` (the worker downgrades a `success` that carries one). The note is posted on both tickets, and the other ticket is proposed as a blocker (an unconfirmed `blocks` link) for the human to confirm.
 - **Warning.** A comment on both tickets; no bounce.
 
 ### Keeping in-flight branches current

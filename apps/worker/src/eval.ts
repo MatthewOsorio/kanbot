@@ -238,9 +238,14 @@ const report = {
 await mkdir(join(evalsDir, "results"), { recursive: true });
 const out = join(evalsDir, "results", `${report.at.replace(/[:.]/g, "-")}.json`);
 await writeFile(out, `${JSON.stringify(report, null, 2)}\n`);
-if (process.argv.includes("--baseline"))
-  await writeFile(join(evalsDir, "baseline.json"), `${JSON.stringify(report, null, 2)}\n`);
 console.log(`Saved ${out}`);
+// Rises in bounces or cost are what a re-saved baseline is for; a ticket that never reached QA is not.
+if (process.argv.includes("--baseline")) {
+  if (results.every((r) => r.reachedQa)) {
+    await writeFile(join(evalsDir, "baseline.json"), `${JSON.stringify(report, null, 2)}\n`);
+    console.log("Saved this run as evals/baseline.json.");
+  } else console.log("Not saved as the baseline: every golden ticket must reach QA.");
+}
 if (problems.length) {
   console.log(`Needs the owner's OK before merging:\n- ${problems.join("\n- ")}`);
   process.exitCode = 1;

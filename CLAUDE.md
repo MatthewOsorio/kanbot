@@ -45,7 +45,7 @@ docker compose up -d db     Postgres 16 on 127.0.0.1:5432 (cp .env.example .env 
 pnpm db:migrate             apply migrations;  pnpm db:generate --name <x>  after editing db/schema.ts
 pnpm dev                    web on http://127.0.0.1:3000 + worker (dev:web / dev:worker run one)
 pnpm typecheck | lint | test | test:e2e | build | format
-pnpm eval:agents            golden tickets with REAL agents (costs money; ask first). --baseline saves evals/baseline.json
+pnpm eval:agents            golden tickets with REAL agents (costs money; ask first). --baseline saves evals/baseline.json if every ticket reached QA
 ```
 
 The worker uses the real Claude Agent SDK unless `KANBOT_RUNTIME=replay` (needs `ANTHROPIC_API_KEY` in `.env`). Tests and CI only ever use replay. A real run costs money: Plan B was about $0.15–0.45 per plan in the M2 smoke test. `KANBOT_RECORD=1` saves real runs as replay scripts (see `.env.example`); `KANBOT_RUNTIME=replay pnpm eval:agents` checks the eval script for free.
