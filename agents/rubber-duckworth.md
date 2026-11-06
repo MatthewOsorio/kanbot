@@ -3,6 +3,7 @@ slug: rubber-duckworth
 name: Rubber Duckworth
 tagline: Quack. Tell me where it hurts.
 avatar: avatars/rubber-duckworth.svg
+color: "#a16207"
 column: blocked
 model: claude-haiku-5-5
 # Diagnoses only (§8): read-only repo access, no shell. report_result is added by the runtime.

@@ -9,12 +9,53 @@ import {
 import Anthropic from "@anthropic-ai/sdk";
 import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
+import { z } from "zod";
 import { verdictShape } from "@kanbot/shared";
-import { checkToolCall } from "./fence";
+import { appRequestUrl, checkToolCall } from "./fence";
 import type { AgentRuntime, ApiError, RuntimeEvent, RuntimeResult } from "./types";
 
 const REPORT_TOOL = "mcp__kanbot__report_result";
+const HTTP_TOOL = "mcp__kanbot__http_request";
 const MAX_TEXT = 4_000; // per stored event; the full transcript stays in the SDK session
+const MAX_BODY = 20_000; // response chars the agent sees
+
+/**
+ * QA's way into the running app (§4): HTTP to the worker-started app only, so no curl in the allowlist.
+ * shortcut: HTTP only, no browser; add the Playwright MCP plugin when its eval spend is approved (§16).
+ */
+const httpTool = (appUrl: string) =>
+  tool(
+    "http_request",
+    `Send an HTTP request to the app under test, running at ${appUrl}. Give a path, not a URL.`,
+    {
+      method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]).default("GET"),
+      path: z.string().describe("Path and query, starting with /, e.g. /api/todos?done=1"),
+      headers: z.record(z.string(), z.string()).optional(),
+      body: z.string().optional().describe("Request body as text (e.g. JSON)"),
+    },
+    async ({ method, path, headers, body }) => {
+      const url = appRequestUrl(appUrl, path);
+      if (typeof url === "string") return { content: [{ type: "text", text: url }], isError: true };
+      try {
+        const r = await fetch(url, {
+          method,
+          headers,
+          body: method === "GET" || method === "HEAD" ? undefined : body,
+          redirect: "manual", // a redirect elsewhere must not be followed
+          signal: AbortSignal.timeout(30_000),
+        });
+        const text = await r.text();
+        const head = [...r.headers].map(([k, v]) => `${k}: ${v}`).join("\n");
+        const shown =
+          text.length > MAX_BODY ? `${text.slice(0, MAX_BODY)}\n… [${text.length} chars]` : text;
+        return {
+          content: [{ type: "text", text: `${r.status} ${r.statusText}\n${head}\n\n${shown}` }],
+        };
+      } catch (e) {
+        return { content: [{ type: "text", text: (e as Error).message }], isError: true };
+      }
+    },
+  );
 
 const clip = (s: string) => (s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}… [truncated]` : s);
 const API_ERRORS: readonly ApiError[] = [
@@ -44,6 +85,7 @@ export class SdkRuntime implements AgentRuntime {
       signal,
       env: extraEnv,
       resumeSessionId,
+      appUrl,
     }: Parameters<AgentRuntime["run"]>[0],
     emit: (e: RuntimeEvent) => Promise<void>,
   ): Promise<RuntimeResult> {
@@ -61,13 +103,14 @@ export class SdkRuntime implements AgentRuntime {
             return { content: [{ type: "text", text: "Recorded. End your turn now." }] };
           },
         ),
+        ...(appUrl ? [httpTool(appUrl)] : []),
       ],
     });
 
     // Every tool call goes through this hook first (§14): tool allowlist, cwd fence, Bash allowlist,
     // edit scope. The SDK auto-runs read-only shell commands (cat, ls, find…) in every permission
     // mode, so the hook, not the SDK's rules, is the fence.
-    const fence = { cwd, tools: [...tools, REPORT_TOOL], canEdit };
+    const fence = { cwd, tools: [...tools, REPORT_TOOL, ...(appUrl ? [HTTP_TOOL] : [])], canEdit };
     const gate: HookCallback = async (input) => {
       const name = "tool_name" in input ? input.tool_name : "";
       const args = ("tool_input" in input ? input.tool_input : {}) as Record<string, unknown>;

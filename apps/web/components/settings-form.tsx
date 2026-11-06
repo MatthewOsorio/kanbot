@@ -1,7 +1,10 @@
 "use client";
 
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Wordmark } from "@/components/brand";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,14 +12,16 @@ import { Textarea } from "@/components/ui/textarea";
 type Settings = {
   name: string;
   keyPrefix: string;
-  commands: { install?: string; build?: string; test?: string; lint?: string };
+  commands: { install?: string; build?: string; test?: string; lint?: string; start?: string };
   testGlobs: string[];
   hotspots: { name: string; paths: string[] }[];
   bounceLimit: number;
   concurrency: number;
 };
 
-const COMMANDS = ["install", "build", "test", "lint"] as const;
+const CARD = "space-y-3 rounded-xl border bg-card p-5 shadow-xs";
+
+const COMMANDS = ["install", "build", "test", "lint", "start"] as const;
 
 // shortcut: a glob can't contain a comma here (the hotspot line splits on commas); use a row editor if one needs {a,b}.
 const hotspotLines = (h: Settings["hotspots"]) =>
@@ -88,46 +93,72 @@ export function SettingsForm({ projectId }: { projectId: string }) {
   }
 
   return (
-    <main className="mx-auto max-w-2xl space-y-6 p-6">
-      <Link href={`/p/${projectId}`} className="text-sm underline-offset-4 hover:underline">
-        ← Back to board
-      </Link>
-      <h1 className="text-xl font-semibold">{s ? `${s.name} settings` : "Settings"}</h1>
+    <main className="mx-auto max-w-2xl space-y-6 px-6 pb-16">
+      <header className="flex items-center justify-between py-5">
+        <Wordmark />
+        <ThemeToggle />
+      </header>
+      <div className="space-y-1">
+        <Link
+          href={`/p/${projectId}`}
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          <ArrowLeft aria-hidden className="size-4" />
+          Back to board
+        </Link>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {s ? `${s.name} settings` : "Settings"}
+        </h1>
+      </div>
       {!s && !msg && <p className="text-muted-foreground">Loading…</p>}
       {s && (
-        <form onSubmit={save} className="space-y-6">
-          <fieldset className="space-y-3">
-            <legend className="font-medium">Commands</legend>
+        <form onSubmit={save} className="space-y-4">
+          <fieldset className={CARD}>
+            <legend className="float-left mb-1 w-full font-semibold">Commands</legend>
             <p className="text-sm text-muted-foreground">
               One plain command each: no pipes, chaining or redirects. Agents run them through the
-              permission fence.
+              permission fence. Start launches the app for QA runs and must listen on the PORT
+              environment variable.
             </p>
             {COMMANDS.map((c) => (
               <label key={c} className="block space-y-1 text-sm">
-                <span className="capitalize">{c}</span>
+                <span className="font-medium capitalize">{c}</span>
                 <Input
+                  className="font-mono"
                   value={s.commands[c] ?? ""}
                   onChange={(e) => setS({ ...s, commands: { ...s.commands, [c]: e.target.value } })}
                 />
               </label>
             ))}
           </fieldset>
-          <label className="block space-y-1 text-sm">
-            <span className="font-medium">Test globs</span>
-            <span className="block text-muted-foreground">
-              One per line. Testy McTestface may only edit files that match.
-            </span>
-            <Textarea value={globs} onChange={(e) => setGlobs(e.target.value)} rows={3} />
-          </label>
-          <label className="block space-y-1 text-sm">
-            <span className="font-medium">Hotspots</span>
-            <span className="block text-muted-foreground">
-              One group per line: <code>name: glob, glob</code>. Tickets touching the same group
-              overlap.
-            </span>
-            <Textarea value={hotspots} onChange={(e) => setHotspots(e.target.value)} rows={3} />
-          </label>
-          <div className="flex gap-6">
+          <div className={CARD}>
+            <label className="block space-y-1 text-sm">
+              <span className="font-semibold">Test globs</span>
+              <span className="block text-muted-foreground">
+                One per line. Testy McTestface may only edit files that match.
+              </span>
+              <Textarea
+                className="font-mono"
+                value={globs}
+                onChange={(e) => setGlobs(e.target.value)}
+                rows={3}
+              />
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span className="font-semibold">Hotspots</span>
+              <span className="block text-muted-foreground">
+                One group per line: <code>name: glob, glob</code>. Tickets touching the same group
+                overlap.
+              </span>
+              <Textarea
+                className="font-mono"
+                value={hotspots}
+                onChange={(e) => setHotspots(e.target.value)}
+                rows={3}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-6 rounded-xl border bg-card p-5 shadow-xs">
             <label className="space-y-1 text-sm">
               <span className="block">Bounce limit (1–10)</span>
               <Input

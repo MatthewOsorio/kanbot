@@ -3,6 +3,7 @@ slug: sir-codes-a-lot
 name: Sir Codes-a-Lot
 tagline: Knighted for services to the keyboard.
 avatar: avatars/sir-codes-a-lot.svg
+color: "#15803d"
 column: in_progress
 model: claude-opus-5-5
 # Full edit inside the ticket's worktree; shell limited to the project's commands and local git (no push,

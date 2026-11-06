@@ -7,21 +7,27 @@ import {
   ticketTypes,
   type BoardEvent,
 } from "@kanbot/shared";
-import { useEffect, useState } from "react";
+import { GitBranch, Layers, Loader2 } from "lucide-react";
+import { createContext, useContext, useEffect, useState } from "react";
+import { SELECT } from "@/components/brand";
 import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/client";
 import type { TicketDetail } from "@/lib/tickets";
+
+/** Section heading and header chip styles shared across the drawer. */
+const H = "block text-xs font-semibold tracking-wide text-muted-foreground uppercase";
+const CHIP = "inline-flex items-center gap-1 rounded-md border bg-surface px-2 py-0.5";
 
 type Comment = {
   id: string;
@@ -48,12 +54,29 @@ const isActive = (r: Run | undefined) =>
   !!r && (activeRunStates as readonly string[]).includes(r.state);
 const RETRYABLE = ["failed", "interrupted", "timed_out", "budget_exceeded", "cancelled"];
 
+/** The board's agents by slug (name, color), so everything an agent made says who made it. */
+type AgentInfo = { name: string; color: string };
+const Agents = createContext<Record<string, AgentInfo>>({});
+
+/** An agent's avatar and name; the slug when its file is gone. */
+function AgentTag({ slug, className = "" }: { slug: string; className?: string }) {
+  const a = useContext(Agents)[slug];
+  return (
+    <span className={`inline-flex items-center gap-1.5 font-medium ${className}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- tiny local SVG */}
+      <img src={`/api/agents/${slug}/avatar`} alt="" className="size-4 rounded-full" />
+      <span className="text-foreground">{a?.name ?? slug}</span>
+    </span>
+  );
+}
+
 export function TicketDrawer(props: {
   ticketId: string | null;
   lastEvent: BoardEvent | null;
   onClose: () => void;
+  agents: Record<string, AgentInfo>;
 }) {
-  const { ticketId, lastEvent, onClose } = props;
+  const { ticketId, lastEvent, onClose, agents } = props;
   const [data, setData] = useState<{
     ticket: TicketDetail;
     comments: Comment[];
@@ -98,421 +121,457 @@ export function TicketDrawer(props: {
   const latest = ticket?.runs[0];
 
   return (
-    <Sheet open={!!ticketId} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-        {!ticket ? (
-          <SheetHeader>
-            <SheetTitle>{error || "Loading…"}</SheetTitle>
-            <SheetDescription className="sr-only">Ticket details</SheetDescription>
-          </SheetHeader>
-        ) : (
-          <div className="space-y-6 p-4">
-            <SheetHeader className="p-0">
-              <SheetDescription className="pr-8">
-                {ticket.key} · {ticket.columnName}
-                {ticket.branchName && (
-                  <>
-                    {" "}
-                    · <code>{ticket.branchName}</code>
-                  </>
-                )}
-                {ticket.bounceCount > 0 && (
-                  <>
-                    {" "}
-                    · ↩ {ticket.bounceCount} bounce{ticket.bounceCount > 1 && "s"}
-                  </>
-                )}
-                {ticket.parent && (
-                  <>
-                    {" "}
-                    · part of {ticket.parent.key} {ticket.parent.title}
-                  </>
-                )}
-              </SheetDescription>
-              {ticket.costUsd > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Cost so far ${ticket.costUsd.toFixed(2)}
-                </p>
-              )}
-              <SheetTitle className="sr-only">{ticket.title}</SheetTitle>
-              <Input
-                key={ticket.title} // remount so another tab's edit shows up
-                aria-label="Title"
-                defaultValue={ticket.title}
-                className="text-lg font-semibold"
-                onBlur={(e) => e.target.value !== ticket.title && patch({ title: e.target.value })}
-              />
-            </SheetHeader>
-
-            {latest && (
-              <RunBar
-                run={latest}
-                onCancel={() => run(() => api(`/api/runs/${latest.id}/cancel`, { method: "POST" }))}
-                onRetry={() => run(() => api(`/api/runs/${latest.id}/retry`, { method: "POST" }))}
-              />
-            )}
-
-            {ticket.columnSlug === "blocked" && (
-              <BlockedPanel
-                key={ticket.runs.find((r) => r.columnSlug !== "blocked")?.id} // a new stuck run clears the answer
-                ticket={ticket}
-                onResume={(runId, answer) =>
-                  run(() => api(`/api/runs/${runId}/resume`, { method: "POST", body: { answer } }))
-                }
-              />
-            )}
-
-            {ticket.columnSlug === "planning" &&
-              ticket.artifacts.some((a) => a.kind === "plan") &&
-              !isActive(latest) && (
-                // The same as dropping the ticket on Ready (UC-4).
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    run(() => api(`/api/tickets/${ticket.id}/approve-plan`, { method: "POST" }))
-                  }
-                >
-                  Approve plan
-                </Button>
-              )}
-
-            <div className="flex flex-wrap gap-3 text-sm">
-              <label className="flex items-center gap-1">
-                Type
-                <select
-                  className="rounded-md border bg-background px-2 py-1"
-                  value={ticket.type}
-                  onChange={(e) => patch({ type: e.target.value })}
-                >
-                  {ticketTypes.map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-1">
-                Priority
-                <select
-                  className="rounded-md border bg-background px-2 py-1"
-                  value={ticket.priority}
-                  onChange={(e) => patch({ priority: e.target.value })}
-                >
-                  {priorities.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-1 items-center gap-1">
-                Labels
-                <Input
-                  key={ticket.labels.join()}
-                  defaultValue={ticket.labels.join(", ")}
-                  placeholder="comma, separated"
-                  onBlur={(e) => {
-                    const labels = e.target.value
-                      .split(",")
-                      .map((l) => l.trim())
-                      .filter(Boolean);
-                    if (labels.join() !== ticket.labels.join()) void patch({ labels });
-                  }}
-                />
-              </label>
-            </div>
-
-            <label className="block space-y-1">
-              <span className="text-sm font-medium">Description</span>
-              <Textarea
-                key={ticket.descriptionMd}
-                defaultValue={ticket.descriptionMd}
-                rows={6}
-                onBlur={(e) =>
-                  e.target.value !== ticket.descriptionMd &&
-                  patch({ descriptionMd: e.target.value })
-                }
-              />
-            </label>
-            {ticket.descriptionMd && (
-              <details className="text-sm">
-                <summary className="cursor-pointer text-muted-foreground">Preview</summary>
-                <Markdown>{ticket.descriptionMd}</Markdown>
-              </details>
-            )}
-
-            {ticket.type === "epic" && (
-              <EpicPanel
-                key={ticket.artifacts.find((a) => a.kind === "plan")?.id} // a revised plan resets the picks
-                ticket={ticket}
-                onAccept={(refs) =>
-                  run(() => api(`/api/tickets/${ticket.id}/accept-proposals`, { body: { refs } }))
-                }
-              />
-            )}
-
-            <section aria-labelledby="links-h" className="space-y-2">
-              <h3 id="links-h" className="text-sm font-medium">
-                Links
-              </h3>
-              <ul className="space-y-1">
-                {ticket.links.map((l) => (
-                  <li
-                    key={l.id}
-                    className={`flex items-center gap-2 text-sm ${l.confirmed ? "" : "opacity-70"}`}
-                  >
-                    <span className="w-20 shrink-0 text-muted-foreground">
-                      {
-                        { blocked_by: "blocked by", blocks: "blocks", relates: "relates to" }[
-                          l.relation
-                        ]
-                      }
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">
-                      {l.key} {l.title}
-                    </span>
-                    {!l.confirmed && (
-                      <>
-                        <span className="shrink-0 text-xs text-muted-foreground">proposed</span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            run(() =>
-                              api(`/api/links/${l.id}`, {
-                                method: "PATCH",
-                                body: { confirmed: true },
-                              }),
-                            )
-                          }
-                        >
-                          Confirm
-                        </Button>
-                      </>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`${l.confirmed ? "Remove" : "Dismiss"} link to ${l.key}`}
-                      onClick={() => run(() => api(`/api/links/${l.id}`, { method: "DELETE" }))}
-                    >
-                      {l.confirmed ? "×" : "Dismiss"}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-              <form
-                action={(f) =>
-                  run(() =>
-                    api(`/api/tickets/${ticket.id}/links`, {
-                      body: { toKey: f.get("toKey"), kind: "blocked_by" },
-                    }),
-                  )
-                }
-              >
-                <Input
-                  name="toKey"
-                  required
-                  aria-label="Blocked by"
-                  placeholder="Blocked by… (e.g. KB-3)"
-                />
-              </form>
-            </section>
-
-            <section aria-labelledby="ac-h" className="space-y-2">
-              <h3 id="ac-h" className="text-sm font-medium">
-                Acceptance criteria
-              </h3>
-              <ul className="space-y-1">
-                {ticket.criteria.map((c) => (
-                  <li key={c.id + c.text} className="flex items-center gap-2 text-sm">
-                    <span className="w-14 shrink-0 text-muted-foreground">
-                      {statusMark[c.status]}
-                    </span>
-                    <Input
-                      aria-label="Criterion"
-                      defaultValue={c.text}
-                      onBlur={(e) =>
-                        e.target.value !== c.text &&
-                        run(() =>
-                          api(`/api/criteria/${c.id}`, {
-                            method: "PATCH",
-                            body: { text: e.target.value },
-                          }),
-                        )
-                      }
-                    />
-                    {c.source === "agent" && (
-                      <span className="shrink-0 text-xs text-muted-foreground">from plan</span>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Remove criterion: ${c.text}`}
-                      onClick={() => run(() => api(`/api/criteria/${c.id}`, { method: "DELETE" }))}
-                    >
-                      ✕
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-              <form
-                action={(f) =>
-                  run(() =>
-                    api(`/api/tickets/${ticket.id}/criteria`, { body: { text: f.get("text") } }),
-                  )
-                }
-              >
-                <Input
-                  name="text"
-                  required
-                  aria-label="New criterion"
-                  placeholder="Add a criterion…"
-                />
-              </form>
-            </section>
-
-            {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            )}
-
-            <Tabs defaultValue={isActive(latest) ? "live" : "activity"}>
-              <TabsList>
-                <TabsTrigger value="activity">Activity</TabsTrigger>
-                <TabsTrigger value="live">Live</TabsTrigger>
-                <TabsTrigger value="artifacts">Artifacts ({ticket.artifacts.length})</TabsTrigger>
-                <TabsTrigger value="diff">Diff</TabsTrigger>
-                <TabsTrigger value="comments">Comments ({comments.length})</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="activity">
-                <ol className="space-y-1 text-sm">
-                  {activity.map((a) => (
-                    <li key={a.id}>
-                      <span className="text-muted-foreground">
-                        {new Date(a.createdAt).toLocaleString()}
-                      </span>{" "}
-                      {a.actor} {describe(a)}
-                    </li>
-                  ))}
-                </ol>
-              </TabsContent>
-
-              <TabsContent value="live">
-                {latest ? (
-                  <LiveLog
-                    key={latest.id}
-                    runId={latest.id}
-                    lastSeq={runEvent?.runId === latest.id ? runEvent.seq : 0}
-                  />
-                ) : (
-                  <p className="text-sm text-muted-foreground">No agent has run on this ticket.</p>
-                )}
-              </TabsContent>
-
-              <TabsContent value="artifacts" className="space-y-4">
-                {ticket.artifacts.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No artifacts yet.</p>
-                )}
-                {ticket.columnSlug === "planning" &&
-                  ticket.artifacts.some((a) => a.kind === "plan") && (
-                    // Separate from comments: this re-runs Plan B at once with the request (UC-3).
-                    <form
-                      className="space-y-2"
-                      action={(f) =>
-                        run(() =>
-                          api(`/api/tickets/${ticket.id}/revise-plan`, {
-                            body: { requestMd: f.get("requestMd") },
-                          }),
-                        )
-                      }
-                    >
-                      <Textarea
-                        name="requestMd"
-                        required
-                        aria-label="Requested plan changes"
-                        placeholder="What should change in the plan?"
-                        rows={2}
-                        disabled={isActive(latest)}
-                      />
-                      <Button type="submit" size="sm" disabled={isActive(latest)}>
-                        Revise plan
-                      </Button>
-                    </form>
+    <Agents.Provider value={agents}>
+      <Dialog open={!!ticketId} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="block max-h-[85vh] overflow-y-auto p-0 sm:max-w-[min(48rem,calc(100%-2rem))]">
+          {!ticket ? (
+            <DialogHeader className="p-5 text-left">
+              <DialogTitle>{error || "Loading…"}</DialogTitle>
+              <DialogDescription className="sr-only">Ticket details</DialogDescription>
+            </DialogHeader>
+          ) : (
+            <div className="space-y-6 p-5">
+              <DialogHeader className="gap-2 p-0 text-left">
+                <DialogDescription className="flex flex-wrap items-center gap-1.5 pr-8 text-xs">
+                  <span className={CHIP + " font-mono font-medium text-foreground"}>
+                    {ticket.key} · {ticket.columnName}
+                  </span>
+                  {ticket.branchName && (
+                    <code className={CHIP + " font-mono"}>
+                      <GitBranch aria-hidden className="size-3" />
+                      {ticket.branchName}
+                    </code>
                   )}
-                {ticket.artifacts.map((a, i) =>
-                  i === ticket.artifacts.findIndex((b) => b.kind === a.kind) ? (
-                    <article
-                      key={a.id}
-                      aria-label={`${a.title} v${a.version}`}
-                      className="rounded-md border p-3"
-                    >
-                      <h3 className="text-sm font-semibold">
-                        {a.title} <span className="text-muted-foreground">v{a.version}</span>
-                      </h3>
-                      <Markdown>{a.contentMd}</Markdown>
-                    </article>
-                  ) : (
-                    // Older versions are kept (UC-3); collapsed under the latest.
-                    <details key={a.id} className="rounded-md border p-3 text-sm">
-                      <summary className="cursor-pointer">
-                        {a.title} v{a.version} · {new Date(a.createdAt).toLocaleString()}
-                      </summary>
-                      <Markdown>{a.contentMd}</Markdown>
-                    </details>
-                  ),
+                  {ticket.bounceCount > 0 && (
+                    <span className={CHIP}>
+                      ↩ {ticket.bounceCount} bounce{ticket.bounceCount > 1 && "s"}
+                    </span>
+                  )}
+                  {ticket.parent && (
+                    <span className={CHIP}>
+                      <Layers aria-hidden className="size-3" />
+                      part of {ticket.parent.key} {ticket.parent.title}
+                    </span>
+                  )}
+                  {ticket.costUsd > 0 && (
+                    <span className={CHIP + " font-mono"}>
+                      Cost so far ${ticket.costUsd.toFixed(2)}
+                    </span>
+                  )}
+                </DialogDescription>
+                <DialogTitle className="sr-only">{ticket.title}</DialogTitle>
+                <Input
+                  key={ticket.title} // remount so another tab's edit shows up
+                  aria-label="Title"
+                  defaultValue={ticket.title}
+                  className="-mx-2 h-auto border-transparent bg-transparent px-2 py-1 text-xl font-semibold shadow-none hover:border-input md:text-xl dark:bg-transparent"
+                  onBlur={(e) =>
+                    e.target.value !== ticket.title && patch({ title: e.target.value })
+                  }
+                />
+              </DialogHeader>
+
+              {latest && (
+                <RunBar
+                  run={latest}
+                  onCancel={() =>
+                    run(() => api(`/api/runs/${latest.id}/cancel`, { method: "POST" }))
+                  }
+                  onRetry={() => run(() => api(`/api/runs/${latest.id}/retry`, { method: "POST" }))}
+                />
+              )}
+
+              {ticket.columnSlug === "blocked" && (
+                <BlockedPanel
+                  key={ticket.runs.find((r) => r.columnSlug !== "blocked")?.id} // a new stuck run clears the answer
+                  ticket={ticket}
+                  onResume={(runId, answer) =>
+                    run(() =>
+                      api(`/api/runs/${runId}/resume`, { method: "POST", body: { answer } }),
+                    )
+                  }
+                />
+              )}
+
+              {ticket.columnSlug === "planning" &&
+                ticket.artifacts.some((a) => a.kind === "plan") &&
+                !isActive(latest) && (
+                  // The same as dropping the ticket on Ready (UC-4).
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      run(() => api(`/api/tickets/${ticket.id}/approve-plan`, { method: "POST" }))
+                    }
+                  >
+                    Approve plan
+                  </Button>
                 )}
-              </TabsContent>
 
-              <TabsContent value="diff">
-                <DiffView ticketId={ticket.id} refresh={change} />
-              </TabsContent>
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <label className="flex items-center gap-2 text-muted-foreground">
+                  Type
+                  <select
+                    className={SELECT + " text-foreground"}
+                    value={ticket.type}
+                    onChange={(e) => patch({ type: e.target.value })}
+                  >
+                    {ticketTypes.map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 text-muted-foreground">
+                  Priority
+                  <select
+                    className={SELECT + " text-foreground"}
+                    value={ticket.priority}
+                    onChange={(e) => patch({ priority: e.target.value })}
+                  >
+                    {priorities.map((p) => (
+                      <option key={p}>{p}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-1 items-center gap-2 text-muted-foreground">
+                  Labels
+                  <Input
+                    className="h-8 text-foreground"
+                    key={ticket.labels.join()}
+                    defaultValue={ticket.labels.join(", ")}
+                    placeholder="comma, separated"
+                    onBlur={(e) => {
+                      const labels = e.target.value
+                        .split(",")
+                        .map((l) => l.trim())
+                        .filter(Boolean);
+                      if (labels.join() !== ticket.labels.join()) void patch({ labels });
+                    }}
+                  />
+                </label>
+              </div>
 
-              <TabsContent value="comments" className="space-y-2">
-                <ul className="space-y-2">
-                  {comments.map((c) => (
-                    <li key={c.id} className="rounded-md border p-2 text-sm">
-                      <CommentByline c={c} />
-                      <Markdown>{c.bodyMd}</Markdown>
-                      <time className="text-xs text-muted-foreground">
-                        {new Date(c.createdAt).toLocaleString()}
-                      </time>
+              <label className="block space-y-2">
+                <span className={H}>Description</span>
+                <Textarea
+                  key={ticket.descriptionMd}
+                  defaultValue={ticket.descriptionMd}
+                  rows={6}
+                  onBlur={(e) =>
+                    e.target.value !== ticket.descriptionMd &&
+                    patch({ descriptionMd: e.target.value })
+                  }
+                />
+              </label>
+              {ticket.descriptionMd && (
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-muted-foreground">Preview</summary>
+                  <Markdown>{ticket.descriptionMd}</Markdown>
+                </details>
+              )}
+
+              {ticket.type === "epic" && (
+                <EpicPanel
+                  key={ticket.artifacts.find((a) => a.kind === "plan")?.id} // a revised plan resets the picks
+                  ticket={ticket}
+                  onAccept={(refs) =>
+                    run(() => api(`/api/tickets/${ticket.id}/accept-proposals`, { body: { refs } }))
+                  }
+                />
+              )}
+
+              <section aria-labelledby="links-h" className="space-y-2">
+                <h3 id="links-h" className={H}>
+                  Links
+                </h3>
+                <ul className="space-y-1">
+                  {ticket.links.map((l) => (
+                    <li
+                      key={l.id}
+                      className={`flex items-center gap-2 text-sm ${l.confirmed ? "" : "opacity-70"}`}
+                    >
+                      <span className="w-20 shrink-0 text-muted-foreground">
+                        {
+                          { blocked_by: "blocked by", blocks: "blocks", relates: "relates to" }[
+                            l.relation
+                          ]
+                        }
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {l.key} {l.title}
+                      </span>
+                      {!l.confirmed && (
+                        <>
+                          <span className="shrink-0 text-xs text-muted-foreground">proposed</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              run(() =>
+                                api(`/api/links/${l.id}`, {
+                                  method: "PATCH",
+                                  body: { confirmed: true },
+                                }),
+                              )
+                            }
+                          >
+                            Confirm
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`${l.confirmed ? "Remove" : "Dismiss"} link to ${l.key}`}
+                        onClick={() => run(() => api(`/api/links/${l.id}`, { method: "DELETE" }))}
+                      >
+                        {l.confirmed ? "×" : "Dismiss"}
+                      </Button>
                     </li>
                   ))}
                 </ul>
                 <form
-                  className="space-y-2"
                   action={(f) =>
                     run(() =>
-                      api(`/api/tickets/${ticket.id}/comments`, {
-                        body: { bodyMd: f.get("bodyMd") },
+                      api(`/api/tickets/${ticket.id}/links`, {
+                        body: { toKey: f.get("toKey"), kind: "blocked_by" },
                       }),
                     )
                   }
                 >
-                  <Textarea name="bodyMd" required aria-label="New comment" rows={2} />
-                  <Button type="submit" size="sm">
-                    Comment
-                  </Button>
+                  <Input
+                    name="toKey"
+                    required
+                    aria-label="Blocked by"
+                    placeholder="Blocked by… (e.g. KB-3)"
+                  />
                 </form>
-              </TabsContent>
-            </Tabs>
+              </section>
 
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() =>
-                confirm(`Delete ${ticket.key}? This can't be undone.`) &&
-                run(async () => {
-                  await api(`/api/tickets/${ticket.id}`, { method: "DELETE" });
-                  onClose();
-                })
-              }
-            >
-              Delete ticket
-            </Button>
-          </div>
-        )}
-      </SheetContent>
-    </Sheet>
+              <section aria-labelledby="ac-h" className="space-y-2">
+                <h3 id="ac-h" className={H}>
+                  Acceptance criteria
+                </h3>
+                <ul className="space-y-1">
+                  {ticket.criteria.map((c) => (
+                    <li key={c.id + c.text} className="flex items-center gap-2 text-sm">
+                      <span className="w-14 shrink-0 text-muted-foreground">
+                        {statusMark[c.status]}
+                      </span>
+                      <Input
+                        aria-label="Criterion"
+                        defaultValue={c.text}
+                        onBlur={(e) =>
+                          e.target.value !== c.text &&
+                          run(() =>
+                            api(`/api/criteria/${c.id}`, {
+                              method: "PATCH",
+                              body: { text: e.target.value },
+                            }),
+                          )
+                        }
+                      />
+                      {c.source === "agent" && (
+                        <span className="shrink-0 text-xs text-muted-foreground">from plan</span>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Remove criterion: ${c.text}`}
+                        onClick={() =>
+                          run(() => api(`/api/criteria/${c.id}`, { method: "DELETE" }))
+                        }
+                      >
+                        ✕
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+                <form
+                  action={(f) =>
+                    run(() =>
+                      api(`/api/tickets/${ticket.id}/criteria`, { body: { text: f.get("text") } }),
+                    )
+                  }
+                >
+                  <Input
+                    name="text"
+                    required
+                    aria-label="New criterion"
+                    placeholder="Add a criterion…"
+                  />
+                </form>
+              </section>
+
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+
+              <Tabs defaultValue={isActive(latest) ? "live" : "activity"}>
+                <TabsList>
+                  <TabsTrigger value="activity">Activity</TabsTrigger>
+                  <TabsTrigger value="live">Live</TabsTrigger>
+                  <TabsTrigger value="artifacts">Artifacts ({ticket.artifacts.length})</TabsTrigger>
+                  <TabsTrigger value="diff">Diff</TabsTrigger>
+                  <TabsTrigger value="comments">Comments ({comments.length})</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="activity">
+                  <ol className="space-y-2 border-l pl-4 text-sm">
+                    {activity.map((a) => (
+                      <li key={a.id} className="relative">
+                        <span
+                          aria-hidden
+                          className="absolute top-1.5 -left-[1.3rem] size-2 rounded-full bg-border ring-4 ring-background"
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(a.createdAt).toLocaleString()}
+                        </span>{" "}
+                        <span className="font-medium">{a.actor}</span> {describe(a)}
+                      </li>
+                    ))}
+                  </ol>
+                </TabsContent>
+
+                <TabsContent value="live">
+                  {latest ? (
+                    <LiveLog
+                      key={latest.id}
+                      runId={latest.id}
+                      lastSeq={runEvent?.runId === latest.id ? runEvent.seq : 0}
+                    />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No agent has run on this ticket.
+                    </p>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="artifacts" className="space-y-4">
+                  {ticket.artifacts.length === 0 && (
+                    <p className="text-sm text-muted-foreground">No artifacts yet.</p>
+                  )}
+                  {ticket.columnSlug === "planning" &&
+                    ticket.artifacts.some((a) => a.kind === "plan") && (
+                      // Separate from comments: this re-runs Plan B at once with the request (UC-3).
+                      <form
+                        className="space-y-2"
+                        action={(f) =>
+                          run(() =>
+                            api(`/api/tickets/${ticket.id}/revise-plan`, {
+                              body: { requestMd: f.get("requestMd") },
+                            }),
+                          )
+                        }
+                      >
+                        <Textarea
+                          name="requestMd"
+                          required
+                          aria-label="Requested plan changes"
+                          placeholder="What should change in the plan?"
+                          rows={2}
+                          disabled={isActive(latest)}
+                        />
+                        <Button type="submit" size="sm" disabled={isActive(latest)}>
+                          Revise plan
+                        </Button>
+                      </form>
+                    )}
+                  {ticket.artifacts.map((a, i) => {
+                    // Each artifact says which agent's run made it, with that agent's color down its edge.
+                    const edge = a.agentSlug
+                      ? { borderLeftColor: agents[a.agentSlug]?.color ?? "var(--border)" }
+                      : undefined;
+                    const byline = (
+                      <span className="flex flex-wrap items-center gap-x-1.5 text-xs font-normal text-muted-foreground">
+                        {a.agentSlug ? <AgentTag slug={a.agentSlug} /> : <span>Kanbot</span>}
+                        <span>· {new Date(a.createdAt).toLocaleString()}</span>
+                      </span>
+                    );
+                    return i === ticket.artifacts.findIndex((b) => b.kind === a.kind) ? (
+                      <article
+                        key={a.id}
+                        aria-label={`${a.title} v${a.version}`}
+                        style={edge}
+                        className="rounded-lg border border-l-4 bg-card p-4 shadow-xs"
+                      >
+                        <header className="mb-2 space-y-1">
+                          <h3 className="text-sm font-semibold">
+                            {a.title} <span className="text-muted-foreground">v{a.version}</span>
+                          </h3>
+                          {byline}
+                        </header>
+                        <Markdown>{a.contentMd}</Markdown>
+                      </article>
+                    ) : (
+                      // Older versions are kept (UC-3); collapsed under the latest.
+                      <details
+                        key={a.id}
+                        style={edge}
+                        className="rounded-lg border border-l-4 bg-surface p-3 text-sm"
+                      >
+                        <summary className="cursor-pointer">
+                          {a.title} v{a.version} {byline}
+                        </summary>
+                        <Markdown>{a.contentMd}</Markdown>
+                      </details>
+                    );
+                  })}
+                </TabsContent>
+
+                <TabsContent value="diff">
+                  <DiffView ticketId={ticket.id} refresh={change} />
+                </TabsContent>
+
+                <TabsContent value="comments" className="space-y-2">
+                  <ul className="space-y-2">
+                    {comments.map((c) => (
+                      <li key={c.id} className="rounded-lg border bg-card p-3 text-sm">
+                        <CommentByline c={c} />
+                        <Markdown>{c.bodyMd}</Markdown>
+                        <time className="text-xs text-muted-foreground">
+                          {new Date(c.createdAt).toLocaleString()}
+                        </time>
+                      </li>
+                    ))}
+                  </ul>
+                  <form
+                    className="space-y-2"
+                    action={(f) =>
+                      run(() =>
+                        api(`/api/tickets/${ticket.id}/comments`, {
+                          body: { bodyMd: f.get("bodyMd") },
+                        }),
+                      )
+                    }
+                  >
+                    <Textarea name="bodyMd" required aria-label="New comment" rows={2} />
+                    <Button type="submit" size="sm">
+                      Comment
+                    </Button>
+                  </form>
+                </TabsContent>
+              </Tabs>
+
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() =>
+                  confirm(`Delete ${ticket.key}? This can't be undone.`) &&
+                  run(async () => {
+                    await api(`/api/tickets/${ticket.id}`, { method: "DELETE" });
+                    onClose();
+                  })
+                }
+              >
+                Delete ticket
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Agents.Provider>
   );
 }
 
@@ -549,8 +608,8 @@ function EpicPanel({
   const done = ticket.children.filter((c) => c.columnSlug === "done").length;
 
   return (
-    <section aria-labelledby="epic-h" className="space-y-3 rounded-md border p-3">
-      <h3 id="epic-h" className="text-sm font-medium">
+    <section aria-labelledby="epic-h" className="space-y-3 rounded-lg border bg-surface p-4">
+      <h3 id="epic-h" className={H}>
         Epic{ticket.children.length > 0 && ` · ${done} of ${ticket.children.length} done`}
       </h3>
       {!plan && (
@@ -656,7 +715,10 @@ function BlockedPanel({
     (a) => a.kind === "blocker" && stuck && new Date(a.createdAt) > new Date(stuck.createdAt),
   );
   return (
-    <section aria-label="Blocker" className="space-y-2 rounded-md border border-amber-500 p-3">
+    <section
+      aria-label="Blocker"
+      className="space-y-2 rounded-lg border border-needs-fg/30 bg-needs/50 p-4"
+    >
       {blocker ? (
         <Markdown>{blocker.contentMd}</Markdown>
       ) : (
@@ -701,6 +763,7 @@ function RunBar({
   onRetry: () => void;
 }) {
   const active = isActive(run);
+  const agentName = useContext(Agents)[run.agentSlug]?.name ?? run.agentSlug;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
@@ -711,10 +774,13 @@ function RunBar({
   const end = run.endedAt ? new Date(run.endedAt).getTime() : now;
   const secs = start ? Math.max(0, Math.round((end - start) / 1000)) : 0;
   return (
-    <section aria-label="Latest run" className="space-y-1 rounded-md border p-2 text-sm">
+    <section aria-label="Latest run" className="space-y-1 rounded-lg border bg-surface p-3 text-sm">
       <div className="flex items-center gap-2">
+        {/* eslint-disable-next-line @next/next/no-img-element -- tiny local SVG */}
+        <img src={`/api/agents/${run.agentSlug}/avatar`} alt="" className="size-6 rounded-full" />
+        {active && <Loader2 aria-hidden className="size-3.5 animate-spin text-running-fg" />}
         <span className="flex-1">
-          <strong>{run.agentSlug}</strong> · {run.state.replace("_", " ")}
+          <strong>{agentName}</strong> · {run.state.replace("_", " ")}
           {start && ` · ${Math.floor(secs / 60)}m ${secs % 60}s`}
           {/* shortcut: the SDK reports cost only when a run ends, so a running run shows none; a live figure needs a price table (M6). */}
           {!active && ` · $${run.costUsd.toFixed(2)}`}
@@ -757,7 +823,10 @@ function LiveLog({ runId, lastSeq }: { runId: string; lastSeq: number }) {
   if (!events.length)
     return <p className="text-sm text-muted-foreground">Waiting for the agent…</p>;
   return (
-    <ol aria-label="Run log" className="space-y-1 font-mono text-xs">
+    <ol
+      aria-label="Run log"
+      className="space-y-1.5 rounded-lg border bg-surface p-3 font-mono text-xs leading-relaxed"
+    >
       {events.map((e) => (
         <li key={e.seq}>
           <LogLine event={e} />
@@ -778,7 +847,7 @@ function LogLine({ event: { type, payload } }: { event: RunEvent }) {
             ? `→ ${String(payload.name)}`
             : `← result${payload.isError ? " (error)" : ""}`}
         </summary>
-        <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-muted p-2">
+        <pre className="mt-1 overflow-x-auto rounded-md border bg-background p-2 whitespace-pre-wrap">
           {type === "tool_call" ? JSON.stringify(payload.input, null, 2) : String(payload.content)}
         </pre>
       </details>
@@ -828,15 +897,7 @@ function describe(a: Activity): string {
 function CommentByline({ c }: { c: Comment }) {
   return (
     <p className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-      {c.agentSlug ? (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element -- tiny local SVG */}
-          <img src={`/api/agents/${c.agentSlug}/avatar`} alt="" className="size-4 rounded-full" />
-          <span>{c.agentSlug}</span>
-        </>
-      ) : (
-        <span>owner</span>
-      )}
+      {c.agentSlug ? <AgentTag slug={c.agentSlug} /> : <span>owner</span>}
       {c.file && (
         <code>
           {c.file}
@@ -854,6 +915,8 @@ type Diff = {
   diff: string;
   truncated: boolean;
   comments: Comment[];
+  /** File → the agents whose runs changed it, first first. */
+  fileAgents: Record<string, string[]>;
 };
 
 /**
@@ -873,7 +936,7 @@ function DiffView({ ticketId, refresh }: { ticketId: string; refresh: unknown })
       stale = true;
     };
   }, [ticketId, refresh]);
-  if (error) return <p className="text-sm text-red-700">{error}</p>;
+  if (error) return <p className="text-sm text-destructive">{error}</p>;
   if (!d) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (!d.branch)
     return (
@@ -891,16 +954,34 @@ function DiffView({ ticketId, refresh }: { ticketId: string; refresh: unknown })
   return (
     <div
       aria-label={`Diff of ${d.branch} against ${d.base}`}
-      className="overflow-x-auto font-mono text-xs"
+      className="overflow-x-auto rounded-lg border bg-surface py-2 font-mono text-xs"
     >
       {diffRows(d.diff, d.comments).map((r, i) => (
         <div key={i}>
-          <div className={`whitespace-pre ${r.cls}`}>{r.text || " "}</div>
+          {r.fileStart !== null && (
+            // Each file opens with who changed it (from the runs' recorded files).
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-y bg-card px-3 py-1.5 font-sans first:mt-0">
+              <span className="font-mono font-semibold text-foreground">{r.fileStart}</span>
+              <span className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                {d.fileAgents[r.fileStart]?.length ? (
+                  <>
+                    Changed by
+                    {d.fileAgents[r.fileStart]!.map((s) => (
+                      <AgentTag key={s} slug={s} />
+                    ))}
+                  </>
+                ) : (
+                  "No agent run recorded changing this file"
+                )}
+              </span>
+            </div>
+          )}
+          <div className={`px-3 whitespace-pre ${r.cls}`}>{r.text || " "}</div>
           {r.notes.map((c) => (
             <div
               key={c.id}
               role="note"
-              className="my-1 whitespace-normal rounded border bg-background p-2 font-sans"
+              className="mx-3 my-1 rounded-md border bg-card p-2 font-sans whitespace-normal shadow-xs"
             >
               <CommentByline c={c} />
               <Markdown>{c.bodyMd}</Markdown>
@@ -929,13 +1010,15 @@ function diffRows(diff: string, comments: Comment[]) {
     } else if (inHunk && (text.startsWith("+") || text.startsWith(" "))) at = ++line;
     const cls =
       inHunk && text.startsWith("+")
-        ? "bg-green-50 text-green-900"
+        ? "bg-ok text-ok-fg"
         : inHunk && text.startsWith("-")
-          ? "bg-red-50 text-red-900"
+          ? "bg-failed text-failed-fg"
           : !inHunk || hunk
             ? "text-muted-foreground"
             : "";
     const notes = at === null ? [] : comments.filter((c) => c.file === file && c.line === at);
-    return { text, cls, notes };
+    // "diff --git a/x b/x" starts a file; take b/'s path (it's also the old one for deletions).
+    const fileStart = text.startsWith("diff --git ") ? (/ b\/(.+)$/.exec(text)?.[1] ?? null) : null;
+    return { text, cls, notes, fileStart };
   });
 }

@@ -3,6 +3,7 @@ slug: nitpick-nancy
 name: Nitpick Nancy
 tagline: Has opinions about your semicolons.
 avatar: avatars/nitpick-nancy.svg
+color: "#be185d"
 column: code_review
 model: claude-sonnet-5-5
 # Read-only review of the ticket's worktree: read files, inspect git history and diffs, run the linter.

@@ -159,6 +159,7 @@ export const patchProjectBody = z
         build: plainCommand,
         test: plainCommand,
         lint: plainCommand,
+        start: plainCommand,
       })
       .partial(),
     testGlobs: z.array(z.string().trim().min(1).max(300)).max(100),

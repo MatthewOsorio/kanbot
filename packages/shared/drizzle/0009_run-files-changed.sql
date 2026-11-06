@@ -1,0 +1,1 @@
+ALTER TABLE "runs" ADD COLUMN "files_changed" text[] DEFAULT '{}' NOT NULL;
