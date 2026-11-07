@@ -1,6 +1,7 @@
-# Locally (M1–M4.5): `docker compose up -d db`, only Postgres on 127.0.0.1.
-# On the server (docs/deploy.md): `docker compose --profile app up -d --build` adds migrate, web, worker and
-# caddy (requirements §7). Everything runs on the host's rootless Docker daemon.
+# Development: `docker compose up -d db`, only Postgres on 127.0.0.1.
+# Running Kanbot (docs/deploy.md, requirements §7): profile `app` adds migrate, web (on 127.0.0.1) and worker;
+# profile `public` adds caddy for HTTPS on a domain. Set COMPOSE_PROFILES=app (local, e.g. WSL) or app,public
+# (server) in .env, then `docker compose up -d --build`. Everything runs on the host's rootless Docker daemon.
 services:
   db:
     image: postgres:16
@@ -36,6 +37,16 @@ services:
     image: kanbot-web
     environment:
       DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD:-kanbot}@db:5432/kanbot
+      # The repos belong to the worker's user; web runs as `node` and only reads them (diffs, settings).
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
+    ports:
+      # Loopback only: the browser on this machine (WSL forwards it to Windows), or Caddy on a server.
+      - "127.0.0.1:${KANBOT_WEB_PORT:-3000}:3000"
+    volumes:
+      # Read-only: the web app checks repo paths and shows diffs; only the worker writes to repos.
+      - ${KANBOT_REPOS_DIR:-/srv/kanbot/repos}:${KANBOT_REPOS_DIR:-/srv/kanbot/repos}:ro
     depends_on:
       migrate: { condition: service_completed_successfully }
     restart: unless-stopped
@@ -49,6 +60,9 @@ services:
       DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD:-kanbot}@127.0.0.1:${KANBOT_DB_PORT:-5432}/kanbot
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       KANBOT_RUNTIME: ${KANBOT_RUNTIME:-sdk}
+      # Projects with no image of their own run here, never in the worker's container, which holds the
+      # Docker socket (§7).
+      KANBOT_DEFAULT_IMAGE: ${KANBOT_DEFAULT_IMAGE:-node:24-bookworm}
     # Host networking: the QA app's container publishes its port on the host's 127.0.0.1 (§7), and the
     # worker must reach it there.
     network_mode: host
@@ -67,7 +81,7 @@ services:
     restart: unless-stopped
 
   caddy:
-    profiles: [app]
+    profiles: [public]
     image: caddy:2
     environment:
       KANBOT_DOMAIN: ${KANBOT_DOMAIN:-localhost}

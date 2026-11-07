@@ -271,7 +271,8 @@ export async function deleteTicket(id: string) {
     return { ...t, repoPath: p!.repoPath };
   });
   // FR-49: the worktree goes with the ticket; the branch stays (it may hold work worth keeping).
-  // shortcut: a cancelled agent may still be stopping inside it; the removal then fails and the folder stays until the M5 nightly cleanup.
+  // When this fails (an agent still stopping inside it, or the repos mounted read-only in Docker), the
+  // worker's nightly cleanup removes it.
   if (t.worktreePath && t.repoPath) await removeWorktree(t.repoPath, t.worktreePath);
 }
 

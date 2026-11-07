@@ -44,6 +44,7 @@ import {
   startApp,
   containerBash,
   projectImage,
+  pullImage,
   removeContainers,
   ensureWorktree,
   snapshot,
@@ -328,6 +329,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
           project.keyPrefix,
         ),
       };
+      if (config.image) await pullImage(config.image);
       wt = await ensureWorktree(
         project.repoPath,
         project.defaultBranch,

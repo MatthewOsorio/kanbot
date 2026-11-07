@@ -632,8 +632,16 @@ describe("nightly cleanup (M5)", () => {
       .update(tickets)
       .set({ columnId: col("done").id, worktreePath: wt.path, branchName: wt.branch })
       .where(eq(tickets.id, ticket.id));
+    // A deleted ticket's worktree (no ticket has key -99).
+    const orphan = await ensureWorktree(
+      repo,
+      "main",
+      { key: `${project.keyPrefix}-99`, title: "gone", branchName: null },
+      await projectConfigOf(db, project),
+    );
 
     await nightlyCleanup(db);
+    expect(existsSync(orphan.path)).toBe(false);
     const left = await db
       .select({ runId: runEvents.runId })
       .from(runEvents)

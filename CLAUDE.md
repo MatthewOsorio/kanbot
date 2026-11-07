@@ -2,7 +2,7 @@
 
 Self-hosted Kanban board where AI agents work the columns. The spec is `docs/requirements.md`: build to it, and update it in the same change whenever a decision or behavior changes. Work milestone by milestone (§16) and stop at the end of each for review.
 
-**Status: M1 (board), M2 (orchestrator, Plan B), M3 (build loop), M4 (unblock) and M4.5 (quality gates and epics, local; PR #8) are done and merged. Since then the `ui-revamp` branch adds the QA rework (Testy checks criteria against a worker-started app) and the UI revamp (themes, agent colors, the drawer as a dialog, per-agent Diff headers); both are at the end of `docs/m4.5-report.md`. Testy's new prompt passed a real `pnpm eval:agents` on 2026-11-06. M5 (ship and deploy) is in progress on `m5-ship-and-deploy`; its living report is `docs/m5-report.md` (phase table, progress log): update it as work lands.** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md` and `docs/m4.5-report.md`.
+**Status: M1 (board), M2 (orchestrator, Plan B), M3 (build loop), M4 (unblock) and M4.5 (quality gates and epics, local; PR #8) are done and merged. Since then the `ui-revamp` branch adds the QA rework (Testy checks criteria against a worker-started app) and the UI revamp (themes, agent colors, the drawer as a dialog, per-agent Diff headers); both are at the end of `docs/m4.5-report.md`. Testy's new prompt passed a real `pnpm eval:agents` on 2026-11-06. M5 (ship and deploy) is in progress on `m5-ship-and-deploy` (Kanbot runs in its own WSL distro; a public server is optional, M6); its living report is `docs/m5-report.md` (phase table, progress log): update it as work lands.** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md` and `docs/m4.5-report.md`.
 
 ## Layout
 
@@ -38,16 +38,16 @@ plugins/             vendored, pinned plugins (each has a VENDORED.md); agents l
 fixtures/runs/       replay scripts: <agent>/<scenario>[.<n>].json; a ticket label `replay:<scenario>` picks one, n = the agent's nth run
 fixtures/sample-repo/ zero-dependency todo app (with .kanbot/project.yml) copied into fresh git repos by prepareSampleRepo()
 fixtures/golden/     the golden tickets for `pnpm eval:agents`
-docs/requirements.md the spec;  docs/deploy.md  Droplet setup, step by step (rootless Docker, firewall, .env, deploys, backups)
+docs/requirements.md the spec;  docs/deploy.md  running Kanbot: A) its own WSL distro, B) a server (rootless Docker, .env, deploys, backups)
 Dockerfile           --target web / --target worker (worker adds git + docker CLI);  Caddyfile  HTTPS in front of web
-docker-compose.yml   db (local default); --profile app adds migrate, web, worker (host network, Docker socket), caddy
+docker-compose.yml   db (local default); profile app adds migrate, web (127.0.0.1), worker (host network, Docker socket); profile public adds caddy
 ```
 
 ## Commands (repo root)
 
 ```
 docker compose up -d db     Postgres 16 on 127.0.0.1:5432 (cp .env.example .env first)
-docker compose --profile app up -d --build   the whole server stack (docs/deploy.md); never locally with caddy (it publishes 80/443)
+docker compose up -d --build   with COMPOSE_PROFILES=app in .env: the whole stack (docs/deploy.md); never the public profile locally (caddy publishes 80/443)
 pnpm db:migrate             apply migrations;  pnpm db:generate --name <x>  after editing db/schema.ts
 pnpm dev                    web on http://127.0.0.1:3000 + worker (dev:web / dev:worker run one)
 pnpm typecheck | lint | test | test:e2e | build | format
@@ -56,7 +56,7 @@ pnpm eval:agents            golden tickets with REAL agents (costs money; ask fi
 
 The worker uses the real Claude Agent SDK unless `KANBOT_RUNTIME=replay` (needs `ANTHROPIC_API_KEY` in `.env`). Tests and CI only ever use replay. A real run costs money: Plan B was about $0.15–0.45 per plan in the M2 smoke test. `KANBOT_RECORD=1` saves real runs as replay scripts (see `.env.example`); `KANBOT_RUNTIME=replay pnpm eval:agents` checks the eval script for free.
 
-Project commands run in the project's image (`docker run`; from the repo's devcontainer, project.yml or Settings "Image") when it has one, else on the host toolchain; the Docker-backed worker tests skip when Docker isn't running. Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs, hotspots, bounce limit and concurrency live in the database (Settings page), seeded once from `.kanbot/project.yml` on its default branch. The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
+Project commands run in the project's image (`docker run`; from the repo's devcontainer, project.yml or Settings "Image") when it has one, else in `KANBOT_DEFAULT_IMAGE` (set by compose: project code never runs in the worker's container, which holds the Docker socket), else (`pnpm dev`) on the host toolchain; the Docker-backed worker tests skip when Docker isn't running. Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs, hotspots, bounce limit and concurrency live in the database (Settings page), seeded once from `.kanbot/project.yml` on its default branch. The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
 
 `pnpm test:e2e` can run while `pnpm dev` is running: it uses `NEXT_DIST_DIR=.next-e2e`, its own database and its own replay worker. Worker tests (`pnpm test`) share `kanbot_test` and cancel any leftover active runs there first.
 

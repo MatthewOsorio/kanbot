@@ -3,7 +3,7 @@ import { createServer, type AddressInfo } from "node:net";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, posix, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { uuidv7 } from "@kanbot/shared";
+import { IMAGE_REF, uuidv7 } from "@kanbot/shared";
 import { branchName, git, type ProjectConfig } from "@kanbot/shared/repo";
 
 const sh = promisify(exec);
@@ -139,13 +139,11 @@ export async function startApp(
   const name = `kanbot-qa-${uuidv7()}`;
   // Pull first, so a first-time download doesn't eat the 60 s the app gets to come up.
   if (image) {
-    const pull = await execFileP("docker", ["image", "inspect", image])
-      .catch(() => execFileP("docker", ["pull", image], { timeout: 10 * 60_000 }))
-      .then(
-        () => null,
-        (e: Error) => e.message,
-      );
-    if (pull) return { error: `Could not pull ${image}: ${pull}` };
+    const pull = await pullImage(image).then(
+      () => null,
+      (e: Error) => e.message,
+    );
+    if (pull) return { error: pull };
   }
   const child = image
     ? spawn("docker", dockerRun(image, cwd, command, { name, port }), { windowsHide: true })
@@ -181,6 +179,18 @@ export async function startApp(
   }
   await stop();
   return { error: `\`${command}\` didn't answer on ${url} within 60 s:\n${tail()}` };
+}
+
+/**
+ * Makes sure the image is local. Called before a run's first project command, so a failed download fails
+ * the run instead of passing for a failing check (which would bounce the ticket to the agent).
+ */
+export async function pullImage(image: string) {
+  await execFileP("docker", ["image", "inspect", image])
+    .catch(() => execFileP("docker", ["pull", image], { timeout: 10 * 60_000 }))
+    .catch((e: Error) => {
+      throw new Error(`Could not pull ${image}: ${e.message}`);
+    });
 }
 
 function freePort(): Promise<number> {
@@ -255,7 +265,7 @@ const BUILD_MS = 20 * 60_000;
 
 /**
  * The image to run project commands in (§7): the owner's Image if set, else the one the repo's
- * devcontainer Dockerfile builds, else none (the worker's toolchain). The build always comes from the
+ * devcontainer Dockerfile builds, else KANBOT_DEFAULT_IMAGE, else none (the worker's toolchain). The build always comes from the
  * default branch (`git archive`), never a worktree, so agents can't change it; its tag is the context's
  * tree hash, so it rebuilds only when the context changes there.
  */
@@ -265,7 +275,8 @@ export async function projectImage(
   config: Pick<ProjectConfig, "image" | "dockerfile">,
   key: string,
 ): Promise<string | undefined> {
-  if (config.image || !config.dockerfile) return config.image;
+  if (config.image) return config.image;
+  if (!config.dockerfile) return defaultImage();
   const { file, context } = config.dockerfile;
   const inContext = context === "." ? file : posix.relative(context, file);
   if (inContext.startsWith("../"))
@@ -281,6 +292,18 @@ export async function projectImage(
   );
   if (!built) await buildImage(repoPath, tree, inContext, tag);
   return tag;
+}
+
+/**
+ * KANBOT_DEFAULT_IMAGE, for projects with no image of their own. Set by docker-compose.yml, so a
+ * containerized worker never runs project code beside its Docker socket; unset in development, where
+ * those projects use the host's toolchain.
+ */
+function defaultImage() {
+  const image = process.env.KANBOT_DEFAULT_IMAGE?.trim();
+  if (image && !IMAGE_REF.test(image))
+    throw new Error(`KANBOT_DEFAULT_IMAGE "${image}" is not an image reference`);
+  return image || undefined;
 }
 
 /** `git archive <tree> | docker build -f <file> -t <tag> -`, without a shell. Throws with the output's tail. */

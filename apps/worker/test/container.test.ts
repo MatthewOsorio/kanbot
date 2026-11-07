@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containerBash, dockerRun, shQuote } from "../src/worktree";
+import { containerBash, dockerRun, projectImage, shQuote } from "../src/worktree";
 
 const cwd = process.platform === "win32" ? "C:\\r\\wt" : "/r/wt";
 const mounted = process.platform === "win32" ? "/c/r/wt" : "/r/wt";
@@ -27,5 +27,21 @@ describe("project commands in containers (§7)", () => {
 
   it("quotes for a POSIX shell", () => {
     expect(shQuote("it's")).toBe(`'it'\\''s'`);
+  });
+
+  it("falls back to KANBOT_DEFAULT_IMAGE when the project has none, and checks it", async () => {
+    const before = process.env.KANBOT_DEFAULT_IMAGE;
+    try {
+      process.env.KANBOT_DEFAULT_IMAGE = "node:24-bookworm";
+      expect(await projectImage("/r", "main", {}, "K")).toBe("node:24-bookworm");
+      expect(await projectImage("/r", "main", { image: "go:1" }, "K")).toBe("go:1");
+      process.env.KANBOT_DEFAULT_IMAGE = "--privileged";
+      await expect(projectImage("/r", "main", {}, "K")).rejects.toThrow(/not an image reference/);
+      delete process.env.KANBOT_DEFAULT_IMAGE;
+      expect(await projectImage("/r", "main", {}, "K")).toBeUndefined();
+    } finally {
+      if (before === undefined) delete process.env.KANBOT_DEFAULT_IMAGE;
+      else process.env.KANBOT_DEFAULT_IMAGE = before;
+    }
   });
 });

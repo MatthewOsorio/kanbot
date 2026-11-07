@@ -1,7 +1,10 @@
 # Kanbot's own images (requirements §7): `--target web` and `--target worker`, built by docker-compose.yml.
-# The worker image carries Node, git and the docker CLI only: project commands run in each project's own
+# Both carry Node and git; the worker adds the docker CLI only: project commands run in each project's own
 # image through the host's (rootless) Docker daemon.
 FROM node:26-bookworm-slim AS base
+# git for both: web reads diffs and project settings from the repos, the worker makes worktrees.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 # Corepack no longer ships with Node 25+, so pnpm comes from npm, pinned to package.json's packageManager.
 RUN npm install -g pnpm@12.16.1
 WORKDIR /app
@@ -19,8 +22,6 @@ EXPOSE 3000
 CMD ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]
 
 FROM base AS worker
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
 COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
 # Runs as container root: under rootless Docker that is the host's unprivileged `kanbot` user, which owns
 # /srv/kanbot and the daemon's socket (docs/deploy.md). Container uid 1000 would map to a subuid instead.

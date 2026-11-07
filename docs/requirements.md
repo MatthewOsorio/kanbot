@@ -14,7 +14,7 @@ Last updated 2026-11-06 (QA rework and UI revamp after M4.5).
     - Testy McTestface (QA), who checks each criterion against the app the worker starts, with tests where the project has a test setup.
   - Bounce-backs and the bounce limit, the overlap check, stall detection, Ponytail, and the golden-ticket eval.
   - Unblocking (M4): Blocked with Rubber Duckworth, Resume with an answer, session resume on bounce-backs, in-app notifications; the daily cap, Pause all and automatic resume after an outage; Archie's retro and worktree removal at Done; ticket links; project Settings; the cost total on each ticket; CI.
-  - M5 so far (in progress, `docs/m5-report.md`): project commands, the QA app and agents' project commands run in the project's own container image, taken from the repo's devcontainer (named, or built from its Dockerfile) or `project.yml`, or set in Settings (§7); the deploy files (compose services, Dockerfile, Caddy, deploy workflow, `docs/deploy.md`) and the nightly cleanup, not yet on a real server.
+  - M5 so far (in progress, `docs/m5-report.md`): project commands, the QA app and agents' project commands run in the project's own container image, taken from the repo's devcontainer (named, or built from its Dockerfile) or `project.yml`, or set in Settings (§7); the deploy files (compose services, Dockerfile, Caddy, deploy workflow, `docs/deploy.md`) and the nightly cleanup. Kanbot runs on the owner's PC in its own WSL distro; a public server is optional and later.
   - Quality gates and epics (M4.5): the worker's checks gate (build, lint and test after every build run, before Code Review); Nancy's security pass with Cloudflare's security-audit skill; epics, where Plan B splits a ticket or a technical doc into proposed tickets the owner accepts into Backlog.
   - The UI revamp (after M4.5): light and dark themes with a toggle, slate and indigo design tokens, Plus Jakarta Sans and JetBrains Mono, and agent colors: each agent file names a color, which marks its column, its cards and its glyph avatar. The ticket drawer is a centered dialog, and its artifacts and diff files name the agent that made them (`runs.files_changed`).
 - **How it runs:** locally only, bound to 127.0.0.1, with no login. Tested on Windows only. Project commands, image, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
@@ -40,7 +40,7 @@ Kanbot is a self-hosted Kanban board where moving a ticket into a column starts 
 
 - Multi-user teams, permissions and real-time collaboration between people.
 - Replacing Jira for human teams; this is a personal AI-development cockpit.
-- Hosting as SaaS for other people. It runs on the owner's own DigitalOcean Droplet.
+- Hosting as SaaS for other people. It runs on the owner's own machine (WSL), or optionally the owner's own server.
 - Supporting non-git projects.
 
 ### Primary user
@@ -300,7 +300,7 @@ The web app and worker never call each other directly: the web app writes jobs t
 | Live updates | Server-Sent Events from the web app, fed by Postgres `LISTEN/NOTIFY` from the worker | One-way streaming is all the board needs; simpler than WebSockets. |
 | Validation | zod | Agent frontmatter, verdict payloads, API bodies. |
 | Testing | Vitest (unit), Playwright (UI end to end) | Fast, TypeScript-native. |
-| Deployment | Docker Compose: `caddy`, `web`, `worker`, `db` | One DigitalOcean Droplet, with Caddy in front for HTTPS (see Deployment below). |
+| Deployment | Docker Compose: `web`, `worker`, `db`, plus `caddy` on a server | The owner's PC in WSL now; optionally one Linux server later, with Caddy in front for HTTPS (see Deployment below). |
 
 ### Process responsibilities
 
@@ -309,20 +309,24 @@ The web app and worker never call each other directly: the web app writes jobs t
 - **Database**: source of truth for projects, tickets, runs, events, artifacts and costs; the `runs` table doubles as the job queue; `NOTIFY` channel `kanbot_events` carries live updates and wakes the worker.
 - **`agents/` folder**: one markdown file per agent, checked into the Kanbot repo and overridable per project at `<repo>/.kanbot/agents/`.
 
-### Deployment on DigitalOcean
+### Deployment
 
-Production runs on one DigitalOcean Droplet with Docker Compose, reachable at an HTTPS subdomain, so GitHub can send webhooks straight to it.
+Kanbot runs with Docker Compose on one Linux machine with rootless Docker. Two setups (decided 2026-11-06, when a paid Droplet turned out more than the owner wanted for now; `docs/deploy.md` has both step by step):
 
-- **Droplet.** Ubuntu LTS, at least 2 vCPUs and 4 GB RAM; 8 GB is safer with two agents running builds and tests at once. A Block Storage volume holds Postgres data and cloned repos so they survive a Droplet rebuild.
-- **Containers.** `caddy` (reverse proxy with automatic HTTPS), `web`, `worker`, `db` (Postgres 16), and a one-shot `migrate` that applies migrations before web and worker start. They are all in `docker-compose.yml` under the `app` profile, so local development still starts only `db`. The images come from the root `Dockerfile` (`--target web` and `--target worker`; the worker adds git and the docker CLI). The worker uses host networking to reach the QA apps that project containers publish on 127.0.0.1. It gets the Docker socket and the repos folder (mounted at the same path), and only the environment variables it needs, never the whole `.env`. DigitalOcean Managed PostgreSQL can replace `db` later. Step-by-step setup is in `docs/deploy.md`.
-- **Domain.** An A record (e.g. `kanbot.<your-domain>`) points at the Droplet; Caddy obtains the TLS certificate.
-- **Network.** A Cloud Firewall opens 80 and 443; SSH (22) only from the owner's IP with key auth. Postgres is never exposed.
+- **Local, in WSL (the current target).** Kanbot gets its own WSL distro with its own rootless Docker, cut off from Windows (no drives mounted, no Windows interop). The web app listens on 127.0.0.1 only, which WSL forwards to the Windows browser. No domain, no Caddy, no webhooks: Kanbot polls GitHub every 60 s instead (section 10, FR-44). Agents work only while the PC is on.
+- **A server (optional, later)**, reachable at an HTTPS subdomain so it works while the PC is off and GitHub can send webhooks straight to it. Any Ubuntu VPS: a DigitalOcean Droplet, Oracle Cloud's free tier or another. The bullets below marked "server" apply only here.
+
+- **Server.** Ubuntu LTS, at least 2 vCPUs and 4 GB RAM; 8 GB is safer with two agents running builds and tests at once. On DigitalOcean, a Block Storage volume holds Postgres data and cloned repos so they survive a rebuild.
+- **Containers.** `web`, `worker`, `db` (Postgres 16), a one-shot `migrate` that applies migrations before web and worker start, and on a server `caddy` (reverse proxy with automatic HTTPS). In `docker-compose.yml`, profile `app` adds migrate, web and worker, and profile `public` adds caddy; the machine's `.env` sets `COMPOSE_PROFILES` (`app` locally, `app,public` on a server), so local development without it still starts only `db`. The web app is published on 127.0.0.1 only. The images come from the root `Dockerfile` (`--target web` and `--target worker`; the worker adds git and the docker CLI). The worker uses host networking to reach the QA apps that project containers publish on 127.0.0.1. It gets the Docker socket and the repos folder (mounted at the same path), and only the environment variables it needs, never the whole `.env`. DigitalOcean Managed PostgreSQL can replace `db` later. Step-by-step setup is in `docs/deploy.md`.
+- **Domain (server).** An A record (e.g. `kanbot.<your-domain>`) points at the server; Caddy obtains the TLS certificate.
+- **Network.** On a server, a firewall opens 80 and 443; SSH (22) only from the owner's IP with key auth. Postgres and the web app are never exposed: they bind to 127.0.0.1. Kanbot is never reachable from another machine before Sign in with GitHub exists.
 - **Repos.** Projects are cloned from GitHub into `/srv/kanbot/repos/<project>` with the GitHub App token; worktrees live beside them.
-- **Secrets.** The Anthropic API key, the session secret and the encryption key for the stored GitHub App credentials live in a root-readable `.env` passed to the containers. Agent shell commands run with a scrubbed environment that excludes them.
+- **Secrets.** The Anthropic API key, the session secret and the encryption key for the stored GitHub App credentials live in an owner-only (`chmod 600`) `.env`; each container gets only the variables its service lists. Agent shell commands run with a scrubbed environment that excludes them.
 - **Project toolchains (built in M5).** The `worker` image carries Node and Kanbot only. Every project command (install, build, lint, test, start, and agents' `{test}`-style shell tools) runs in the project's own image instead, found without the owner doing anything when the repo says which:
   - the repo's `.devcontainer/devcontainer.json`, if it has one: the image its `image` field names, or the image Kanbot **builds** from the Dockerfile its `build.dockerfile` (or older `dockerFile`) points at;
   - else `image:` in `.kanbot/project.yml`;
-  - else none: the worker's own toolchain (how local development and the sample repo run). Guessing an image from the project's language belongs to onboarding's command detection (section 10).
+  - else `KANBOT_DEFAULT_IMAGE`, which `docker-compose.yml` sets for the containerized worker (default `node:24-bookworm`). Without it, project code would run inside the worker's own container, beside the Docker socket, which would hand it every other container;
+  - else (development, where the variable is unset) none: the host's own toolchain, as the sample repo and tests run. Guessing an image from the project's language belongs to onboarding's command detection (section 10).
 
   Like the other project settings these are seeded once from the default branch. Settings' **Image** overrides them. A plain root `Dockerfile` is ignored, because it is usually a production image without test tools (decided 2026-11-06). Devcontainer `features`, `postCreateCommand` and docker-compose devcontainers are not applied.
   - The build (`projectImage()` in `apps/worker/src/worktree.ts`) always uses the default branch: `git archive <default>:<context>` piped into `docker build`, never a worktree or the checkout's working copy, so an agent can't change what it runs in. The tag is `kanbot-<key>:<the context's tree hash>`, so the image is rebuilt only when the build context changes on the default branch. A build that fails fails the run with the build's output. The Dockerfile must be inside its build context. Kanbot never installs a language toolchain itself, so a Python, Go or Rust project works the same as a Node one.
@@ -331,9 +335,9 @@ Production runs on one DigitalOcean Droplet with Docker Compose, reachable at an
   - Docker runs **rootless** on the server (decided 2026-11-06), and the worker uses the plain `docker` CLI against that daemon's socket: the daemon itself has no root, so no socket proxy is needed. Containers are not network-limited (Later, with per-run containers).
   - The QA app (section 4) runs the same way, publishing its port on 127.0.0.1 only. The image is pulled before the app's 60 seconds start.
 - **Isolation.** Nothing runs as the host's root. Docker is rootless and runs as the `kanbot` user. The worker runs as root inside its container, which under rootless Docker *is* that unprivileged user on the host, so the socket, the repos and the files project containers write share one owner. Because the server is public and agents run `npm install` and test scripts, per-run containers (section 14) are recommended before pointing agents at repos with untrusted dependencies. Running project commands in the project's image (above) is the first half of that; network limits are the second (Later).
-- **Backups.** Nightly `pg_dump` to DigitalOcean Spaces from a cron job on the host (`docs/deploy.md`), plus Droplet backups if enabled.
+- **Backups.** Nightly `pg_dump` from a cron job on the host (`docs/deploy.md`): copied to DigitalOcean Spaces (or similar) on a server, kept in the distro and copied out by hand in WSL.
 - **Nightly cleanup.** The worker prunes run logs past 90 days (each ticket's last run kept), worktrees that Done tickets still hold, and Kanbot-built project images nothing has used for a week. It runs a minute after start, then every 24 hours (`apps/worker/src/cleanup.ts`). The shared package cache volume is cleared by hand if it grows.
-- **Deploys.** `.github/workflows/deploy.yml` runs after CI passes on main. It connects to the Droplet over SSH, checks out that commit and runs `docker compose --profile app up -d --build`, so images are built on the server and no registry is needed. It stays off until the repo variable `KANBOT_DEPLOY` is `on`. CI also builds the images, so a broken Dockerfile fails there first. The worker exits if it loses its single-worker lock, and compose restarts it.
+- **Deploys.** `.github/workflows/deploy.yml` runs after CI passes on main. It connects to the server over SSH, checks out that commit and runs `docker compose up -d --build` (the server's `.env` picks the profiles), so images are built on the server and no registry is needed. In WSL, updates are `git pull` and the same command by hand. It stays off until the repo variable `KANBOT_DEPLOY` is `on`. CI also builds the images, so a broken Dockerfile fails there first. The worker exits if it loses its single-worker lock, and compose restarts it.
 
 ## 8. Agent orchestration and runtime
 
@@ -594,7 +598,7 @@ GitHub is required: it holds every branch and PR, runs CI, and its branch protec
 - **Identity.** A GitHub App, created and installed through the two-click setup below. Not the user's own token: GitHub does not let a PR's author approve it, so the user could not be the required reviewer on PRs opened in their own name.
 - **Permissions.** Contents read/write (clone, push branches); pull requests read/write; workflows read/write (GitHub requires it to add or change files in `.github/workflows`); administration read/write (apply branch protection); checks and commit statuses read; metadata read. Only the worker holds the token; agents never see it.
 - **Commits.** Authored by the bot identity, with trailers naming the agent and ticket (`Kanbot-Agent: sir-codes-a-lot`, `Kanbot-Ticket: KB-42`) so `git log` shows who did what.
-- **Events.** Webhooks for `pull_request`, `pull_request_review`, `pull_request_review_comment`, `check_suite` and `push`, sent to `/api/webhooks/github` and verified by signature. The DigitalOcean server has a public HTTPS URL, so GitHub delivers webhooks directly; polling every 60 s stays as a fallback for missed deliveries.
+- **Events.** Webhooks for `pull_request`, `pull_request_review`, `pull_request_review_comment`, `check_suite` and `push`, sent to `/api/webhooks/github` and verified by signature. A server with a public HTTPS URL gets webhooks directly, with polling every 60 s as a fallback for missed deliveries. Run locally in WSL (section 7), GitHub can't reach Kanbot, so the 60 s polling is the only path; a tunnel (e.g. Cloudflare Tunnel) can bring webhooks back later.
 
 ### Two-click setup
 
@@ -810,8 +814,8 @@ Kanbot is a single-user, self-hosted tool, so the targets favor responsiveness, 
 | Streaming | Run events appear in the UI within 1 s of the agent emitting them. |
 | Reliability | No ticket or run is lost on a crash or restart; interrupted runs are detected on worker start. Database backups via a documented `pg_dump` cron. |
 | Auditability | Every move, run, verdict, comment and config version is recorded with actor and timestamp; run logs are kept for at least 90 days. |
-| Portability | Production: one DigitalOcean Droplet (Ubuntu LTS) with Docker Compose. Development: Windows, macOS or Linux with Node 23.6+ (the sample repo runs TypeScript directly) and PostgreSQL 16. So far tested on Windows only. |
-| Security | Public HTTPS only (Caddy); Sign in with GitHub limited to the owner; firewall restricts SSH; secrets only from env and never passed to agent shells. |
+| Portability | Running: Docker Compose on Linux with rootless Docker, in WSL on the owner's PC or on one Ubuntu server. Development: Windows, macOS or Linux with Node 23.6+ (the sample repo runs TypeScript directly) and PostgreSQL 16. So far tested on Windows only. |
+| Security | Loopback only in WSL; on a server, public HTTPS only (Caddy) and a firewall that restricts SSH; Sign in with GitHub limited to the owner; secrets only from env and never passed to agent shells. |
 | Accessibility | Board operable by keyboard (dnd-kit keyboard sensor); color is never the only status signal (pills also carry text or icons). |
 | Code quality | TypeScript strict mode, ESLint, Prettier; unit tests for the transition engine, verdict handling and budget logic; Playwright test for the happy-path board flow; CI on GitHub Actions. |
 | Extensibility | Adding an agent = adding one markdown file and assigning it to a column; no code change. |
@@ -839,7 +843,7 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Item | Spec | Notes |
 | --- | --- | --- |
 | `blockWritesOutsideWorkingDirectories` | §7, §14 | Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
-| The real deployment on the Droplet | §7 | The files, `docs/deploy.md` and the deploy workflow exist and were checked locally (without Caddy). Waits for the owner's Droplet and domain, and must not be exposed before Sign in with GitHub. |
+| Running Kanbot in its own WSL distro with rootless Docker | §7 | The files and `docs/deploy.md` (setup A) exist; the stack was checked in WSL on rootful Docker. The owner sets up the `kanbot` distro, which checks rootless Docker for real. |
 | Disk over 90% full: no new runs and a banner | §8 failure handling | The nightly cleanup exists; the guard itself was never built (found 2026-11-06). |
 | Sign in with GitHub; auth on every route | §12 | No auth yet. The dev server binds to 127.0.0.1, and `apps/web/proxy.ts` refuses any Host other than localhost (DNS rebinding) and cross-origin writes (CSRF). |
 | GitHub App two-click setup, onboarding walkthrough with command detection and branch-protection check | §10, FR-3, FR-45 | |
@@ -849,7 +853,7 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Ship/Done manual-move confirmations | §3, FR-24 | They guard opening and closing PRs, which arrive with Ship-It. |
 | Fetch and rebase onto the default branch before each run; auto-rebase when main moves | §9, FR-51 | Locally nothing merges into main yet. |
 | Commit trailers `Kanbot-Agent` / `Kanbot-Ticket` and the bot identity | FR-42 | With the GitHub App. Agent commits use the host's git identity until then. |
-| SDK `sandbox` | §7, §14 | Linux/macOS only (dev is Windows; the Droplet is Linux). |
+| SDK `sandbox` | §7, §14 | Linux/macOS only (dev is Windows; Kanbot itself runs on Linux in WSL). |
 | GitHub status in `/api/health`; "PR ready for review" notification | §8, FR-60 | Health reports GitHub `unknown` until then. |
 | SSE `Last-Event-ID` replay | §12 | Only if needed: the board refetches on reconnect and the Live tab pages `/api/runs/:id/events?after=seq`. Revisit when running over real networks. Marked with a `shortcut:` comment. |
 
@@ -857,6 +861,7 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 
 | Item | Spec | Notes |
 | --- | --- | --- |
+| A public server: Caddy, HTTPS, webhooks, the deploy workflow on a real host | §7, FR-44 | Moved from M5 (2026-11-06): Kanbot runs locally in WSL for now. The files and `docs/deploy.md` (setup B) exist; checking them needs a server and a domain. Login must exist first. |
 | Agent files for Dr. Rabbit Hole and Marge Conflict | §4, §9 | Until Marge ships, every conflicting rebase goes to Blocked. |
 | Onboarding steps 8–9: Plan B suggests hotspot groups; Kanbot drafts CLAUDE.md and `.claude/claude-security-guidance.md` as a PR | §10 | Moved from M5 on 2026-11-06: not needed for M5's done-when, and each is agent work with its own eval spend. Hotspots are edited in Settings meanwhile. |
 | Agents and Costs pages | §13 | |
@@ -878,7 +883,7 @@ Nearly everything is decided; Claude Code builds to the Decided list below unles
 ### Decided
 
 - **Language:** TypeScript end to end (section 7). No Python; no Rust in v1.
-- **Hosting:** one DigitalOcean Droplet with Docker Compose and Caddy (section 7).
+- **Hosting:** Docker Compose in a dedicated WSL distro on the owner's PC; a public server (any Ubuntu VPS, with Caddy) is optional and later (section 7, decided 2026-11-06).
 - **Agent authentication:** a Claude Console API key, pay per token. Kanbot gets its own Console workspace with a monthly spend limit as a hard ceiling, prepaid credits and auto-reload off. If the owner later moves to a plan with monthly API credits, linking the same Console organization covers this key with no change to Kanbot.
 - **Budget defaults:** start low at $3 per ticket and $5 per day, plus the per-agent run budgets in each agent file; raise them once real ticket costs are known.
 - **QA's job:** check that the branch meets its acceptance criteria, with evidence from the running app, tests or code; regressions are the checks gate's and CI's (decided 2026-11-05, section 4).

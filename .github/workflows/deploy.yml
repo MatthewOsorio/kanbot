@@ -1,4 +1,4 @@
-# Redeploys the Droplet after CI passes on main (requirements §7, docs/deploy.md). Off until the repo
+# Redeploys the server after CI passes on main (requirements §7, docs/deploy.md). Off until the repo
 # variable KANBOT_DEPLOY is "on" and the DEPLOY_* secrets exist. Images are built on the server itself,
 # so there is no registry to manage.
 name: Deploy
@@ -31,4 +31,4 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           ssh -i ~/.ssh/id_deploy "kanbot@$HOST" \
-            "cd /srv/kanbot/app && git fetch -q origin main && git checkout -q --detach $SHA && docker compose --profile app up -d --build --remove-orphans"
+            "cd /srv/kanbot/app && git fetch -q origin main && git checkout -q --detach $SHA && docker compose up -d --build --remove-orphans"
