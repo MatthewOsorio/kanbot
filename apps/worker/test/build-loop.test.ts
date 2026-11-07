@@ -1,5 +1,6 @@
 // The M3 build loop against the replay runtime, on a real git repo (fixtures/sample-repo): no API calls.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { activeRunStates, DEFAULT_COLUMNS, uuidv7 } from "@kanbot/shared";
@@ -14,6 +15,7 @@ import {
   moveToColumnEnd,
   projectConfigOf,
   projects,
+  runEvents,
   runs,
   startColumnAgent,
   ticketLinks,
@@ -24,9 +26,10 @@ import { git, loadProjectConfig } from "@kanbot/shared/repo";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
+import { nightlyCleanup } from "../src/cleanup";
 import { claimNext, executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
-import { checkAfterRun, ensureWorktree, snapshot } from "../src/worktree";
+import { checkAfterRun, ensureWorktree, projectImage, snapshot } from "../src/worktree";
 
 const db = createDb(TEST_DATABASE_URL);
 const runtime = new ReplayRuntime();
@@ -494,6 +497,159 @@ describe("build loop (M3 done criterion)", () => {
     const [run] = await drain();
     expect(run!.error).toMatch(/Link a local repo/);
     expect((await ticketNow(ticket.id)).worktreePath).toBeNull();
+  });
+});
+
+// Needs Docker (CI's ubuntu runner has it); skipped where none is running.
+const IMAGE = "node:24-alpine";
+const docker = (args: string[]) => execFileSync("docker", args, { encoding: "utf8" });
+const hasDocker = (() => {
+  try {
+    return !!docker(["info", "--format", "{{.ServerVersion}}"]);
+  } catch {
+    return false;
+  }
+})();
+
+describe.skipIf(!hasDocker)("project commands in the project's image (M5, §7)", () => {
+  const useImage = (id: string) =>
+    db.update(projects).set({ image: IMAGE }).where(eq(projects.id, id));
+  const leftovers = () => docker(["ps", "-aq", "--filter", "label=kanbot"]).trim();
+
+  it("runs the checks gate in the image", async () => {
+    const { project, move } = await setup("checks-fail");
+    await projectConfigOf(db, project); // seed from project.yml first, so the image isn't overwritten
+    await useImage(project.id);
+    await move("in_progress");
+    const done = await drain();
+    expect(done[0]!.error).toBe("Kanbot checks: `node --test` failed");
+    const [report] = await db
+      .select()
+      .from(artifacts)
+      .where(and(eq(artifacts.runId, done[0]!.id), eq(artifacts.kind, "test_report")));
+    expect(report!.contentMd).toMatch(/remove deletes the todo/); // the test output, from the container
+    expect(done.at(-1)!.state).toBe("succeeded");
+    expect(leftovers()).toBe("");
+  }, 120_000);
+
+  it("starts the QA app in the image on 127.0.0.1 and removes it after", async () => {
+    const { project, move } = await setup("default");
+    await projectConfigOf(db, project);
+    await useImage(project.id);
+    await move("qa");
+    let seen: { url?: string; status?: number; running?: string } = {};
+    const probe: typeof runtime = {
+      run: async (req, emit) => {
+        seen = {
+          url: req.appUrl,
+          status: (await fetch(req.appUrl!)).status,
+          running: leftovers(),
+        };
+        return runtime.run(req, emit);
+      },
+    };
+    await executeRun(db, probe, (await claimNext(db))!, new AbortController().signal);
+    expect(seen.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(seen.status).toBe(200);
+    expect(seen.running).not.toBe(""); // it really was a container
+    expect(leftovers()).toBe("");
+  }, 120_000);
+
+  it("builds the image from the devcontainer's Dockerfile on the default branch, once", async () => {
+    const { project, repo, move } = await setup("default");
+    // The owner's repo has a devcontainer that builds (paths relative to .devcontainer/, context the repo).
+    mkdirSync(join(repo, ".devcontainer"));
+    writeFileSync(
+      join(repo, ".devcontainer", "devcontainer.json"),
+      `{\n  // dev image\n  "build": { "dockerfile": "Dockerfile", "context": ".." },\n}\n`,
+    );
+    writeFileSync(
+      join(repo, ".devcontainer", "Dockerfile"),
+      `FROM ${IMAGE}\nCOPY package.json /kanbot-built/\n`,
+    );
+    await git(repo, ["add", ".devcontainer"]);
+    await git(repo, ["commit", "-q", "-m", "devcontainer"]);
+    const config = await projectConfigOf(db, project);
+    expect(config.dockerfile).toEqual({ file: ".devcontainer/Dockerfile", context: "." });
+
+    await move("qa");
+    let image = "";
+    const probe: typeof runtime = {
+      run: async (req, emit) => {
+        image = docker(["ps", "--filter", "label=kanbot", "--format", "{{.Image}}"]).trim();
+        expect((await fetch(req.appUrl!)).status).toBe(200);
+        return runtime.run(req, emit);
+      },
+    };
+    await executeRun(db, probe, (await claimNext(db))!, new AbortController().signal);
+    expect(image).toMatch(new RegExp(`^kanbot-${project.keyPrefix.toLowerCase()}:[0-9a-f]{12}$`));
+    // The COPY came from the default branch's tree (the build context).
+    expect(docker(["run", "--rm", image, "ls", "/kanbot-built"]).trim()).toBe("package.json");
+    // Same default branch, same tag: no rebuild.
+    expect(await projectImage(repo, "main", config, project.keyPrefix)).toBe(image);
+    // The owner's Image wins over the devcontainer.
+    expect(await projectImage(repo, "main", { ...config, image: IMAGE }, project.keyPrefix)).toBe(
+      IMAGE,
+    );
+    docker(["rmi", image]);
+    // A Dockerfile that doesn't build fails with the build's output.
+    writeFileSync(join(repo, ".devcontainer", "Dockerfile"), `FROM ${IMAGE}\nRUN exit 7\n`);
+    await git(repo, ["commit", "-q", "-am", "broken"]);
+    await expect(projectImage(repo, "main", config, project.keyPrefix)).rejects.toThrow(
+      /Building the devcontainer image kanbot-.* failed:[\s\S]*exit 7/,
+    );
+  }, 300_000);
+});
+
+describe("nightly cleanup (M5)", () => {
+  it("prunes old run logs except each ticket's last run, and worktrees left in Done", async () => {
+    const { project, ticket, repo, col } = await setup("default");
+    const old = new Date(Date.now() - 100 * 24 * 3600_000);
+    const [first, last] = await db
+      .insert(runs)
+      .values(
+        [0, 1].map((i) => ({
+          ticketId: ticket.id,
+          agentSlug: "plan-b",
+          columnSlug: "planning",
+          state: "succeeded" as const,
+          createdAt: new Date(old.getTime() + i * 1000),
+        })),
+      )
+      .returning();
+    await db
+      .insert(runEvents)
+      .values(
+        [first!, last!].map((r) => ({ runId: r.id, seq: 1, type: "system" as const, payload: {} })),
+      );
+    const wt = await ensureWorktree(
+      repo,
+      "main",
+      { key: `${project.keyPrefix}-1`, title: ticket.title, branchName: null },
+      await projectConfigOf(db, project),
+    );
+    await db
+      .update(tickets)
+      .set({ columnId: col("done").id, worktreePath: wt.path, branchName: wt.branch })
+      .where(eq(tickets.id, ticket.id));
+    // A deleted ticket's worktree (no ticket has key -99).
+    const orphan = await ensureWorktree(
+      repo,
+      "main",
+      { key: `${project.keyPrefix}-99`, title: "gone", branchName: null },
+      await projectConfigOf(db, project),
+    );
+
+    await nightlyCleanup(db);
+    expect(existsSync(orphan.path)).toBe(false);
+    const left = await db
+      .select({ runId: runEvents.runId })
+      .from(runEvents)
+      .where(inArray(runEvents.runId, [first!.id, last!.id]));
+    expect(left.map((e) => e.runId)).toEqual([last!.id]);
+    expect(existsSync(wt.path)).toBe(false);
+    expect((await ticketNow(ticket.id)).worktreePath).toBeNull();
+    expect(await git(repo, ["branch", "--list", wt.branch])).toContain(wt.branch); // branch kept
   });
 });
 

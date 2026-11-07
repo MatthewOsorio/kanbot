@@ -21,6 +21,8 @@ export type RunRequest = {
   attempt: number; // this agent's nth run on the ticket (1-based); replay picks <scenario>.<n>.json
   /** QA runs: the app the worker started; the agent gets an `http_request` tool limited to it (§4). */
   appUrl?: string;
+  /** Rewrites a Bash command before it runs (project commands into the project's image, §7); null = unchanged. */
+  bash?: (command: string) => string | null;
   /** Continue this agent session instead of starting cold (Resume, bounce-backs; FR-35). */
   resumeSessionId?: string;
 };

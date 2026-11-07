@@ -2,7 +2,7 @@
 
 Self-hosted Kanban board where AI agents work the columns. The spec is `docs/requirements.md`: build to it, and update it in the same change whenever a decision or behavior changes. Work milestone by milestone (§16) and stop at the end of each for review.
 
-**Status: M1 (board), M2 (orchestrator, Plan B), M3 (build loop), M4 (unblock) and M4.5 (quality gates and epics, local; PR #8) are done and merged. Since then the `ui-revamp` branch adds the QA rework (Testy checks criteria against a worker-started app) and the UI revamp (themes, agent colors, the drawer as a dialog, per-agent Diff headers); both are at the end of `docs/m4.5-report.md`. Testy's new prompt passed a real `pnpm eval:agents` on 2026-11-06. Next is M5 (ship and deploy).** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md` and `docs/m4.5-report.md`.
+**Status: M1 (board), M2 (orchestrator, Plan B), M3 (build loop), M4 (unblock) and M4.5 (quality gates and epics, local; PR #8) are done and merged. Since then the `ui-revamp` branch adds the QA rework (Testy checks criteria against a worker-started app) and the UI revamp (themes, agent colors, the drawer as a dialog, per-agent Diff headers); both are at the end of `docs/m4.5-report.md`. Testy's new prompt passed a real `pnpm eval:agents` on 2026-11-06. M5 (ship and deploy) is in progress on `m5-ship-and-deploy` (Kanbot runs in its own WSL distro; a public server is optional, M6); its living report is `docs/m5-report.md` (phase table, progress log): update it as work lands.** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md` and `docs/m4.5-report.md`.
 
 ## Layout
 
@@ -11,15 +11,18 @@ apps/web/            Next.js 16 App Router: board UI + REST API + SSE
   app/api/**/route.ts  thin handlers: parse with zod, call lib/, wrap with route() for {error:{code,message}}
   lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations, overlap check, diff, acceptProposals (epics)
   lib/runs.ts          run history, run log paging, cancel, retry, revise plan
+  lib/auth.ts          the signed session cookie, OAuth state, originOf();  proxy.ts  localhost + same-origin + session on every route
+  app/api/github/**, app/api/auth/**   the GitHub App's two-click setup and Sign in with GitHub;  app/login/  Connect or Sign in
   lib/events.ts        one LISTEN client per process fans out to SSE (publish() itself is in shared)
   components/          board.tsx (dnd-kit), ticket-drawer.tsx (dialog: tabs, Live log, Diff), home.tsx, brand.tsx (Wordmark, SELECT), theme-toggle.tsx, markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
   app/globals.css      design tokens (slate + indigo, status colors bg-running/needs/failed/ok), light and .dark; agent colors come from agent frontmatter
   e2e/                 Playwright; starts its own dev server on :3100 and a replay worker, against database kanbot_test
 apps/worker/         Node process (tsx): claims queued runs, runs agents, applies verdicts
-  src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery
+  src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery, schedules the nightly cleanup
+  src/cleanup.ts       nightlyCleanup: old run_events, worktrees left in Done, unused Kanbot-built images
   src/run.ts           claimNext (SKIP LOCKED queue), executeRun, outcomeOf, finish (verdict → transition, one tx)
   src/context.ts       the context bundle (prompt) for a run (branch context, in-flight tickets)
-  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate), startApp (QA's app on a free PORT)
+  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate), startApp (QA's app on a free PORT), projectImage (builds the devcontainer's Dockerfile), dockerRun/containerBash (project commands in the project's image)
   src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
   src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK; Kanbot's MCP server with report_result and QA's http_request), replay.ts (fixtures + record()), fence.ts (permission hook logic, appRequestUrl)
   test/                Vitest against kanbot_test with the replay runtime
@@ -28,6 +31,7 @@ packages/shared/     shared by web and worker
   src/transitions.ts   the transition table as data (afterRun);  src/verdict.ts  report_result schema
   src/agents.ts        agent file loader (server-only export "@kanbot/shared/agents")
   src/repo.ts          git(), .kanbot/project.yml loader, overlap(), branchName() (server-only "@kanbot/shared/repo")
+  src/github.ts        the GitHub App's credentials, AES-256-GCM in settings.github_app (server-only "@kanbot/shared/github")
   src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd, projectConfigOf (settings, seeded once from project.yml)
   src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
   drizzle/             generated SQL migrations (commit them)
@@ -37,13 +41,16 @@ plugins/             vendored, pinned plugins (each has a VENDORED.md); agents l
 fixtures/runs/       replay scripts: <agent>/<scenario>[.<n>].json; a ticket label `replay:<scenario>` picks one, n = the agent's nth run
 fixtures/sample-repo/ zero-dependency todo app (with .kanbot/project.yml) copied into fresh git repos by prepareSampleRepo()
 fixtures/golden/     the golden tickets for `pnpm eval:agents`
-docs/requirements.md the spec
+docs/requirements.md the spec;  docs/deploy.md  running Kanbot: A) its own WSL distro, B) a server (rootless Docker, .env, deploys, backups)
+Dockerfile           --target web / --target worker (worker adds git + docker CLI);  Caddyfile  HTTPS in front of web
+docker-compose.yml   db (local default); profile app adds migrate, web (127.0.0.1), worker (host network, Docker socket); profile public adds caddy
 ```
 
 ## Commands (repo root)
 
 ```
 docker compose up -d db     Postgres 16 on 127.0.0.1:5432 (cp .env.example .env first)
+docker compose up -d --build   with COMPOSE_PROFILES=app in .env: the whole stack (docs/deploy.md); never the public profile locally (caddy publishes 80/443)
 pnpm db:migrate             apply migrations;  pnpm db:generate --name <x>  after editing db/schema.ts
 pnpm dev                    web on http://127.0.0.1:3000 + worker (dev:web / dev:worker run one)
 pnpm typecheck | lint | test | test:e2e | build | format
@@ -52,7 +59,7 @@ pnpm eval:agents            golden tickets with REAL agents (costs money; ask fi
 
 The worker uses the real Claude Agent SDK unless `KANBOT_RUNTIME=replay` (needs `ANTHROPIC_API_KEY` in `.env`). Tests and CI only ever use replay. A real run costs money: Plan B was about $0.15–0.45 per plan in the M2 smoke test. `KANBOT_RECORD=1` saves real runs as replay scripts (see `.env.example`); `KANBOT_RUNTIME=replay pnpm eval:agents` checks the eval script for free.
 
-Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs, hotspots, bounce limit and concurrency live in the database (Settings page), seeded once from `.kanbot/project.yml` on its default branch. The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
+Project commands run in the project's image (`docker run`; from the repo's devcontainer, project.yml or Settings "Image") when it has one, else in `KANBOT_DEFAULT_IMAGE` (set by compose: project code never runs in the worker's container, which holds the Docker socket), else (`pnpm dev`) on the host toolchain; the Docker-backed worker tests skip when Docker isn't running. Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs, hotspots, bounce limit and concurrency live in the database (Settings page), seeded once from `.kanbot/project.yml` on its default branch. The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
 
 `pnpm test:e2e` can run while `pnpm dev` is running: it uses `NEXT_DIST_DIR=.next-e2e`, its own database and its own replay worker. Worker tests (`pnpm test`) share `kanbot_test` and cancel any leftover active runs there first.
 
@@ -72,4 +79,4 @@ If `pnpm dev` returns 500 with a Turbopack panic about `globals.css` / exit code
 - A known-limited shortcut gets a `shortcut: <limit>, <when to upgrade>` comment.
 - One `.env` at the repo root; `.env.example` lists every variable. Never commit secrets.
 - Dependencies: pnpm 12 enforces a minimum release age. Pick a mature version rather than adding `minimumReleaseAgeExclude` entries.
-- The app has no auth until M5 and binds to 127.0.0.1. Don't expose it.
+- Every route needs the owner's session (Sign in with GitHub, `proxy.ts`), and the app still binds to 127.0.0.1 and answers only on localhost: don't expose it (a public server is M6). Set `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY` in `.env`. e2e and browser checks never switch auth off: `e2e/global-setup.ts` stores a fake App and signs a session with test secrets (`playwright.config.ts`), and every spec runs with that cookie.

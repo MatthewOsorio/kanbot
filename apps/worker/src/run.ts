@@ -42,6 +42,10 @@ import {
   checkAfterRun,
   runChecks,
   startApp,
+  containerBash,
+  projectImage,
+  pullImage,
+  removeContainers,
   ensureWorktree,
   snapshot,
   WORKTREE_COLUMNS,
@@ -315,6 +319,17 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         await db.update(tickets).set({ worktreePath: null }).where(eq(tickets.id, ticket.id));
     if (WORKTREE_COLUMNS.has(run.columnSlug)) {
       if (!project.repoPath) throw new Error("Link a local repo to this project before building");
+      // Builds the devcontainer's image when the project has no Image of its own (§7).
+      config = {
+        ...config,
+        image: await projectImage(
+          project.repoPath,
+          project.defaultBranch,
+          config,
+          project.keyPrefix,
+        ),
+      };
+      if (config.image) await pullImage(config.image);
       wt = await ensureWorktree(
         project.repoPath,
         project.defaultBranch,
@@ -333,7 +348,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     // QA checks the criteria against the running app (§4); one that won't start is for Testy to report.
     let appError: string | undefined;
     if (run.columnSlug === "qa" && wt && config.commands.start) {
-      const started = await startApp(config.commands.start, wt.path);
+      const started = await startApp(config.commands.start, wt.path, config.image);
       if ("url" in started) app = started;
       else appError = started.error;
     }
@@ -368,6 +383,8 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         attempt,
         resumeSessionId: run.resumeSessionId ?? undefined,
         appUrl: app?.url,
+        // Project commands the agent runs go to the project's image (§7).
+        bash: config.image ? containerBash(config.image, cwd, config.commands, run.id) : undefined,
       },
       emit,
     );
@@ -401,6 +418,8 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     return stop({ state: "failed", error: (e as Error).message });
   } finally {
     await app?.stop().catch(() => {});
+    // Containers of agent commands the Bash tool's timeout or a cancel left running.
+    if (config?.image) await removeContainers(["--filter", `label=kanbot=${run.id}`]);
     if (scratch) await rm(scratch, { recursive: true, force: true });
   }
 
@@ -427,7 +446,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       outcome.touched = await changedSince(wt.path, base.trim());
       // The checks gate (§8): a branch that doesn't build, lint and test goes back before review.
       if (outcome.state === "succeeded" && config) {
-        const failed = await runChecks(config.commands, wt.path);
+        const failed = await runChecks(config.commands, wt.path, config.image);
         if (failed) {
           outcome.state = "changes_requested";
           outcome.error = `Kanbot checks: \`${failed.command}\` failed`;

@@ -1,0 +1,8 @@
+# HTTPS in front of the web app (requirements §7). Caddy gets the certificate for KANBOT_DOMAIN itself.
+{$KANBOT_DOMAIN} {
+	encode gzip
+	# SSE (/api/events) must not be buffered.
+	reverse_proxy web:3000 {
+		flush_interval -1
+	}
+}

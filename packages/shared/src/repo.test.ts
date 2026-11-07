@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { branchName, overlap } from "./repo";
+import { branchName, devcontainer, overlap } from "./repo";
+
+describe("devcontainer", () => {
+  it("reads the image from JSONC, and nothing it can't trust", () => {
+    const jsonc = `{\n  // the base\n  "image": "mcr.microsoft.com/devcontainers/go:1-1.22",\n  "features": {},\n}`;
+    expect(devcontainer(jsonc)).toEqual({ image: "mcr.microsoft.com/devcontainers/go:1-1.22" });
+    expect(devcontainer(`{"image": "--privileged"}`)).toBeUndefined(); // would be a docker flag
+    expect(devcontainer("")).toBeUndefined();
+    expect(devcontainer("{ not json")).toBeUndefined();
+  });
+
+  it("reads the Dockerfile it builds, with paths made repo-relative", () => {
+    const build = (b: object) => devcontainer(JSON.stringify({ build: b }));
+    expect(build({ dockerfile: "Dockerfile" })).toEqual({
+      dockerfile: { file: ".devcontainer/Dockerfile", context: ".devcontainer" },
+    });
+    expect(build({ dockerfile: "Dockerfile", context: ".." })).toEqual({
+      dockerfile: { file: ".devcontainer/Dockerfile", context: "." },
+    });
+    expect(devcontainer(`{"dockerFile": "../docker/dev.Dockerfile", "context": "x"}`)).toEqual({
+      dockerfile: { file: "docker/dev.Dockerfile", context: ".devcontainer/x" },
+    });
+    expect(build({ dockerfile: "Dockerfile", context: "../.." })).toBeUndefined(); // outside the repo
+    expect(build({ dockerfile: "/etc/Dockerfile" })).toBeUndefined();
+  });
+});
 
 const hotspots = [{ name: "database", paths: ["db/schema.ts", "db/migrations/**"] }];
 

@@ -1,6 +1,7 @@
 import { EVENTS_CHANNEL, type EventEnvelope } from "@kanbot/shared";
 import { createDb } from "@kanbot/shared/db";
 import { Client } from "pg";
+import { nightlyCleanup } from "./cleanup";
 import {
   afterPrevious,
   claimNext,
@@ -106,8 +107,12 @@ async function listen() {
 
 // One worker per database: crash recovery below would mark a live worker's runs interrupted.
 const lock = new Client({ connectionString: url, application_name: "kanbot-worker" });
-// shortcut: if this connection drops, the lock goes with it and a second worker could start; fine for one dev machine, revisit with deployment (M5).
-lock.on("error", (e) => console.warn("worker lock connection lost", e.message));
+// The lock goes with this connection; without it a second worker could start. Exit, and let the process
+// manager (compose's `restart`) start us again, which takes the lock anew and recovers interrupted runs.
+lock.on("error", (e) => {
+  console.error("worker lock connection lost, exiting", e.message);
+  process.exit(1);
+});
 await lock.connect();
 const { rows } = await lock.query<{ ok: boolean }>(
   "select pg_try_advisory_lock(hashtext('kanbot_worker')) as ok",
@@ -124,6 +129,14 @@ if (recovered) console.log(`marked ${recovered} run(s) interrupted after a resta
 await listen();
 setInterval(() => void pump(), 5_000);
 setInterval(() => void resume(), 60_000);
+// The nightly cleanup: a minute after start (deploys restart the worker often), then every 24 h.
+const cleanup = () =>
+  nightlyCleanup(db).then(
+    (r) => console.log(`cleanup: ${r.runEvents} run event(s), ${r.worktrees} worktree(s) removed`),
+    (e) => console.error("cleanup failed", e),
+  );
+setTimeout(() => void cleanup(), 60_000);
+setInterval(() => void cleanup(), 24 * 3600_000);
 void pump();
 console.log(`kanbot worker up (runtime: ${runtime instanceof ReplayRuntime ? "replay" : "sdk"})`);
 

@@ -151,12 +151,16 @@ export type Card = Board["tickets"][number];
 export async function getProjectSettings(id: string) {
   const [p] = await db.select().from(projects).where(eq(projects.id, id));
   if (!p) throw notFound("Project not found");
-  const { commands, testGlobs, hotspots, bounceLimit, concurrency } = await projectConfigOf(db, p);
+  const { commands, image, dockerfile, testGlobs, hotspots, bounceLimit, concurrency } =
+    await projectConfigOf(db, p);
   return {
     id,
     name: p.name,
     keyPrefix: p.keyPrefix,
     commands,
+    image: image ?? "",
+    // Read-only: what the repo's devcontainer builds when Image is empty (§7).
+    dockerfile: dockerfile?.file ?? null,
     testGlobs,
     hotspots,
     bounceLimit,
@@ -169,7 +173,7 @@ export async function patchProject(id: string, input: z.output<typeof patchProje
   if (!p) throw notFound("Project not found");
   // Seed first so a partial patch (one command) doesn't hide the rest of project.yml behind nulls.
   const cur = await projectConfigOf(db, p);
-  const { bounceLimit, concurrency, commands, testGlobs, hotspots } = input;
+  const { bounceLimit, concurrency, commands, image, testGlobs, hotspots } = input;
   await db
     .update(projects)
     .set({
@@ -177,6 +181,8 @@ export async function patchProject(id: string, input: z.output<typeof patchProje
       commands: Object.fromEntries(
         Object.entries({ ...cur.commands, ...commands }).filter(([, v]) => v),
       ),
+      // "" clears the image: commands run on the worker's own toolchain again.
+      image: image === undefined ? (cur.image ?? null) : image || null,
       testGlobs: testGlobs ?? cur.testGlobs,
       hotspots: hotspots ?? cur.hotspots,
       settings: {

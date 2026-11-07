@@ -140,6 +140,10 @@ export const patchSettingsBody = z
   .partial()
   .refine(nonEmpty, "No fields to update");
 
+/** A Docker image reference (§7). It becomes a `docker run` argument, so it may not start with "-". */
+export const IMAGE_REF = /^[a-z0-9][\w./:@-]*$/i;
+const IMAGE_MESSAGE = "Must be a Docker image name, e.g. node:22-bookworm";
+
 // The permission hook refuses chained commands, so a project command is one plain command (§8).
 const plainCommand = z
   .string()
@@ -162,6 +166,12 @@ export const patchProjectBody = z
         start: plainCommand,
       })
       .partial(),
+    // "" clears it.
+    image: z
+      .string()
+      .trim()
+      .max(300)
+      .refine((s) => !s || IMAGE_REF.test(s), IMAGE_MESSAGE),
     testGlobs: z.array(z.string().trim().min(1).max(300)).max(100),
     hotspots: z
       .array(

@@ -60,6 +60,8 @@ export const projects = pgTable("projects", {
   commands: jsonb("commands").$type<ProjectConfig["commands"]>(),
   testGlobs: text("test_globs").array(),
   hotspots: jsonb("hotspots").$type<ProjectConfig["hotspots"]>(),
+  image: text("image"),
+  dockerfile: jsonb("dockerfile").$type<ProjectConfig["dockerfile"]>(),
   settings: jsonb("settings").$type<{ bounceLimit?: number; concurrency?: number }>(),
   ticketSeq: integer("ticket_seq").notNull().default(0),
   createdAt: createdAt(),
@@ -269,6 +271,8 @@ export const settings = pgTable(
     dailyBudgetUsd: numeric("daily_budget_usd", { precision: 10, scale: 2, mode: "number" })
       .notNull()
       .default(5),
+    // The GitHub App (§10), encrypted JSON (github.ts); null until the two-click setup.
+    githubApp: text("github_app"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [check("settings_single_row", sql`${t.id} = 1`)],

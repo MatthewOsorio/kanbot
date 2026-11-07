@@ -1,9 +1,10 @@
 // Server-only: git, the project's .kanbot/project.yml, and the overlap check (requirements §9, §14).
 import { execFile } from "node:child_process";
-import { matchesGlob } from "node:path";
+import { matchesGlob, posix } from "node:path";
 import { promisify } from "node:util";
 import { parse } from "yaml";
 import { z } from "zod";
+import { IMAGE_REF } from "./schemas";
 
 const run = promisify(execFile);
 
@@ -45,6 +46,10 @@ export const projectConfig = z.object({
       start: z.string().trim().min(1).optional(),
     })
     .default({}),
+  /** The container image project commands run in (§7); none = the worker's own toolchain. */
+  image: z.string().trim().regex(IMAGE_REF).optional(),
+  /** The Dockerfile the repo's devcontainer builds (repo-relative); used when `image` is empty (§7). */
+  dockerfile: z.object({ file: z.string().min(1), context: z.string().min(1) }).optional(),
   testGlobs: z.array(z.string().min(1)).default([]),
   hotspots: z
     .array(z.object({ name: z.string().min(1), paths: z.array(z.string().min(1)) }))
@@ -57,13 +62,58 @@ export type ProjectConfig = z.output<typeof projectConfig>;
  * widen its own allowlist; the change only counts once the owner merges it.
  */
 export async function loadProjectConfig(repoPath: string, defaultBranch: string) {
-  let text: string;
+  const show = (file: string) =>
+    git(repoPath, ["show", `${defaultBranch}:${file}`]).catch(() => "");
+  const [yml, dev] = await Promise.all([
+    show(".kanbot/project.yml"),
+    show(".devcontainer/devcontainer.json"),
+  ]);
+  const c = projectConfig.parse(parse(yml) ?? {});
+  // The repo's devcontainer comes first (its image, or the Dockerfile it builds), else project.yml's `image:` (§7).
+  const d = devcontainer(dev);
+  return d ? { ...c, image: undefined, ...d } : c;
+}
+
+/** A repo-relative path from one relative to `.devcontainer/`; null if it leaves the repo. */
+function fromDevcontainer(p: string) {
+  if (posix.isAbsolute(p) || /^[A-Za-z]:|^\\/.test(p)) return null;
+  const rel = posix.normalize(posix.join(".devcontainer", p.replaceAll("\\", "/")));
+  return rel === ".." || rel.startsWith("../") || posix.isAbsolute(rel) ? null : rel;
+}
+
+/**
+ * What a devcontainer.json says to run in: an image it names, or a Dockerfile it builds (paths
+ * repo-relative). JSONC: whole-line `//` comments and trailing commas are dropped.
+ * shortcut: block comments, `features`, `postCreateCommand` and docker-compose devcontainers aren't read; set the image in Settings for those.
+ */
+export function devcontainer(
+  text: string,
+): { image: string } | { dockerfile: { file: string; context: string } } | undefined {
+  const json = text
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n")
+    .replace(/,(\s*[}\]])/g, "$1");
+  let d: {
+    image?: unknown;
+    dockerFile?: unknown;
+    context?: unknown;
+    build?: { dockerfile?: unknown; context?: unknown };
+  };
   try {
-    text = await git(repoPath, ["show", `${defaultBranch}:.kanbot/project.yml`]);
+    d = JSON.parse(json) ?? {};
   } catch {
-    return projectConfig.parse({});
+    return undefined;
   }
-  return projectConfig.parse(parse(text) ?? {});
+  if (typeof d.image === "string" && IMAGE_REF.test(d.image.trim()))
+    return { image: d.image.trim() };
+  // `dockerFile` and `context` at the top level are the older form.
+  const file = d.build?.dockerfile ?? d.dockerFile;
+  const ctx = d.build?.context ?? d.context;
+  if (typeof file !== "string") return undefined;
+  const context = typeof ctx === "string" ? ctx : ".";
+  const [f, c] = [fromDevcontainer(file), fromDevcontainer(context)];
+  return f && c ? { dockerfile: { file: f, context: c } } : undefined;
 }
 
 /** Does one touch entry (path or glob) cover another? Folder entries end with "/". */
