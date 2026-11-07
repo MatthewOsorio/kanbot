@@ -183,6 +183,10 @@ describe("expandTools", () => {
 
 describe("http_request reaches only the QA app", () => {
   const base = "http://127.0.0.1:4123";
+  it("isn't refused as a file path by the permission hook", () => {
+    const fence = { cwd: process.cwd(), tools: ["mcp__kanbot__http_request"] };
+    expect(checkToolCall("mcp__kanbot__http_request", { path: "/api/todos" }, fence)).toBeNull();
+  });
   it("allows paths on the app", () => {
     expect(String(appRequestUrl(base, "/api/todos?done=1"))).toBe(`${base}/api/todos?done=1`);
   });
