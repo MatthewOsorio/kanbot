@@ -15,6 +15,7 @@ import {
   moveToColumnEnd,
   projectConfigOf,
   projects,
+  runEvents,
   runs,
   startColumnAgent,
   ticketLinks,
@@ -25,6 +26,7 @@ import { git, loadProjectConfig } from "@kanbot/shared/repo";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
+import { nightlyCleanup } from "../src/cleanup";
 import { claimNext, executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
 import { checkAfterRun, ensureWorktree, projectImage, snapshot } from "../src/worktree";
@@ -597,6 +599,50 @@ describe.skipIf(!hasDocker)("project commands in the project's image (M5, §7)",
       /Building the devcontainer image kanbot-.* failed:[\s\S]*exit 7/,
     );
   }, 300_000);
+});
+
+describe("nightly cleanup (M5)", () => {
+  it("prunes old run logs except each ticket's last run, and worktrees left in Done", async () => {
+    const { project, ticket, repo, col } = await setup("default");
+    const old = new Date(Date.now() - 100 * 24 * 3600_000);
+    const [first, last] = await db
+      .insert(runs)
+      .values(
+        [0, 1].map((i) => ({
+          ticketId: ticket.id,
+          agentSlug: "plan-b",
+          columnSlug: "planning",
+          state: "succeeded" as const,
+          createdAt: new Date(old.getTime() + i * 1000),
+        })),
+      )
+      .returning();
+    await db
+      .insert(runEvents)
+      .values(
+        [first!, last!].map((r) => ({ runId: r.id, seq: 1, type: "system" as const, payload: {} })),
+      );
+    const wt = await ensureWorktree(
+      repo,
+      "main",
+      { key: `${project.keyPrefix}-1`, title: ticket.title, branchName: null },
+      await projectConfigOf(db, project),
+    );
+    await db
+      .update(tickets)
+      .set({ columnId: col("done").id, worktreePath: wt.path, branchName: wt.branch })
+      .where(eq(tickets.id, ticket.id));
+
+    await nightlyCleanup(db);
+    const left = await db
+      .select({ runId: runEvents.runId })
+      .from(runEvents)
+      .where(inArray(runEvents.runId, [first!.id, last!.id]));
+    expect(left.map((e) => e.runId)).toEqual([last!.id]);
+    expect(existsSync(wt.path)).toBe(false);
+    expect((await ticketNow(ticket.id)).worktreePath).toBeNull();
+    expect(await git(repo, ["branch", "--list", wt.branch])).toContain(wt.branch); // branch kept
+  });
 });
 
 describe("post-run checks", () => {

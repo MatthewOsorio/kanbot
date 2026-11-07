@@ -1,19 +1,86 @@
-# M1 runs locally: only Postgres. web, worker and caddy are added for deployment in M5.
+# Locally (M1–M4.5): `docker compose up -d db`, only Postgres on 127.0.0.1.
+# On the server (docs/deploy.md): `docker compose --profile app up -d --build` adds migrate, web, worker and
+# caddy (requirements §7). Everything runs on the host's rootless Docker daemon.
 services:
   db:
     image: postgres:16
     environment:
       POSTGRES_USER: kanbot
-      POSTGRES_PASSWORD: kanbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kanbot}
       POSTGRES_DB: kanbot
     ports:
-      - "127.0.0.1:5432:5432"
+      # The worker uses host networking (below), so it reaches Postgres here. Never published publicly.
+      - "127.0.0.1:${KANBOT_DB_PORT:-5432}:5432"
     volumes:
+      # Named volumes live in rootless Docker's data-root, on the block-storage volume (docs/deploy.md).
       - db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kanbot"]
       interval: 2s
       retries: 30
+    restart: unless-stopped
+
+  migrate:
+    profiles: [app]
+    build: { context: ., target: web }
+    image: kanbot-web
+    working_dir: /app/packages/shared
+    command: ["node_modules/.bin/drizzle-kit", "migrate"]
+    environment:
+      DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD:-kanbot}@db:5432/kanbot
+    depends_on:
+      db: { condition: service_healthy }
+
+  web:
+    profiles: [app]
+    image: kanbot-web
+    environment:
+      DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD:-kanbot}@db:5432/kanbot
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  worker:
+    profiles: [app]
+    build: { context: ., target: worker }
+    # Only what the worker needs, never the whole .env: anything here reaches agents' host shells
+    # (the worker strips DATABASE_URL and the API key from those itself).
+    environment:
+      DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD:-kanbot}@127.0.0.1:${KANBOT_DB_PORT:-5432}/kanbot
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      KANBOT_RUNTIME: ${KANBOT_RUNTIME:-sdk}
+    # Host networking: the QA app's container publishes its port on the host's 127.0.0.1 (§7), and the
+    # worker must reach it there.
+    network_mode: host
+    # Root in the container is the unprivileged `kanbot` user on the host under rootless Docker, so the
+    # socket, the repos and the files project containers write all have one owner (docs/deploy.md).
+    user: "0:0"
+    volumes:
+      # The rootless daemon's socket: the worker starts project containers on the host's Docker.
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      # Repos and worktrees at the same path as on the host, so `docker run -v <worktree>` resolves.
+      - ${KANBOT_REPOS_DIR:-/srv/kanbot/repos}:${KANBOT_REPOS_DIR:-/srv/kanbot/repos}
+      # Agent sessions (~/.claude) survive restarts, so Resume and bounce-backs can continue them.
+      - worker-home:/root
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  caddy:
+    profiles: [app]
+    image: caddy:2
+    environment:
+      KANBOT_DOMAIN: ${KANBOT_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [web]
+    restart: unless-stopped
 
 volumes:
   db-data:
+  worker-home:
+  caddy-data:

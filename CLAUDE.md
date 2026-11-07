@@ -16,7 +16,8 @@ apps/web/            Next.js 16 App Router: board UI + REST API + SSE
   app/globals.css      design tokens (slate + indigo, status colors bg-running/needs/failed/ok), light and .dark; agent colors come from agent frontmatter
   e2e/                 Playwright; starts its own dev server on :3100 and a replay worker, against database kanbot_test
 apps/worker/         Node process (tsx): claims queued runs, runs agents, applies verdicts
-  src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery
+  src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery, schedules the nightly cleanup
+  src/cleanup.ts       nightlyCleanup: old run_events, worktrees left in Done, unused Kanbot-built images
   src/run.ts           claimNext (SKIP LOCKED queue), executeRun, outcomeOf, finish (verdict → transition, one tx)
   src/context.ts       the context bundle (prompt) for a run (branch context, in-flight tickets)
   src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate), startApp (QA's app on a free PORT), projectImage (builds the devcontainer's Dockerfile), dockerRun/containerBash (project commands in the project's image)
@@ -37,13 +38,16 @@ plugins/             vendored, pinned plugins (each has a VENDORED.md); agents l
 fixtures/runs/       replay scripts: <agent>/<scenario>[.<n>].json; a ticket label `replay:<scenario>` picks one, n = the agent's nth run
 fixtures/sample-repo/ zero-dependency todo app (with .kanbot/project.yml) copied into fresh git repos by prepareSampleRepo()
 fixtures/golden/     the golden tickets for `pnpm eval:agents`
-docs/requirements.md the spec
+docs/requirements.md the spec;  docs/deploy.md  Droplet setup, step by step (rootless Docker, firewall, .env, deploys, backups)
+Dockerfile           --target web / --target worker (worker adds git + docker CLI);  Caddyfile  HTTPS in front of web
+docker-compose.yml   db (local default); --profile app adds migrate, web, worker (host network, Docker socket), caddy
 ```
 
 ## Commands (repo root)
 
 ```
 docker compose up -d db     Postgres 16 on 127.0.0.1:5432 (cp .env.example .env first)
+docker compose --profile app up -d --build   the whole server stack (docs/deploy.md); never locally with caddy (it publishes 80/443)
 pnpm db:migrate             apply migrations;  pnpm db:generate --name <x>  after editing db/schema.ts
 pnpm dev                    web on http://127.0.0.1:3000 + worker (dev:web / dev:worker run one)
 pnpm typecheck | lint | test | test:e2e | build | format

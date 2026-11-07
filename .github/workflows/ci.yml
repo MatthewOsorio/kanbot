@@ -37,3 +37,11 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm test:e2e
+
+  # The deploy images (Dockerfile, docker-compose.yml) still build, so a broken one never reaches the server.
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose --profile app build

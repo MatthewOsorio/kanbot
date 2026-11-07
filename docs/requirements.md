@@ -14,7 +14,7 @@ Last updated 2026-11-06 (QA rework and UI revamp after M4.5).
     - Testy McTestface (QA), who checks each criterion against the app the worker starts, with tests where the project has a test setup.
   - Bounce-backs and the bounce limit, the overlap check, stall detection, Ponytail, and the golden-ticket eval.
   - Unblocking (M4): Blocked with Rubber Duckworth, Resume with an answer, session resume on bounce-backs, in-app notifications; the daily cap, Pause all and automatic resume after an outage; Archie's retro and worktree removal at Done; ticket links; project Settings; the cost total on each ticket; CI.
-  - M5 so far (in progress, `docs/m5-report.md`): project commands, the QA app and agents' project commands run in the project's own container image, taken from the repo's devcontainer (named, or built from its Dockerfile) or `project.yml`, or set in Settings (§7).
+  - M5 so far (in progress, `docs/m5-report.md`): project commands, the QA app and agents' project commands run in the project's own container image, taken from the repo's devcontainer (named, or built from its Dockerfile) or `project.yml`, or set in Settings (§7); the deploy files (compose services, Dockerfile, Caddy, deploy workflow, `docs/deploy.md`) and the nightly cleanup, not yet on a real server.
   - Quality gates and epics (M4.5): the worker's checks gate (build, lint and test after every build run, before Code Review); Nancy's security pass with Cloudflare's security-audit skill; epics, where Plan B splits a ticket or a technical doc into proposed tickets the owner accepts into Backlog.
   - The UI revamp (after M4.5): light and dark themes with a toggle, slate and indigo design tokens, Plus Jakarta Sans and JetBrains Mono, and agent colors: each agent file names a color, which marks its column, its cards and its glyph avatar. The ticket drawer is a centered dialog, and its artifacts and diff files name the agent that made them (`runs.files_changed`).
 - **How it runs:** locally only, bound to 127.0.0.1, with no login. Tested on Windows only. Project commands, image, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
@@ -314,7 +314,7 @@ The web app and worker never call each other directly: the web app writes jobs t
 Production runs on one DigitalOcean Droplet with Docker Compose, reachable at an HTTPS subdomain, so GitHub can send webhooks straight to it.
 
 - **Droplet.** Ubuntu LTS, at least 2 vCPUs and 4 GB RAM; 8 GB is safer with two agents running builds and tests at once. A Block Storage volume holds Postgres data and cloned repos so they survive a Droplet rebuild.
-- **Containers.** `caddy` (reverse proxy with automatic HTTPS), `web`, `worker`, `db` (Postgres 16). DigitalOcean Managed PostgreSQL can replace `db` later.
+- **Containers.** `caddy` (reverse proxy with automatic HTTPS), `web`, `worker`, `db` (Postgres 16), and a one-shot `migrate` that applies migrations before web and worker start. They are all in `docker-compose.yml` under the `app` profile, so local development still starts only `db`. The images come from the root `Dockerfile` (`--target web` and `--target worker`; the worker adds git and the docker CLI). The worker uses host networking to reach the QA apps that project containers publish on 127.0.0.1. It gets the Docker socket and the repos folder (mounted at the same path), and only the environment variables it needs, never the whole `.env`. DigitalOcean Managed PostgreSQL can replace `db` later. Step-by-step setup is in `docs/deploy.md`.
 - **Domain.** An A record (e.g. `kanbot.<your-domain>`) points at the Droplet; Caddy obtains the TLS certificate.
 - **Network.** A Cloud Firewall opens 80 and 443; SSH (22) only from the owner's IP with key auth. Postgres is never exposed.
 - **Repos.** Projects are cloned from GitHub into `/srv/kanbot/repos/<project>` with the GitHub App token; worktrees live beside them.
@@ -330,9 +330,10 @@ Production runs on one DigitalOcean Droplet with Docker Compose, reachable at an
   - Agents' Bash calls go through the permission hook as written; when one is a project command (with any arguments), the hook rewrites it into that `docker run`, labelled with the run's id, and the worker removes any such container still running when the run ends. git and other commands stay on the host. Git is not available inside the container (only the worktree is mounted, not the repository's `.git`).
   - Docker runs **rootless** on the server (decided 2026-11-06), and the worker uses the plain `docker` CLI against that daemon's socket: the daemon itself has no root, so no socket proxy is needed. Containers are not network-limited (Later, with per-run containers).
   - The QA app (section 4) runs the same way, publishing its port on 127.0.0.1 only. The image is pulled before the app's 60 seconds start.
-- **Isolation.** The worker runs as a non-root `kanbot` user. Because the server is public and agents run `npm install` and test scripts, per-run containers (section 14) are recommended before pointing agents at repos with untrusted dependencies. Running project commands in the project's image (above) is the first half of that; network limits are the second (Later).
-- **Backups.** Nightly `pg_dump` to DigitalOcean Spaces, plus Droplet backups if enabled.
-- **Deploys.** A GitHub Actions workflow in the Kanbot repo builds images and redeploys over SSH on pushes to main.
+- **Isolation.** Nothing runs as the host's root. Docker is rootless and runs as the `kanbot` user. The worker runs as root inside its container, which under rootless Docker *is* that unprivileged user on the host, so the socket, the repos and the files project containers write share one owner. Because the server is public and agents run `npm install` and test scripts, per-run containers (section 14) are recommended before pointing agents at repos with untrusted dependencies. Running project commands in the project's image (above) is the first half of that; network limits are the second (Later).
+- **Backups.** Nightly `pg_dump` to DigitalOcean Spaces from a cron job on the host (`docs/deploy.md`), plus Droplet backups if enabled.
+- **Nightly cleanup.** The worker prunes run logs past 90 days (each ticket's last run kept), worktrees that Done tickets still hold, and Kanbot-built project images nothing has used for a week. It runs a minute after start, then every 24 hours (`apps/worker/src/cleanup.ts`). The shared package cache volume is cleared by hand if it grows.
+- **Deploys.** `.github/workflows/deploy.yml` runs after CI passes on main. It connects to the Droplet over SSH, checks out that commit and runs `docker compose --profile app up -d --build`, so images are built on the server and no registry is needed. It stays off until the repo variable `KANBOT_DEPLOY` is `on`. CI also builds the images, so a broken Dockerfile fails there first. The worker exits if it loses its single-worker lock, and compose restarts it.
 
 ## 8. Agent orchestration and runtime
 
@@ -838,7 +839,8 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Item | Spec | Notes |
 | --- | --- | --- |
 | `blockWritesOutsideWorkingDirectories` | §7, §14 | Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
-| Compose `web`, `worker`, `caddy` services and Dockerfiles; DigitalOcean deployment and nightly disk cleanup | §7 | Compose has only `db`, bound to 127.0.0.1. |
+| The real deployment on the Droplet | §7 | The files, `docs/deploy.md` and the deploy workflow exist and were checked locally (without Caddy). Waits for the owner's Droplet and domain, and must not be exposed before Sign in with GitHub. |
+| Disk over 90% full: no new runs and a banner | §8 failure handling | The nightly cleanup exists; the guard itself was never built (found 2026-11-06). |
 | Sign in with GitHub; auth on every route | §12 | No auth yet. The dev server binds to 127.0.0.1, and `apps/web/proxy.ts` refuses any Host other than localhost (DNS rebinding) and cross-origin writes (CSRF). |
 | GitHub App two-click setup, onboarding walkthrough with command detection and branch-protection check | §10, FR-3, FR-45 | |
 | `projects`: github\_owner, github\_repo, baseline; clone and default-branch validation | FR-1, FR-3 | Need the GitHub App and onboarding. Projects are name, key prefix, default branch and an optional local `repo_path`. |
@@ -881,7 +883,7 @@ Nearly everything is decided; Claude Code builds to the Decided list below unles
 - **Budget defaults:** start low at $3 per ticket and $5 per day, plus the per-agent run budgets in each agent file; raise them once real ticket costs are known.
 - **QA's job:** check that the branch meets its acceptance criteria, with evidence from the running app, tests or code; regressions are the checks gate's and CI's (decided 2026-11-05, section 4).
 - **Project toolchains:** each project's commands run in its own container image from M5 (section 7); Kanbot never installs language toolchains (decided 2026-11-05).
-- **Container isolation (the agent's whole run, network limits):** stays Later. Kanbot is single-user and works only on the owner's own repos with dependencies the owner chose; the MVP relies on the non-root worker, scrubbed agent environments, the firewall and login. Revisit before pointing Kanbot at repos with unfamiliar dependencies or opening it to other users.
+- **Container isolation (the agent's whole run, network limits):** stays Later. Kanbot is single-user and works only on the owner's own repos with dependencies the owner chose; the MVP relies on rootless Docker, scrubbed agent environments, the firewall and login. Revisit before pointing Kanbot at repos with unfamiliar dependencies or opening it to other users.
 - **GitHub identity:** a GitHub App created through the two-click setup (section 10). The same app provides Sign in with GitHub.
 - **Approval gates:** only plan, ship and merge wait for the owner; manual moves behave as in section 3.
 - **Models:** per-agent defaults in section 4, tuned once cost data comes in.
