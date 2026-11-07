@@ -8,3 +8,4 @@ evals/results/
 test-results/
 playwright-report/
 apps/web/e2e/.auth.json
+.kanbot-repos/

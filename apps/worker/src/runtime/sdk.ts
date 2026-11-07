@@ -11,11 +11,10 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import { verdictShape } from "@kanbot/shared";
-import { appRequestUrl, checkToolCall } from "./fence";
+import { appRequestUrl, checkToolCall, HTTP_TOOL } from "./fence";
 import type { AgentRuntime, ApiError, RuntimeEvent, RuntimeResult } from "./types";
 
 const REPORT_TOOL = "mcp__kanbot__report_result";
-const HTTP_TOOL = "mcp__kanbot__http_request";
 const MAX_TEXT = 4_000; // per stored event; the full transcript stays in the SDK session
 const MAX_BODY = 20_000; // response chars the agent sees
 

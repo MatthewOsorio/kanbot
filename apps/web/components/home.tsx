@@ -11,6 +11,21 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/client";
 
 type Project = { id: string; name: string; keyPrefix: string };
+type Repo = { owner: string; name: string; taken: boolean };
+
+function KeyPrefix() {
+  return (
+    <label className="block space-y-1.5">
+      <span className="text-sm font-medium">Key prefix (e.g. KB)</span>
+      <Input
+        name="keyPrefix"
+        required
+        pattern="[A-Za-z][A-Za-z0-9]{1,9}"
+        className="font-mono uppercase"
+      />
+    </label>
+  );
+}
 
 /** Home: projects and the new-project form. `agents` are the shipped agents (app/page.tsx reads their files);
  * `installUrl` is the GitHub App's install page, where the owner adds repos later (§10). */
@@ -23,10 +38,15 @@ export function Home({
 }) {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [repos, setRepos] = useState<Repo[] | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     api<Project[]>("/api/projects").then(setProjects, (e: Error) => setError(e.message));
+    api<Repo[]>("/api/github/repos").then(
+      setRepos,
+      (e: Error) => (setRepos([]), setError(e.message)),
+    );
   }, []);
 
   async function create(form: FormData) {
@@ -41,6 +61,25 @@ export function Home({
         },
       });
       router.push(`/p/${p.id}`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  /** A GitHub repo: the project is created and onboarding (§10) continues on its setup page. */
+  async function createFromGitHub(form: FormData) {
+    setError("");
+    const [githubOwner, githubRepo] = String(form.get("repo")).split("/");
+    try {
+      const p = await api<Project>("/api/projects", {
+        body: {
+          name: githubRepo,
+          keyPrefix: String(form.get("keyPrefix")).toUpperCase(),
+          githubOwner,
+          githubRepo,
+        },
+      });
+      router.push(`/p/${p.id}/setup`);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -122,8 +161,7 @@ export function Home({
           </section>
         </div>
 
-        <form
-          action={create}
+        <section
           className="h-fit space-y-4 rounded-xl border bg-card p-5 shadow-xs"
           aria-labelledby="new-h"
         >
@@ -131,39 +169,69 @@ export function Home({
             <FolderGit2 aria-hidden className="size-4 text-primary" />
             New project
           </h2>
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">Name</span>
-            <Input name="name" required maxLength={100} />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">Key prefix (e.g. KB)</span>
-            <Input
-              name="keyPrefix"
-              required
-              pattern="[A-Za-z][A-Za-z0-9]{1,9}"
-              className="font-mono uppercase"
-            />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">Default branch</span>
-            <Input name="defaultBranch" placeholder="main" className="font-mono" />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">Local repo path (optional)</span>
-            <Input name="repoPath" placeholder="/home/you/code/my-app" className="font-mono" />
-            <span className="block text-xs text-muted-foreground">
-              Plan B reads this checkout. Without one it plans from the ticket alone.
-            </span>
-          </label>
+          <form action={createFromGitHub} aria-label="From GitHub" className="space-y-4">
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">GitHub repo</span>
+              <select
+                name="repo"
+                required
+                className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                disabled={!repos?.length}
+              >
+                {repos === null && <option>Loading…</option>}
+                {repos?.length === 0 && <option>No repos yet: add some on GitHub</option>}
+                {repos?.map((r) => (
+                  <option
+                    key={`${r.owner}/${r.name}`}
+                    value={`${r.owner}/${r.name}`}
+                    disabled={r.taken}
+                  >
+                    {r.owner}/{r.name}
+                    {r.taken ? " (already a project)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <KeyPrefix />
+            <Button type="submit" className="w-full" disabled={!repos?.some((r) => !r.taken)}>
+              Set up project
+            </Button>
+          </form>
+          <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">
+              Use a local folder instead
+            </summary>
+            <form action={create} aria-label="Local folder" className="mt-3 space-y-4">
+              <p className="text-xs text-muted-foreground">
+                No GitHub: agents plan, build, review and test, but nothing ships as a pull request.
+              </p>
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium">Name</span>
+                <Input name="name" required maxLength={100} />
+              </label>
+              <KeyPrefix />
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium">Default branch</span>
+                <Input name="defaultBranch" placeholder="main" className="font-mono" />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium">Local repo path (optional)</span>
+                <Input name="repoPath" placeholder="/home/you/code/my-app" className="font-mono" />
+                <span className="block text-xs text-muted-foreground">
+                  Plan B reads this checkout. Without one it plans from the ticket alone.
+                </span>
+              </label>
+              <Button type="submit" variant="outline" className="w-full">
+                Create project
+              </Button>
+            </form>
+          </details>
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           )}
-          <Button type="submit" className="w-full">
-            Create project
-          </Button>
-        </form>
+        </section>
       </main>
     </div>
   );

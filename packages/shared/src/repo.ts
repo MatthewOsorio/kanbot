@@ -9,12 +9,16 @@ import { IMAGE_REF } from "./schemas";
 const run = promisify(execFile);
 
 /** Runs git without a shell (arguments are never interpreted). Throws with git's stderr on failure. */
-export async function git(cwd: string, args: string[]): Promise<string> {
+export async function git(
+  cwd: string,
+  args: string[],
+  env: Record<string, string> = {},
+): Promise<string> {
   try {
     const { stdout } = await run("git", args, {
       cwd,
       maxBuffer: 50 * 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env },
       windowsHide: true,
     });
     return stdout;

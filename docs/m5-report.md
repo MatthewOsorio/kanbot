@@ -1,6 +1,6 @@
 # M5 report: ship and deploy
 
-Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06.
+Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is built on `m5-onboarding` (2026-11-07), not yet committed, waiting for the owner's review and the real run on NetGPT.
 
 **Done when:** a ticket goes from Backlog to a human-approved, merged PR.
 
@@ -20,7 +20,7 @@ Status: **in progress (living document, updated as each phase lands).** Branch `
 | 2 | Dockerfiles, compose `web`/`worker`/`caddy`, deploy workflow, nightly cleanup, `docs/deploy.md` | **done locally** (2026-11-06) |
 | 2b | Run Kanbot in WSL; a default image so project code never runs in the worker's container | **done** (2026-11-06); the owner's own `kanbot` distro is set up from `docs/deploy.md` |
 | 3 | GitHub App two-click setup, Sign in with GitHub, auth on every route | **done** (2026-11-07) |
-| 4 | Onboarding (§10 steps 1–7 and 10) | next |
+| 4 | Onboarding (§10 steps 1–7 and 10) | **done** (2026-11-07), checked for real on NetGPT |
 | 5 | Captain Ship-It, CI status, PR Review gate, merge detection, rebase before runs | not started |
 | 6 | Leftovers: `blockWritesOutsideWorkingDirectories`, SDK `sandbox`, SSE `Last-Event-ID`, the disk-over-90% guard | not started |
 
@@ -46,9 +46,39 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   The owner also asked which repos the App is for: the ones Kanbot manages, picked at install time, not Kanbot's own repo.
 - **2026-11-07.** Phase 3 built: the two-click setup, Sign in with GitHub, and a session required on every route. Tests, e2e and the browser check pass. The browser check found a bug: Next reports `localhost` as the origin of a request made to `127.0.0.1`, so GitHub would have sent the owner back to a host without their state cookie. URLs and cookies now use the browser's own Host. The owner then did the real round trip; it worked after one fix (below). Next: phase 4.
 - **2026-11-07.** Real round trip done: the App `kanbot-6527ff` is created and installed on `MatthewOsorio/NetGPT`, and the owner signed in. GitHub refused the first manifest because its (inactive) webhook URL was localhost, so the manifest no longer has a webhook.
+- **2026-11-07.** Phases 1 to 3 merged into `main` as PR #10 (merge `62929d7`) after CI passed (checks and image build). The deploy workflow stays off (`KANBOT_DEPLOY` is unset). Next: phase 4, onboarding, with NetGPT as the first repo.
+- **2026-11-07.** Phase 4 planned on branch `m5-onboarding`. NetGPT, read-only through `gh`: public, Python, no dependency file, no tests, no CI, `main` unprotected.
+
+  Owner decisions:
+  - **Baseline:** a command that already fails on the default branch is skipped by the checks gate, and agents are told it was already failing.
+  - **Local-folder projects stay**, tucked under "Use a local folder instead"; the API keeps `repoPath` for tests and the eval.
+  - **Branch protection binds admins too** (`enforce_admins`).
+- **2026-11-07.** Phase 4 built: the repo picker, clone, command detection, baseline, the starter CI PR, branch protection, and agents held off until setup is done. Tests, e2e and the browser check pass. The browser check found one bug: cloning into a folder that already holds Kanbot's clone (a retry, or a key reused after deleting a project) failed, because git won't fetch into the checked-out `main`. It now fetches and resets instead. Next: the real run on NetGPT with the owner (it opens a PR and changes `main`'s protection on their repo, so those clicks are theirs), then phase 5.
+- **2026-11-07.** Real run on NetGPT, steps 1–4, through the UI on `localhost:3000` against the real GitHub App (worker on the replay runtime, so no agent could spend). The repo picker listed `MatthewOsorio/NetGPT`. The clone went to `.kanbot-repos/ng`, and its `.git/config` holds no token. Detection proposed exactly what was expected: build `python -m compileall -q .`, no install, test or lint, image `python:3.12-bookworm`, Python test globs. The first baseline failed because Docker Desktop could not unpack the image ("failed to Lchown … no such file or directory", a containerd error on Docker's side). The step showed the error, and **Try again** pulled the image and passed the build, with no container left behind and the throwaway worktree removed. The CI step saw, through the real API, that NetGPT has no workflows. Stopped before **Open CI pull request**: it commits to the owner's repo, and Claude Code's permission check left that click to the owner.
+- **2026-11-07.** The owner finished steps 6–7 in the UI, and both are checked on GitHub. PR #1 "Add CI for Kanbot" (branch `kanbot/onboarding-ci`) was opened by the App, and Kanbot CI passed on the push and on the PR; the PR is merged. `main`'s protection is exactly §10's rules: 1 approving review, required check `ci` (strict), `enforce_admins` on, no force-push or deletion. The project is Ready. The owner then moved a ticket (NG-1) to Planning, and its "plan" was about Kanbot: the worker was still on the replay runtime from the test, which plays a recorded sample-repo plan (its $0.12 is the recording's, nothing was spent). The worker now runs on the SDK runtime. **Phase 4 is done on a real repo.** Next: a real Plan B run on NG-1 (paid, the owner's click), then phase 5.
+- **2026-11-07.** The owner's ticket NG-2 ("a very simple UI") ran with real agents: Plan B ($0.18), Sir Codes-a-Lot ($0.20), Nancy ($0.09) and Testy ($0.06). Testy passed it on a code read alone. NetGPT's only command was the build, so Testy had no test command and no app to start. Sir Codes-a-Lot couldn't run `python -m unittest` for the same reason: it isn't a project command. NG-2 then waited in QA as "Approve · needs you", with no button to approve it; approving meant dragging it to Ship. **Owner's decisions:** QA must be able to run something (a test command with test globs, or a start command), and "Approve and ship" goes on the ticket now. Built:
+  - Onboarding's commands step won't move on without such a command.
+  - A move into QA without one is refused (409 `qa_setup`), and Code Review's success holds the ticket in Code Review, flagged "Needs you", with the reason. No Duckworth run is spent on a settings problem.
+  - Testy's code-read fallback is gone: behavior passes only on evidence from the app or a test, else `needs_input`.
+  - The drawer has an **Approve and ship** button, which moves the ticket to Ship. It waits there until Captain Ship-It (phase 5).
+
+  The owner then tightened it: **QA needs a start command**, because QA's job is to run the app. A test setup alone no longer counts. The setup page marks Start as "Not found in the repo. Required" when detection didn't find one. For NetGPT, a tkinter app, this means QA can't pass until desktop apps can be driven (a virtual display, M6 QA row) or NetGPT gets a web UI.
+
+  Testy's prompt changed, so `pnpm eval:agents` is due before merging (paid; owner's OK). For NetGPT, Install `pip install --user pyshark openai` and Test `python -m unittest` in Settings still give the checks gate and Testy's tests something to run. Commands run in `python:3.12-bookworm`, and the packages land in the shared cache volume.
+- **2026-11-07.** Owner asked that onboarding account for projects needing env vars (API keys, connection strings). **Owner's decisions:** every project command gets them, the agents' own project-command calls included; and CI reads them from the repo's Actions secrets, which the owner adds on GitHub (Kanbot doesn't write secrets to GitHub). Built: stored encrypted and write-only; names proposed from `.env.example`; passed to every project command, through an env file in containers; redacted from what Kanbot stores; listed in the starter workflow. Tests, e2e and the browser check pass.
+- **2026-11-07.** `pnpm eval:agents` for Testy's prompt change (owner's OK). The first run failed: `feature` and `security` were blocked after QA. Every `http_request` call had been refused with "/api/todos is outside this run's working directory". The permission hook checked the tool's `path` field as a file path. **This bug predates this branch.** Testy's code-read fallback had hidden it, and with the fallback gone Testy rightly reported `needs_input`. Fixed in `fence.ts`: the HTTP tool skips the file-path checks, since `appRequestUrl` already keeps it on the app. A fence test was added. The second run passed: all 5 golden tickets reached QA and ended in Done, within the baseline's bounces and cost (about $2.57). Testy now checks API criteria against the live app. Page criteria are still checked by reading code or by stub-DOM tests, because there's no browser (the Playwright row on M6). Results: `evals/results/2026-11-07T22-28-30-615Z.json` (failed run) and `…22-39-55-470Z.json` (passing run).
 
 ## What you can do
 
+- **Add a GitHub repo as a project** (phase 4). On Home, pick the repo under **New project**, give it a key prefix and click **Set up project**. The setup page then walks through:
+  1. **Clone.** Kanbot clones the repo; nothing to do.
+  2. **Commands.** Check what Kanbot found (install, build, test, lint, start, image, test globs) and confirm.
+  3. **Baseline.** Kanbot runs them once on the default branch. Accept the result; anything already failing is skipped by Kanbot's checks from then on.
+  4. **CI.** If the repo has no workflow, **Open CI pull request** adds one that runs your commands; merge it on GitHub.
+  5. **Branch protection.** **Apply protection** (PR with your approval, green CI, no force-push, for admins too), or **Run agents without it**.
+  6. **Ready.** Agents start when you move tickets. Until then the board says "Finish setup".
+
+  A project from a local folder (no GitHub) is still under **Use a local folder instead**.
 - **Sign in with GitHub.**
   1. Put `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY` in `.env` (`openssl rand -base64 32` each) and start `pnpm dev`.
   2. Open `http://localhost:3000` and click **Connect GitHub**.
@@ -69,7 +99,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 
 ## How to run it
 
-`pnpm db:migrate` (three new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`), then `pnpm dev`. Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
+`pnpm db:migrate` (four new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`, `0013_onboarding`), then `pnpm dev`. Clones go to `KANBOT_REPOS_DIR`, or `.kanbot-repos/` at the repo root when it is unset (`pnpm dev`). Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
 
 ## What was built
 
@@ -148,6 +178,42 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - `e2e/global-setup.ts` stores a fake App and saves a signed session as the specs' `storageState`.
   - `e2e/auth.spec.ts` covers the rest: 401 without a cookie, 401 with a forged one, a page redirecting to `/login` with Sign in, setup refusing a second App, and a callback with the wrong state refused.
 
+### After phase 4: project env vars
+
+- **Storage.** `projects.env` (migration `0014_project_env`): encrypted JSON `{NAME: value}`, using `encryptEnv`/`decryptEnv` beside the App's `encrypt`/`decrypt` in `github.ts`. An empty value means the name is known but not set.
+- **API.** `patchProjectBody.env` replaces the whole set, with null keeping a stored value. Names are validated, `PORT`/`HOME`/`PATH` are refused, and values may not contain newlines. Project and onboarding reads return `env: [{name, set}]` (`envView()` in `lib/projects.ts`).
+- **Detection.** At clone, `envNames()` reads `.env.example` (or `.sample`, `.template`), and the names are stored with empty values. Values already set (a retry) stay.
+- **Worker.**
+  - `openEnv()` (`worktree.ts`) writes a 0600 env file to a fresh temp folder and gives back a dispose function. `runCommand`, `install`/`ensureWorktree`, `runChecks`, `runBaseline`, `startApp` and `containerBash` take it: `--env-file` in docker, merged into the environment on the host.
+  - `redactText()` also takes the project's values, raw and JSON-escaped. It covers run events, recordings, run errors, checks reports and baseline output.
+- **CI.** `starterWorkflow()` adds a job `env` from `secrets.NAME`. The CI step and the PR body name the secrets to add on GitHub.
+- **UI.** `components/env-editor.tsx` is used in the setup wizard's commands step and on Settings. Each row has a name, a password input that reads "Set (type to replace)" or "Not set", and a remove button, plus an **Add variable** button.
+
+### Phase 4: onboarding
+
+- **State.** `projects` gains `github_owner`, `github_repo`, `onboarding` (step and state) and `baseline` (migration `0013_onboarding`). The steps are `clone`, `commands`, `baseline`, `ci`, `protection` and `ready`. The worker runs `clone` and `baseline` while they're `queued`; every other step waits for the owner. A failed step keeps its error for **Try again**. A new `project.onboarding` event wakes the worker and refreshes the setup page.
+- **Shared** (`packages/shared`):
+  - `onboarding.ts` (pure) holds the step types, `detect()` (commands, test globs and image from the file list and a few files), `starterWorkflow()`, and the protection rules (`missingRules`, `protectionRules`).
+  - `github.ts` gains `gh()` (one REST call; the base URL is `KANBOT_GITHUB_API`), `appJwt()` (RS256 with `node:crypto`), `repoToken()` (an installation token for one repo), `getRepo()` and `listAppRepos()`.
+  - `github-stub.ts` is a test-only stand-in for the GitHub calls onboarding makes. Its `clone_url` is a local repo, so tests need no network.
+- **Worker** (`apps/worker/src/onboard.ts`).
+  - `onboardNext()` claims one queued step. A step a restart interrupted is queued again on start.
+  - Clone: the installation token goes through git's environment (`GIT_CONFIG_*`), so it is never saved in `.git/config`. Then `project.yml`/devcontainer first, detection for the rest, saved to the project's settings.
+  - Baseline: install, build, lint and test in a throwaway `_baseline` worktree of the default branch (`runBaseline()`), in the project's image.
+  - The loop runs beside the run queue on the event and the 5 s poll.
+  - `runChecks()` takes the baseline's failed commands and skips them. The context bundle gets a `<baseline_failures>` section, only when there are some, so other projects' prompts are unchanged.
+- **Web.**
+  - `lib/onboarding.ts` and two routes: `GET /api/github/repos` and `GET/POST /api/projects/:id/onboarding` (one `action` per step).
+  - `POST /api/projects` with `githubOwner`/`githubRepo` checks the repo through the App and takes its default branch.
+  - The CI PR is written with the contents API on `kanbot/onboarding-ci`, so the web app never needs git. Repeating it updates the file and reuses an open PR.
+  - Apply protection leaves a branch that is already protected alone.
+- **Gate.** `startColumnAgent` throws `AgentsDisabledError` for a GitHub project whose setup isn't Ready, and the API answers 409 `unprotected`. Local projects (and every older test) are unaffected.
+- **UI.** Home's **New project** card is now a repo picker, with the old form in a disclosure. `/p/:id/setup` is a step list with the current step open. The board shows a "Finish setup" banner until Ready.
+- **Tests.**
+  - Unit: `detect` for Node, Python (NetGPT's shape too), Go and an unknown repo; the workflow; the protection rules; the JWT verified with the public key.
+  - Worker: a clone through the stub, then the retry over an existing clone; a baseline with a failing lint, which the checks gate then skips; a failed clone keeping its error; agents refused until Ready.
+  - e2e: `onboarding.spec.ts` walks the wizard from the picker to the board. The older specs now open "Use a local folder instead". Global setup starts the stub and stores an App with a real RSA key.
+
 ## Key decisions
 
 - **One `docker run` per command, not a long-lived container per run.** It needs no lifecycle code, and the shared cache volume keeps repeated installs fast. Starting a container adds about a second per command.
@@ -167,6 +233,12 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - **The owner is whoever created the App (owner's choice).** GitHub's manifest exchange names that account, so nothing needs configuring, and an App created under a GitHub organization would name the organization; not a case for one person's Kanbot.
 - **Plain `fetch` and `node:crypto`, no Octokit or auth library.** Five GitHub calls and an HMAC. Phase 5's installation tokens (an RS256 JWT) are also a few lines of `node:crypto`.
 - **URLs from the browser's Host header, not Next's `req.url`.** Next names its bind host, so a visit to `127.0.0.1` came back as `localhost`, and cookies set on one host aren't sent to the other. The proxy has already checked Host, so it is trusted.
+- **Onboarding's GitHub calls are the web app's, git is the worker's (phase 4).** The web app's repos mount stays read-only, and the CI PR goes through the contents API. The worker already owns the repos folder and Docker.
+- **Detection is Kanbot's code, not an agent's (phase 4).** Reading a lockfile and `package.json` scripts needs no judgment and costs nothing, and the owner confirms the result anyway.
+- **Baseline failures are skipped, not compared (owner's choice).** Comparing outputs (which tests failed) would catch more but is fragile and different for every language. The cost is that a new break in an already-failing command isn't caught by the gate; Code Review, QA and CI still see it.
+- **The starter workflow runs in the project's image** (`container:`), the same one Kanbot uses, so CI and the checks gate run the same commands in the same toolchain without per-language setup actions.
+- **Protection binds admins (owner's choice), and Kanbot doesn't overwrite rules already there.** An owner who protected `main` their own way keeps it.
+- **Protection is checked at setup only.** Rechecking before every run would cost a GitHub call per run; removing protection later on GitHub is the owner's own choice. Phase 5 reads PR state from GitHub anyway.
 - **Git Bash on Windows** turns the `/c/…` mount path back into `C:/…`, so on Windows the rewritten agent command is prefixed with `MSYS_NO_PATHCONV=1`. Windows is dev only; on Linux the path is unchanged.
 
 ## Changes to the spec (`requirements.md`)
@@ -184,6 +256,24 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - "Where things stand": login and the App.
   - §10: no webhook in the manifest while local (GitHub refuses a localhost hook URL).
 - "Where things stand" and §10 updated; the phase-1 row came off "Still to build". Onboarding steps 8–9 went onto the M6 table.
+- Phase 4:
+  - §10 "Onboarding a repo": built details for each step (where it runs, the clone's token, detection by language, the baseline and the checks gate, the starter workflow in the project's image, the protection rules with `enforce_admins` and the 403 case, agents gated until Ready).
+  - §8 checks gate: skips commands that failed at baseline. §4: onboarding proposes the start command; the ready URL and services still aren't detected.
+  - §11: `projects.onboarding`, and `baseline` per command.
+  - §12: `/api/github/repos`, `/api/projects/:id/onboarding`, the GitHub body of `POST /api/projects`, the move's 409 `unprotected`, and the `project.onboarding` event.
+  - §13: the wizard is built. §16: the onboarding row and the `projects` GitHub row came off. "Where things stand" lists onboarding.
+- After phase 4 (owner's choice, 2026-11-07): QA needs a start command.
+  - §4 "How QA runs": code is evidence only for criteria about the code. Without a start command, a move into QA is refused.
+  - §3: a new Code Review row (held when there's no start command), and QA's approval can also be "Approve and ship".
+  - §10 step 4: confirming needs a start command.
+  - §12: `approve-ship`, 409 `qa_setup` on move and `confirm-commands`.
+  - §16: desktop apps can't be driven yet, so their QA can't pass.
+- Project env vars (owner's choices, 2026-11-07):
+  - §10: step 4 proposes env var names; a new "Environment variables" built detail covers storage, who gets them, the env file, redaction and the limit; step 6's workflow reads them from Actions secrets.
+  - §7: `docker run` passes only the project's env vars, by `--env-file`.
+  - §11: `projects.env`.
+  - §12: `env` on project GET/PATCH.
+  - §14: the env-var bullet and its limit.
 
 ## Checks run
 
@@ -236,10 +326,39 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
     - one installation (selected repos), whose installation token lists `MatthewOsorio/NetGPT` (default branch `main`);
     - the server log shows the setup, the manifest callback and the OAuth callback all ending in redirects, with no errors.
   - Not checked: a second GitHub account being refused (the owner has none at hand). The `user.id !== ownerId` check is one line.
+- Phase 4:
+  - `pnpm typecheck`, `pnpm lint`: clean.
+  - `pnpm test`: 51 shared + 117 worker tests pass. New: `detect`, `starterWorkflow`, `missingRules`, `baselineFailures`, the App JWT checked against the public key, and the worker onboarding tests listed under "What was built".
+  - `pnpm test:e2e`: 15 pass, including `onboarding.spec.ts`, which walks from the repo picker through clone, commands, baseline, the CI PR and protection to the board, against the stub.
+  - Browser check (`next dev` on :3200, its own database `kanbot_check`, the stub posing as `MatthewOsorio/NetGPT` with the sample repo, a replay worker), 9 checks pass:
+    - Home lists the App's repos;
+    - the clone finishes and the commands are proposed;
+    - the baseline shows a passing and a failing command, with output;
+    - the board shows Finish setup during setup and not after;
+    - the CI step offers the starter PR, and the protection step lists what `main` lacks, with the PR link;
+    - Ready;
+    - no horizontal scroll at 390 px.
+
+    Both themes were checked. The first run found the clone retry bug (progress log) and the baseline listed in jsonb's key order; both fixed. Screenshots: `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\e9849090-3633-4802-8dd0-48affe014f43\scratchpad\p4-{home,commands,baseline,board-banner,ci,protection,ready,ready-phone}-{light,dark}.png`.
+  - Not checked yet: the real run on NetGPT (GitHub's real API, a real clone, the Python image, the CI PR and protection on GitHub).
+- After phase 4 (QA needs a start command, Approve and ship): typecheck and lint clean; 52 shared and 117 worker tests (new: `qaRunnable`, a reviewed ticket held in Code Review with a move into QA refused; the "no app configured" context test went, as a move can't reach it now); 15 e2e specs (onboarding refuses commands with no start; "Approve and ship" moves a QA-passed ticket to Ship).
 - Not checked: a real agent's Bash call going through the rewrite inside the SDK. It would need a paid run; the hook is a few lines, and the rewritten command itself was run through a shell.
+- Project env vars:
+  - Typecheck and lint are clean. 56 shared and 121 worker tests pass. New tests:
+    - `envNames`, the workflow's `secrets.*` env, and the `env` body's validation;
+    - `--env-file` in `dockerRun` and `containerBash`, and the env file's content, mode and removal;
+    - redaction, raw and JSON-escaped;
+    - a clone proposing `.env.example`'s names, and a baseline whose test passes only with the value and whose printed value is stored as `[redacted]`.
+  - All 15 e2e specs pass. `onboarding.spec.ts` now fills `KB_API_KEY` at the commands step, checks the onboarding GET never returns the value, checks the CI step names the secret, and checks Settings shows it as set with an empty input.
+  - Browser check: a throwaway spec, screenshots at `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\81921b25-d58c-45c1-aa4a-abf3eba08e10\scratchpad\env-shots\{1-commands-step,2-commands-filled,3-ci-step,4-settings,5-settings-removed}.png`. It covered the detected name with a value, an added `DATABASE_URL`, the CI step's note with the GitHub link, Settings showing set and not-set rows, and remove then save. Light theme only, desktop width.
+  - Not checked: a real container run with an env file under Docker (the Docker-backed path is covered by the argument test, not a real `docker run`), and Settings at phone width.
 
 ## Open items
 
+- Docker Desktop sometimes fails to unpack a first image pull (seen twice now: "lease does not exist", "failed to Lchown"); a retry works. Onboarding shows the error with **Try again**; a run fails with the pull error and Retry works the same way.
+- Detection covers Node, Python and Go at the repo root (`shortcut:` comment on `detect()`). Monorepos and other languages get no proposal; the owner types the commands.
+- The repo picker shows the first 100 repos per installation (`shortcut:` comment on `listAppRepos()`).
+- Python packages from `pip install --user` land in the shared cache volume, so two Python projects share one user site. Fine for one owner; a per-project venv would need a two-step install.
 - **To check in the owner's `kanbot` distro** (needs `sudo`, so the owner sets it up from `docs/deploy.md` setup A): rootless Docker's host network and published ports, and a real SDK run as container root (paid; ask first).
 - **Moved to M6 with the public server:** Caddy getting its certificate, the deploy workflow end to end, webhooks.
 - The logon task that keeps the WSL distro running is documented but untested; WSL's idle shutdown was seen in the check.
@@ -249,6 +368,11 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - The GitHub App knows the address it was created from: one created on `localhost:3000` can't sign in on `127.0.0.1:3000` or another port. A second address needs a callback URL added in the App's settings on GitHub.
 - Health still reports GitHub as `unknown`; it comes with phase 5's use of the App.
 
+- NetGPT is a desktop app, so its QA can't pass until Kanbot can drive desktop apps (or NetGPT has a web UI).
+- **Owner's goal (2026-11-07): extend Kanbot to projects other than web apps** (desktop apps, CLIs, libraries). It's a row on the M6 "Still to build" table in `requirements.md` §16.
+- Testy's prompt lost its code-read path: `pnpm eval:agents` before merging (paid; owner's OK).
 - Settings are seeded once. A repo that adds a devcontainer later needs its Image set in Settings, or a future "re-detect" button.
 - Devcontainer `features`, `postCreateCommand` and docker-compose devcontainers aren't applied (`shortcut:` comment on `devcontainer()`).
 
+- Project env vars can't hold multi-line values (PEM keys), because docker's env file is one line per variable (`shortcut:` comment on the schema). Base64 such a value and decode it in the project for now.
+- Kanbot doesn't push env values to GitHub's Actions secrets (owner's choice). The owner adds them by hand, and a value changed in Kanbot must be changed there too.

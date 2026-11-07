@@ -1,5 +1,6 @@
 "use client";
 
+import { QA_SETUP_MESSAGE } from "@kanbot/shared/onboarding";
 import {
   activeRunStates,
   priorities,
@@ -204,6 +205,27 @@ export function TicketDrawer(props: {
                     }
                   >
                     Approve plan
+                  </Button>
+                )}
+
+              {ticket.columnSlug === "code_review" && ticket.statusFlag === "needs_input" && (
+                // finish() held it here: no start command for QA (§4).
+                <p className="rounded-md bg-needs px-3 py-2 text-sm text-needs-fg">
+                  {QA_SETUP_MESSAGE}, then drag the ticket to QA.
+                </p>
+              )}
+
+              {ticket.columnSlug === "qa" &&
+                ticket.statusFlag === "awaiting_approval" &&
+                !isActive(latest) && (
+                  // The same as dropping the ticket on Ship (§3: QA's approval gate).
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      run(() => api(`/api/tickets/${ticket.id}/approve-ship`, { method: "POST" }))
+                    }
+                  >
+                    Approve and ship
                   </Button>
                 )}
 

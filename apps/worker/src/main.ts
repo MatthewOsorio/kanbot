@@ -2,6 +2,7 @@ import { EVENTS_CHANNEL, type EventEnvelope } from "@kanbot/shared";
 import { createDb } from "@kanbot/shared/db";
 import { Client } from "pg";
 import { nightlyCleanup } from "./cleanup";
+import { onboardNext, requeueOnboarding } from "./onboard";
 import {
   afterPrevious,
   claimNext,
@@ -70,6 +71,20 @@ async function pump() {
   }
 }
 
+let onboarding = false;
+/** Onboarding steps (§10 clone and baseline), one at a time beside the runs. */
+async function onboard() {
+  if (onboarding) return;
+  onboarding = true;
+  try {
+    while (await onboardNext(db));
+  } catch (e) {
+    console.error("onboarding failed; retrying on the next tick", e);
+  } finally {
+    onboarding = false;
+  }
+}
+
 const reachable = runtime instanceof ReplayRuntime ? async () => true : anthropicReachable;
 /** Restarts runs an outage or Pause all interrupted (§8); every minute, and when agents are unpaused. */
 const resume = () =>
@@ -90,6 +105,7 @@ async function listen() {
     if (!msg.payload) return;
     const { event } = JSON.parse(msg.payload) as EventEnvelope;
     if (event.type === "run.started") void pump();
+    if (event.type === "project.onboarding") void onboard();
     if (event.type === "run.finished") active.get(event.runId)?.abort();
     // Pause all (FR-63): running agents stop now and restart on their own when unpaused.
     if (event.type === "settings.updated" && event.paused)
@@ -127,7 +143,10 @@ if (!rows[0]?.ok) {
 const recovered = await recoverInterrupted(db);
 if (recovered) console.log(`marked ${recovered} run(s) interrupted after a restart`);
 await listen();
+await requeueOnboarding(db);
 setInterval(() => void pump(), 5_000);
+setInterval(() => void onboard(), 5_000);
+void onboard();
 setInterval(() => void resume(), 60_000);
 // The nightly cleanup: a minute after start (deploys restart the worker often), then every 24 h.
 const cleanup = () =>

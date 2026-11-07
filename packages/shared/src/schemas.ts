@@ -70,27 +70,39 @@ export type ArtifactKind = (typeof artifactKinds)[number];
 
 const nonEmpty = <T extends object>(o: T) => Object.keys(o).length > 0;
 
-export const createProjectBody = z.object({
-  name: z.string().trim().min(1).max(100),
-  keyPrefix: z
-    .string()
-    .trim()
-    .regex(/^[A-Z][A-Z0-9]{1,9}$/, "2-10 uppercase letters or digits, starting with a letter"),
-  // Passed to git as an argument: a leading "-" would be read as an option (e.g. --output=<file>).
-  // The rest is the core of git check-ref-format.
-  defaultBranch: z
-    .string()
-    .trim()
-    .min(1)
-    .max(200)
-    .regex(
-      /^(?![-/])(?!.*(\.\.|@\{|\/\/))[^\s\p{Cc}~^:?*[\\]+(?<![/.])$/u,
-      "Not a valid branch name",
-    )
-    .default("main"),
-  // Absolute path to a local checkout; Plan B reads it (read-only). Optional until onboarding clones repos (M5).
-  repoPath: z.string().trim().min(1).max(1_000).optional(),
-});
+/** A GitHub owner or repo name: letters, digits, `-`, `_`, `.` (never `.` or `..` alone). */
+const GITHUB_NAME = /^(?!\.\.?$)[\w.-]+$/;
+
+export const createProjectBody = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    keyPrefix: z
+      .string()
+      .trim()
+      .regex(/^[A-Z][A-Z0-9]{1,9}$/, "2-10 uppercase letters or digits, starting with a letter"),
+    // Passed to git as an argument: a leading "-" would be read as an option (e.g. --output=<file>).
+    // The rest is the core of git check-ref-format.
+    defaultBranch: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .regex(
+        /^(?![-/])(?!.*(\.\.|@\{|\/\/))[^\s\p{Cc}~^:?*[\\]+(?<![/.])$/u,
+        "Not a valid branch name",
+      )
+      .default("main"),
+    // Absolute path to a local checkout; Plan B reads it (read-only). Optional until onboarding clones repos (M5).
+    repoPath: z.string().trim().min(1).max(1_000).optional(),
+    // A GitHub repo the App can see (§10 onboarding); its default branch comes from GitHub. Used in API paths.
+    githubOwner: z.string().regex(GITHUB_NAME).max(100).optional(),
+    githubRepo: z.string().regex(GITHUB_NAME).max(100).optional(),
+  })
+  .refine((b) => !b.githubOwner === !b.githubRepo, "githubOwner and githubRepo go together")
+  .refine(
+    (b) => !(b.githubRepo && b.repoPath),
+    "A project is a GitHub repo or a local folder, not both",
+  );
 
 const ticketFields = {
   title: z.string().trim().min(1).max(200),
@@ -154,6 +166,9 @@ const plainCommand = z
     "Must be one plain command: no && ; | < > $ backticks, backslashes or newlines",
   );
 
+/** Env vars Kanbot sets on project commands itself (§7), so a project can't override them. */
+export const RESERVED_ENV = ["PORT", "HOME", "PATH"];
+
 /** Project Settings (§13). An empty command clears it. */
 export const patchProjectBody = z
   .object({
@@ -183,6 +198,22 @@ export const patchProjectBody = z
       .max(50),
     bounceLimit: z.number().int().min(1).max(10),
     concurrency: z.number().int().min(1).max(4),
+    // The project's env vars (§10), the whole set: a string sets the value, null keeps the stored one,
+    // a name left out is removed. Values are write-only: reads return names only.
+    env: z
+      .record(
+        z
+          .string()
+          .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Env var names are letters, digits and _")
+          .refine((n) => !RESERVED_ENV.includes(n), `${RESERVED_ENV.join(", ")} are set by Kanbot`),
+        z
+          .string()
+          .max(10_000)
+          // shortcut: docker's --env-file is one line per variable; base64 multi-line values (PEM keys) if needed.
+          .refine((v) => !/[\n\r]/.test(v), "Env var values can't contain newlines")
+          .nullable(),
+      )
+      .refine((e) => Object.keys(e).length <= 100, "At most 100 env vars"),
   })
   .partial()
   .refine(nonEmpty, "No fields to update");
@@ -204,3 +235,19 @@ export const patchCriterionBody = z
 export const acceptProposalsBody = z.object({
   refs: z.array(z.string().trim().min(1).max(20)).min(1).max(30),
 });
+
+/** The owner's side of onboarding (§10 steps 4–7); the worker does clone and baseline. */
+export const onboardingActionBody = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("confirm-commands"), settings: patchProjectBody }),
+  z.object({
+    action: z.enum([
+      "retry",
+      "rerun-baseline",
+      "accept-baseline",
+      "open-ci-pr",
+      "skip-ci",
+      "apply-protection",
+      "override-protection",
+    ]),
+  }),
+]);

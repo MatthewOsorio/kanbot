@@ -1,5 +1,7 @@
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { containerBash, dockerRun, projectImage, shQuote } from "../src/worktree";
+import { redactText } from "../src/runtime/replay";
+import { containerBash, dockerRun, openEnv, projectImage, shQuote } from "../src/worktree";
 
 const cwd = process.platform === "win32" ? "C:\\r\\wt" : "/r/wt";
 const mounted = process.platform === "win32" ? "/c/r/wt" : "/r/wt";
@@ -23,6 +25,33 @@ describe("project commands in containers (§7)", () => {
     expect(bash("eslint .")).not.toBeNull();
     expect(bash("git status")).toBeNull();
     expect(bash("node --testx")).toBeNull(); // a prefix of a word isn't the command
+  });
+
+  it("passes the project's env vars as a file, never their values in argv (§10)", () => {
+    const args = dockerRun("node:24", cwd, "node --test", { envFile: "/tmp/kanbot-env-x/env" });
+    expect(args.join(" ")).toContain("-e HOME=/cache --env-file /tmp/kanbot-env-x/env node:24");
+    const bash = containerBash("node:24", cwd, { test: "node --test" }, "run-1", "/tmp/e/env");
+    expect(bash("node --test")).toContain("'--env-file' '/tmp/e/env'");
+  });
+
+  it("writes the env file 0600 outside the worktree, without unset names, and removes it", async () => {
+    const env = await openEnv({ API_KEY: "s3cret-value", UNSET: "" });
+    expect(env.vars).toEqual({ API_KEY: "s3cret-value" });
+    expect(readFileSync(env.file!, "utf8")).toBe("API_KEY=s3cret-value\n");
+    if (process.platform !== "win32") expect(statSync(env.file!).mode & 0o777).toBe(0o600);
+    await env.dispose();
+    expect(existsSync(env.file!)).toBe(false);
+    expect((await openEnv({ UNSET: "" })).file).toBeUndefined();
+  });
+
+  it("redacts the project's env values from stored text, raw and JSON-escaped", () => {
+    expect(redactText('{"out":"key=s3cret-value"}', ["s3cret-value", "short"])).toBe(
+      '{"out":"key=[redacted]"}',
+    );
+    expect(redactText(JSON.stringify({ v: 'a"quoted"value' }), ['a"quoted"value'])).toBe(
+      '{"v":"[redacted]"}',
+    );
+    expect(redactText("short stays", ["short"])).toBe("short stays");
   });
 
   it("quotes for a POSIX shell", () => {

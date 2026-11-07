@@ -8,9 +8,11 @@ const card = (p: Page, title: string) =>
 async function newBoard(page: Page) {
   const prefix = `P${Date.now().toString(36).toUpperCase().slice(-6)}`;
   await page.goto("/");
-  await page.getByLabel("Name").fill("E2E agents");
-  await page.getByLabel("Key prefix").fill(prefix);
-  await page.getByRole("button", { name: "Create project" }).click();
+  await page.getByText("Use a local folder instead").click();
+  const form = page.getByRole("form", { name: "Local folder" });
+  await form.getByLabel("Name").fill("E2E agents");
+  await form.getByLabel("Key prefix").fill(prefix);
+  await form.getByRole("button", { name: "Create project" }).click();
   await page.waitForURL(/\/p\//);
   return prefix;
 }

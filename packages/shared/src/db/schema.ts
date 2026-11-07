@@ -18,6 +18,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { uuidv7 } from "../ids";
+import type { Baseline, Onboarding } from "../onboarding";
 import type { ProjectConfig } from "../repo";
 import {
   activityActions,
@@ -56,12 +57,19 @@ export const projects = pgTable("projects", {
   name: text("name").notNull(),
   defaultBranch: text("default_branch").notNull().default("main"),
   repoPath: text("repo_path"),
+  // The GitHub repo (§10 onboarding); null for a local-folder project.
+  githubOwner: text("github_owner"),
+  githubRepo: text("github_repo"),
+  onboarding: jsonb("onboarding").$type<Onboarding>(),
+  baseline: jsonb("baseline").$type<Baseline>(),
   // Project settings (§11). null = not seeded yet; projectConfigOf seeds them once from .kanbot/project.yml.
   commands: jsonb("commands").$type<ProjectConfig["commands"]>(),
   testGlobs: text("test_globs").array(),
   hotspots: jsonb("hotspots").$type<ProjectConfig["hotspots"]>(),
   image: text("image"),
   dockerfile: jsonb("dockerfile").$type<ProjectConfig["dockerfile"]>(),
+  // The project's env vars (§10), encrypted JSON {NAME: value} (github.ts encryptEnv); "" = not set yet.
+  env: text("env"),
   settings: jsonb("settings").$type<{ bounceLimit?: number; concurrency?: number }>(),
   ticketSeq: integer("ticket_seq").notNull().default(0),
   createdAt: createdAt(),

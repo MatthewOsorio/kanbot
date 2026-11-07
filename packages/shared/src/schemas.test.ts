@@ -63,3 +63,14 @@ describe("patchProjectBody", () => {
     expect(ok({})).toBe(false);
   });
 });
+
+describe("patchProjectBody.env", () => {
+  const env = (e: unknown) => patchProjectBody.safeParse({ env: e }).success;
+  it("takes names with values, or null to keep the stored value", () => {
+    expect(env({ API_KEY: "x", DB_URL: null, _A1: "" })).toBe(true);
+  });
+  it("refuses bad names, Kanbot's own vars and multi-line values", () => {
+    for (const e of [{ "1A": "x" }, { "A-B": "x" }, { PORT: "1" }, { HOME: "/" }, { A: "a\nb" }])
+      expect(env(e)).toBe(false);
+  });
+});

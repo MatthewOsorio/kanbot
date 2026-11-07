@@ -297,6 +297,20 @@ export function Board({ projectId }: { projectId: string }) {
         </div>
       </header>
       {settings && <Banner settings={settings} health={health} />}
+      {board.project.onboarding && board.project.onboarding.step !== "ready" && (
+        <div role="alert" className="flex gap-2 border-b bg-needs px-4 py-2 text-sm text-needs-fg">
+          <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <p>
+            Setup isn&apos;t finished, so agents don&apos;t start yet.{" "}
+            <Link
+              href={`/p/${projectId}/setup`}
+              className="font-medium underline underline-offset-4"
+            >
+              Finish setup
+            </Link>
+          </p>
+        </div>
+      )}
 
       <DndContext
         sensors={sensors}

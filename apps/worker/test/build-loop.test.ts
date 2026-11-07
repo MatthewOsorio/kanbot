@@ -15,6 +15,7 @@ import {
   moveToColumnEnd,
   projectConfigOf,
   projects,
+  QaSetupError,
   runEvents,
   runs,
   startColumnAgent,
@@ -266,24 +267,20 @@ describe("build loop (M3 done criterion)", () => {
     expect((await ticketNow(ticket.id)).statusFlag).not.toBe("failed");
   });
 
-  it("tells Testy when no app is configured", async () => {
-    const { project, move } = await setup("default");
+  it("holds a reviewed ticket in Code Review when there's no start command for QA (§4)", async () => {
+    const { ticket, project, col, move } = await setup("default");
     await projectConfigOf(db, project); // seed from project.yml, then drop the start command
     await db
       .update(projects)
       .set({ commands: { test: "node --test" } })
       .where(eq(projects.id, project.id));
-    await move("qa");
-    let req: Parameters<typeof runtime.run>[0] | undefined;
-    const run = (await claimNext(db))!;
-    await executeRun(
-      db,
-      { run: async (r, emit) => ((req = r), runtime.run(r, emit)) },
-      run,
-      new AbortController().signal,
-    );
-    expect(req!.appUrl).toBeUndefined();
-    expect(req!.prompt).toContain("App: not configured");
+    await expect(move("qa")).rejects.toBeInstanceOf(QaSetupError);
+    await move("code_review");
+    const done = await drain();
+    expect(done.map((r) => `${r.agentSlug}:${r.state}`)).toEqual(["nitpick-nancy:succeeded"]);
+    const t = await ticketNow(ticket.id);
+    expect(t.columnId).toBe(col("code_review").id);
+    expect(t.statusFlag).toBe("needs_input");
   });
 
   it("stops a run that repeats the same tool call three times", async () => {

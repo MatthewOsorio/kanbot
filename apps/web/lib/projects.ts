@@ -7,7 +7,15 @@ import {
   type patchProjectBody,
 } from "@kanbot/shared";
 import { loadAgent } from "@kanbot/shared/agents";
-import { columns, projectConfigOf, projects, ticketLinks, tickets } from "@kanbot/shared/db";
+import { decryptEnv, encryptEnv } from "@kanbot/shared/github";
+import {
+  columns,
+  projectConfigOf,
+  projects,
+  publish,
+  ticketLinks,
+  tickets,
+} from "@kanbot/shared/db";
 import { overlap } from "@kanbot/shared/repo";
 import { asc, eq, sql } from "drizzle-orm";
 import type { z } from "zod";
@@ -18,7 +26,11 @@ export function listProjects() {
   return db.select().from(projects).orderBy(asc(projects.createdAt));
 }
 
-export async function createProject(input: z.output<typeof createProjectBody>) {
+/** `extra`: what onboarding adds for a GitHub repo (its default branch from GitHub, the first step queued). */
+export async function createProject(
+  input: z.output<typeof createProjectBody>,
+  extra: Partial<typeof projects.$inferInsert> = {},
+) {
   if (input.repoPath !== undefined) {
     let dir = false;
     try {
@@ -35,7 +47,11 @@ export async function createProject(input: z.output<typeof createProjectBody>) {
   }
   try {
     return await db.transaction(async (tx) => {
-      const [project] = await tx.insert(projects).values(input).returning();
+      const [project] = await tx
+        .insert(projects)
+        .values({ ...input, ...extra })
+        .returning();
+      if (project!.onboarding) await publish(tx, project!.id, { type: "project.onboarding" });
       await tx
         .insert(columns)
         .values(DEFAULT_COLUMNS.map((c, i) => ({ ...c, projectId: project!.id, position: i })));
@@ -165,15 +181,21 @@ export async function getProjectSettings(id: string) {
     hotspots,
     bounceLimit,
     concurrency,
+    env: envView(p),
   };
 }
+
+/** The project's env vars for the browser (§10): names and whether each has a value, never the values. */
+export const envView = (p: typeof projects.$inferSelect) =>
+  Object.entries(decryptEnv(p.env)).map(([name, v]) => ({ name, set: v !== "" }));
 
 export async function patchProject(id: string, input: z.output<typeof patchProjectBody>) {
   const [p] = await db.select().from(projects).where(eq(projects.id, id));
   if (!p) throw notFound("Project not found");
   // Seed first so a partial patch (one command) doesn't hide the rest of project.yml behind nulls.
   const cur = await projectConfigOf(db, p);
-  const { bounceLimit, concurrency, commands, image, testGlobs, hotspots } = input;
+  const { bounceLimit, concurrency, commands, image, testGlobs, hotspots, env } = input;
+  const stored = decryptEnv(p.env);
   await db
     .update(projects)
     .set({
@@ -184,6 +206,12 @@ export async function patchProject(id: string, input: z.output<typeof patchProje
       // "" clears the image: commands run on the worker's own toolchain again.
       image: image === undefined ? (cur.image ?? null) : image || null,
       testGlobs: testGlobs ?? cur.testGlobs,
+      // The whole set: null keeps a stored value, a name left out is removed.
+      ...(env && {
+        env: encryptEnv(
+          Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v ?? stored[k] ?? ""])),
+        ),
+      }),
       hotspots: hotspots ?? cur.hotspots,
       settings: {
         bounceLimit: bounceLimit ?? cur.bounceLimit,
