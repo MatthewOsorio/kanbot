@@ -85,6 +85,31 @@ export function approvePlan(ticketId: string) {
   });
 }
 
+/** "Approve and ship" in the drawer: QA passed, so the same as dropping the ticket at the bottom of Ship. */
+export function approveShip(ticketId: string) {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ ticket: tickets, column: columns })
+      .from(tickets)
+      .innerJoin(columns, eq(columns.id, tickets.columnId))
+      .where(eq(tickets.id, ticketId))
+      .for("update", { of: tickets });
+    if (!row) throw notFound("Ticket not found");
+    const { ticket, column } = row;
+    if (column.slug !== "qa" || ticket.statusFlag !== "awaiting_approval")
+      throw new HttpError(409, "not_approvable", "Only a ticket that passed QA can be approved");
+    const [ship] = await tx
+      .select()
+      .from(columns)
+      .where(and(eq(columns.projectId, ticket.projectId), eq(columns.slug, "ship")));
+    if (!ship) throw new HttpError(409, "column_gone", "This board has no Ship column");
+    await tx.update(tickets).set({ statusFlag: "none" }).where(eq(tickets.id, ticketId));
+    await moveToColumnEnd(tx, ticket, column, ship, OWNER);
+    // Captain Ship-It opens the PR (M5 phase 5); until its agent file exists this starts nothing.
+    await startColumnAgent(tx, ticket.projectId, ticketId, ship, OWNER);
+  });
+}
+
 export async function planExists(tx: Tx, ticketId: string) {
   const [plan] = await tx
     .select({ id: artifacts.id })

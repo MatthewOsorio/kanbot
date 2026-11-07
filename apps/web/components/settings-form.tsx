@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Wordmark } from "@/components/brand";
+import { EnvEditor, envBody, type EnvRow } from "@/components/env-editor";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ type Settings = {
   hotspots: { name: string; paths: string[] }[];
   bounceLimit: number;
   concurrency: number;
+  env: { name: string; set: boolean }[];
 };
 
 const CARD = "space-y-3 rounded-xl border bg-card p-5 shadow-xs";
@@ -53,12 +55,14 @@ export function SettingsForm({ projectId }: { projectId: string }) {
   const [s, setS] = useState<Settings | null>(null);
   const [globs, setGlobs] = useState("");
   const [hotspots, setHotspots] = useState("");
+  const [env, setEnv] = useState<EnvRow[]>([]);
   const [msg, setMsg] = useState<{ error: boolean; text: string } | null>(null);
 
   const load = (d: Settings) => {
     setS(d);
     setGlobs(d.testGlobs.join("\n"));
     setHotspots(hotspotLines(d.hotspots));
+    setEnv(d.env);
   };
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
@@ -83,6 +87,7 @@ export function SettingsForm({ projectId }: { projectId: string }) {
       hotspots: parseHotspots(hotspots),
       bounceLimit: s.bounceLimit,
       concurrency: s.concurrency,
+      env: envBody(env),
     };
     const r = await fetch(`/api/projects/${projectId}`, {
       method: "PATCH",
@@ -154,6 +159,16 @@ export function SettingsForm({ projectId }: { projectId: string }) {
                 onChange={(e) => setS({ ...s, image: e.target.value })}
               />
             </label>
+          </fieldset>
+          <fieldset className={CARD}>
+            <legend className="float-left mb-1 w-full font-semibold">Environment variables</legend>
+            <p className="text-sm text-muted-foreground">
+              API keys, connection strings and the like, for every project command (install, the
+              checks, QA&apos;s app, the agents&apos; own runs). Stored encrypted and never shown
+              again. Code the agents write can still read them, so use development credentials, not
+              production ones. CI reads them from the repo&apos;s Actions secrets.
+            </p>
+            <EnvEditor rows={env} onChange={setEnv} />
           </fieldset>
           <div className={CARD}>
             <label className="block space-y-1 text-sm">

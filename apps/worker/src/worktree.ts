@@ -1,9 +1,12 @@
 import { exec, execFile, spawn } from "node:child_process";
 import { createServer, type AddressInfo } from "node:net";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, posix, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { IMAGE_REF, uuidv7 } from "@kanbot/shared";
+import type { Baseline } from "@kanbot/shared/onboarding";
 import { branchName, git, type ProjectConfig } from "@kanbot/shared/repo";
 
 const sh = promisify(exec);
@@ -18,6 +21,33 @@ export const worktreesRoot = (repoPath: string) => `${resolve(repoPath)}.kanbot-
 type Ticket = { key: string; title: string; branchName: string | null };
 
 /**
+ * The project's env vars (§10) for its commands: `vars` for the worker's toolchain, `file` (docker's
+ * --env-file) for containers, so values never appear in a command line. Empty values (names not set yet)
+ * are left out.
+ */
+export type ProjectEnv = { vars: Record<string, string>; file?: string };
+const NO_ENV: ProjectEnv = { vars: {} };
+
+/**
+ * Writes the env file (mode 0600) to a fresh folder outside every worktree, where agents can't read it
+ * (fence.ts refuses paths outside the run's cwd). Call dispose() when the run or step ends.
+ */
+export async function openEnv(
+  all: Record<string, string>,
+): Promise<ProjectEnv & { dispose: () => Promise<void> }> {
+  const vars = Object.fromEntries(Object.entries(all).filter(([, v]) => v !== ""));
+  if (!Object.keys(vars).length) return { vars, dispose: async () => {} };
+  const dir = await mkdtemp(join(tmpdir(), "kanbot-env-"));
+  const file = join(dir, "env");
+  const lines = Object.entries(vars).map(
+    ([k, v]) => `${k}=${v}
+`,
+  );
+  await writeFile(file, lines.join(""), { mode: 0o600 });
+  return { vars, file, dispose: () => rm(dir, { recursive: true, force: true }) };
+}
+
+/**
  * Creates the ticket's worktree and branch on first use, or reuses them (FR-40). Never touches the
  * default branch or any branch outside `kanbot/`. Runs the project's install command after creating.
  */
@@ -26,6 +56,7 @@ export async function ensureWorktree(
   defaultBranch: string,
   ticket: Ticket,
   config: ProjectConfig,
+  env: ProjectEnv = NO_ENV,
 ): Promise<{ path: string; branch: string }> {
   const branch = ticket.branchName ?? branchName(ticket.key, ticket.title);
   const root = worktreesRoot(repoPath);
@@ -39,7 +70,7 @@ export async function ensureWorktree(
     // Agents can change dependencies; install again when the lockfile differs from the last install (§8 step 2).
     // A failed reinstall keeps the worktree: it may hold the agent's work.
     if (config.commands.install && (await lockfileHash(path)) !== (await installedHash(path))) {
-      await install(config.commands.install, path, config.image);
+      await install(config.commands.install, path, config.image, env);
     }
     return { path, branch };
   }
@@ -55,7 +86,7 @@ export async function ensureWorktree(
   );
   // A failed install removes the worktree again (the branch stays), so the next run installs anew.
   if (config.commands.install)
-    await install(config.commands.install, path, config.image).catch(async (e: Error) => {
+    await install(config.commands.install, path, config.image, env).catch(async (e: Error) => {
       await git(repoPath, ["worktree", "remove", "--force", path]).catch(() => {});
       throw e;
     });
@@ -83,9 +114,9 @@ async function installedHash(path: string) {
   }
 }
 
-async function install(command: string, path: string, image?: string) {
+async function install(command: string, path: string, image?: string, env = NO_ENV) {
   const hash = await lockfileHash(path);
-  await runCommand(command, path, image).catch((e: Error) => {
+  await runCommand(command, path, image, env).catch((e: Error) => {
     throw new Error(`Install failed (${command}): ${e.message}`);
   });
   writeFileSync(await markerPath(path), hash);
@@ -94,25 +125,57 @@ async function install(command: string, path: string, image?: string) {
 /** Lines of a failing check's output kept for the report. */
 const CHECK_TAIL_LINES = 200;
 
+/** Runs one project command; null if it passed, else the tail of its output. */
+async function tryCommand(command: string, path: string, image?: string, env = NO_ENV) {
+  try {
+    await runCommand(command, path, image, env);
+    return null;
+  } catch (e) {
+    const err = e as Error & { stdout?: string; stderr?: string; killed?: boolean };
+    const text = [err.stdout, err.stderr].filter(Boolean).join("\n").trimEnd();
+    return (
+      (err.killed ? "Killed after 10 minutes.\n" : "") +
+      (text ? text.split("\n").slice(-CHECK_TAIL_LINES).join("\n") : err.message)
+    );
+  }
+}
+
 /**
  * The checks gate (§8): the project's build, lint and test commands, in that order, after Sir Codes-a-Lot
  * reports success. Stops at the first failure and returns it with the tail of its output; null if all pass.
+ * `skip`: commands that already failed on the default branch at onboarding (the baseline, §10 step 5).
  */
-export async function runChecks(commands: ProjectConfig["commands"], path: string, image?: string) {
+export async function runChecks(
+  commands: ProjectConfig["commands"],
+  path: string,
+  image?: string,
+  skip: string[] = [],
+  env = NO_ENV,
+) {
   for (const command of [commands.build, commands.lint, commands.test]) {
-    if (!command) continue;
-    try {
-      await runCommand(command, path, image);
-    } catch (e) {
-      const err = e as Error & { stdout?: string; stderr?: string; killed?: boolean };
-      const text = [err.stdout, err.stderr].filter(Boolean).join("\n").trimEnd();
-      const output =
-        (err.killed ? "Killed after 10 minutes.\n" : "") +
-        (text ? text.split("\n").slice(-CHECK_TAIL_LINES).join("\n") : err.message);
-      return { command, output };
-    }
+    if (!command || skip.includes(command)) continue;
+    const output = await tryCommand(command, path, image, env);
+    if (output !== null) return { command, output };
   }
   return null;
+}
+
+/** The baseline (§10 step 5): install, build, lint and test once, each run whatever the others did. */
+export async function runBaseline(
+  commands: ProjectConfig["commands"],
+  path: string,
+  image?: string,
+  env = NO_ENV,
+) {
+  if (image) await pullImage(image);
+  const out: Baseline = {};
+  for (const k of ["install", "build", "lint", "test"] as const) {
+    const command = commands[k];
+    if (!command) continue;
+    const output = await tryCommand(command, path, image, env);
+    out[k] = { command, ok: output === null, output: output ?? "" };
+  }
+  return out;
 }
 
 /** The environment project commands get: the worker's, minus its credentials. */
@@ -133,6 +196,7 @@ export async function startApp(
   command: string,
   cwd: string,
   image?: string,
+  env = NO_ENV,
 ): Promise<{ url: string; stop: () => Promise<void> } | { error: string }> {
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
@@ -146,10 +210,12 @@ export async function startApp(
     if (pull) return { error: pull };
   }
   const child = image
-    ? spawn("docker", dockerRun(image, cwd, command, { name, port }), { windowsHide: true })
+    ? spawn("docker", dockerRun(image, cwd, command, { name, port, envFile: env.file }), {
+        windowsHide: true,
+      })
     : spawn(command, {
         cwd,
-        env: { ...commandEnv(), PORT: String(port) },
+        env: { ...commandEnv(), ...env.vars, PORT: String(port) },
         shell: true,
         windowsHide: true,
         detached: process.platform !== "win32", // own process group, so stop() reaches the shell's children
@@ -208,14 +274,16 @@ function freePort(): Promise<number> {
  * A project command, run by the worker itself (install, the checks gate): in the project's image when it
  * has one (§7), else on the worker's toolchain with the same scrubbed env agents get.
  */
-async function runCommand(command: string, cwd: string, image?: string) {
+async function runCommand(command: string, cwd: string, image?: string, env = NO_ENV) {
   const opts = { cwd, timeout: 10 * 60_000, windowsHide: true, maxBuffer: 20 * 1024 * 1024 };
-  if (!image) return void (await sh(command, { ...opts, env: commandEnv() }));
+  if (!image) return void (await sh(command, { ...opts, env: { ...commandEnv(), ...env.vars } }));
   const name = `kanbot-${uuidv7()}`;
   // A timeout kills the docker CLI, not the container, so remove it by name whatever happened.
-  await execFileP("docker", dockerRun(image, cwd, command, { name }), opts).finally(() =>
-    removeContainers(["--filter", `name=${name}`]),
-  );
+  await execFileP(
+    "docker",
+    dockerRun(image, cwd, command, { name, envFile: env.file }),
+    opts,
+  ).finally(() => removeContainers(["--filter", `name=${name}`]));
 }
 
 /** Where a host folder is mounted in a container: the same path, so paths in output and errors match. */
@@ -228,14 +296,15 @@ const LABEL = "kanbot";
 
 /**
  * `docker run` arguments for one project command in the project's image (§7): only the worktree is
- * mounted, plus a shared cache volume as HOME, and no host environment reaches the container. The image
+ * mounted, plus a shared cache volume as HOME, and no host environment reaches the container (only the
+ * project's own env vars, from `envFile`). The image
  * is a validated reference (`IMAGE_REF`), so it can't be read as a docker option.
  */
 export function dockerRun(
   image: string,
   cwd: string,
   command: string,
-  o: { name?: string; port?: number; label?: string } = {},
+  o: { name?: string; port?: number; label?: string; envFile?: string } = {},
 ) {
   const dir = mountPath(cwd);
   return [
@@ -253,6 +322,7 @@ export function dockerRun(
     "kanbot-cache:/cache",
     "-e",
     "HOME=/cache",
+    ...(o.envFile ? ["--env-file", o.envFile] : []), // the project's env vars (§10), never in argv
     ...(o.port ? ["-e", `PORT=${o.port}`, "-p", `127.0.0.1:${o.port}:${o.port}`] : []),
     image,
     "sh",
@@ -360,6 +430,7 @@ export function containerBash(
   cwd: string,
   commands: ProjectConfig["commands"],
   runId: string,
+  envFile?: string,
 ) {
   const own = [commands.install, commands.build, commands.test, commands.lint].filter(
     (c): c is string => !!c,
@@ -367,7 +438,9 @@ export function containerBash(
   return (cmd: string) => {
     const c = cmd.trim().replace(/\s+/g, " ");
     if (!own.some((o) => c === o || c.startsWith(`${o} `))) return null;
-    const line = ["docker", ...dockerRun(image, cwd, c, { label: runId })].map(shQuote).join(" ");
+    const line = ["docker", ...dockerRun(image, cwd, c, { label: runId, envFile })]
+      .map(shQuote)
+      .join(" ");
     // Git Bash (the Bash tool on Windows, dev only) would turn the /c/… mount path back into C:/….
     return process.platform === "win32" ? `MSYS_NO_PATHCONV=1 ${line}` : line;
   };

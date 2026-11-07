@@ -5,6 +5,7 @@ import { generateKeyBetween } from "fractional-indexing";
 import { agentFileExists } from "../agents";
 import { activeRunStates } from "../schemas";
 import { BOUNCE_LIMIT } from "../transitions";
+import { QA_SETUP_MESSAGE, qaRunnable } from "../onboarding";
 import { loadProjectConfig, projectConfig } from "../repo";
 import { projects, runs, settings, tickets } from "./schema";
 import { logActivity, OWNER, publish, type Actor, type Tx } from "./write";
@@ -50,6 +51,28 @@ export async function projectConfigOf(
     bounceLimit: p.settings?.bounceLimit ?? BOUNCE_LIMIT,
     concurrency: p.settings?.concurrency ?? 1,
   };
+}
+
+/** Thrown by startColumnAgent while a GitHub project is still onboarding (the web app answers 409). */
+export class AgentsDisabledError extends Error {
+  constructor() {
+    super(
+      "Finish this project's setup first: agents start once branch protection is in place or overridden",
+    );
+  }
+}
+
+/** Thrown by startColumnAgent for QA on a project with no start command (§4; the web app answers 409). */
+export class QaSetupError extends Error {
+  constructor() {
+    super(QA_SETUP_MESSAGE);
+  }
+}
+
+/** Whether QA can run on this project: always, for a project with no repo (tests); else qaRunnable. */
+export async function qaReady(tx: Pick<Tx, "select" | "update">, projectId: string) {
+  const [p] = await tx.select().from(projects).where(eq(projects.id, projectId));
+  return !p?.repoPath || qaRunnable(await projectConfigOf(tx, p));
 }
 
 type Column = { id: string; slug: string; name: string; agentSlug: string | null };
@@ -104,6 +127,13 @@ export async function startColumnAgent(
   { requestMd, resumeSessionId }: { requestMd?: string; resumeSessionId?: string | null } = {},
 ) {
   if (!column.agentSlug || !agentFileExists(column.agentSlug)) return null;
+  // §10 step 10: a GitHub project runs agents once branch protection is applied or overridden.
+  const [p] = await tx
+    .select({ repo: projects.githubRepo, onboarding: projects.onboarding })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  if (p?.repo && p.onboarding?.step !== "ready") throw new AgentsDisabledError();
+  if (column.slug === "qa" && !(await qaReady(tx, projectId))) throw new QaSetupError();
   const [r] = await tx
     .insert(runs)
     .values({

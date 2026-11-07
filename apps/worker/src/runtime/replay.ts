@@ -137,9 +137,16 @@ function withCriterionIds(report: unknown, prompt: string): unknown {
 }
 
 const secret = process.env.ANTHROPIC_API_KEY;
-/** Secrets never reach stored run events or recorded scripts (requirements §14). */
-export const redactText = (s: string) =>
-  secret && secret.length >= 8 ? s.replaceAll(secret, "[redacted]") : s;
+/**
+ * Secrets never reach stored run events or recorded scripts (requirements §14): the API key and the
+ * project's env vars (`more`), as written and as escaped inside JSON. Values under 8 characters are kept
+ * (redacting "1" would mangle everything).
+ */
+export const redactText = (s: string, more: string[] = []) =>
+  [secret, ...more]
+    .filter((v): v is string => !!v && v.length >= 8)
+    .flatMap((v) => [v, JSON.stringify(v).slice(1, -1)])
+    .reduce((t, v) => t.replaceAll(v, "[redacted]"), s);
 
 /**
  * Saves a real run as a replay script (requirements §8 recorded runs, KANBOT_RECORD=1): its events,
@@ -154,6 +161,7 @@ export async function record(
   wt: { path: string; base: string } | null,
   prompt: string,
   cwd: string,
+  secrets: string[] = [],
 ) {
   const commits = wt ? (await git(wt.path, ["rev-list", `${wt.base}..HEAD`])).trim() : "";
   const out = {
@@ -176,7 +184,7 @@ export async function record(
     .replaceAll(JSON.stringify(cwd).slice(1, -1), "<cwd>")
     .replaceAll(JSON.stringify(cwd.replaceAll("\\", "/")).slice(1, -1), "<cwd>");
   criterionIds(prompt).forEach((id, i) => (text = text.replaceAll(id, `$criterion${i + 1}`)));
-  text = redactText(text);
+  text = redactText(text, secrets);
   const file = resolve(fixturesDir(), slug, `${scenario}.${attempt}.json`);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, `${text}\n`);

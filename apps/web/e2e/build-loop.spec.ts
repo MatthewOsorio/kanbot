@@ -15,10 +15,12 @@ test("the build loop runs to QA with one bounce, and the Diff tab shows the bran
 }) => {
   const repo = await prepareSampleRepo(join(mkdtempSync(join(tmpdir(), "kanbot-e2e-")), "repo"));
   await page.goto("/");
-  await page.getByLabel("Name").fill("E2E build loop");
-  await page.getByLabel("Key prefix").fill(`B${Date.now().toString(36).toUpperCase().slice(-6)}`);
-  await page.getByPlaceholder("/home/you/code/my-app").fill(repo);
-  await page.getByRole("button", { name: "Create project" }).click();
+  await page.getByText("Use a local folder instead").click();
+  const form = page.getByRole("form", { name: "Local folder" });
+  await form.getByLabel("Name").fill("E2E build loop");
+  await form.getByLabel("Key prefix").fill(`B${Date.now().toString(36).toUpperCase().slice(-6)}`);
+  await form.getByPlaceholder("/home/you/code/my-app").fill(repo);
+  await form.getByRole("button", { name: "Create project" }).click();
   await page.waitForURL(/\/p\//);
   const projectId = page.url().split("/p/")[1]!;
 
@@ -49,6 +51,12 @@ test("the build loop runs to QA with one bounce, and the Diff tab shows the bran
   await expect(diff).toContainText(/Changed by\s*Sir Codes-a-Lot/); // who changed each file
   await expect(diff.getByRole("note")).toContainText("Add a regression test");
   await expect(diff.getByRole("note")).toContainText("Nitpick Nancy");
+
+  // QA's approval gate: the drawer's button moves it to Ship (Captain Ship-It is M5 phase 5).
+  await page.getByRole("button", { name: "Approve and ship" }).click();
+  await expect(page.getByRole("button", { name: "Approve and ship" })).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(column(page, "Ship").getByText(title)).toBeVisible();
 });
 
 // §9 overlap check: entering In Progress while an in-flight ticket touches the same files is a 409

@@ -31,6 +31,8 @@ export type BoardEvent =
   | { type: "run.event"; runId: string; ticketId: string; seq: number; eventType: RunEventType }
   // Global (projectId "*"): Pause all or the daily cap changed. The worker aborts its runs on `paused`.
   | { type: "settings.updated"; paused: boolean }
+  // Onboarding moved on (§10): the worker hears it for clone/baseline, the setup page refetches.
+  | { type: "project.onboarding" }
   // A ticket now waits for the owner (FR-60); global with no ticketId when Kanbot paused itself.
   | {
       type: "notification";

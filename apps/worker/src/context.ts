@@ -53,6 +53,8 @@ type Repo = {
   hotspots: ProjectConfig["hotspots"];
   commands?: ProjectConfig["commands"];
   testGlobs?: string[];
+  /** Commands already failing on the default branch at onboarding (§10 step 5); the checks gate skips them. */
+  baselineFailures?: string[];
   /** QA runs: the app the worker started, or why it didn't start. */
   app?: { url: string } | { error: string };
 };
@@ -64,9 +66,9 @@ function qaSetup(repo: Repo) {
   return [
     test && globs.length
       ? `Test command: ${test}\nTest files you may write: ${globs.join(", ")}`
-      : "Test setup: none (no test command or no test globs). Don't write tests; give other evidence.",
+      : "Test setup: none (no test command or no test globs). Don't write tests.",
     !repo.app
-      ? "App: not configured (no start command). Check criteria by reading the code."
+      ? "App: not configured (no start command)."
       : "url" in repo.app
         ? `App: running at ${repo.app.url}. Use the http_request tool to exercise it.`
         : `App: failed to start.\n${repo.app.error}`,
@@ -222,6 +224,15 @@ export async function buildContext(
         .map((r) => `- ${r.agentSlug}: ${r.state}${r.summary ? ` — ${r.summary}` : ""}`)
         .join("\n"),
     ),
+    // Only when there are some, so other projects' prompts are unchanged.
+    ...(repo.baselineFailures?.length
+      ? [
+          section(
+            "baseline_failures",
+            `These project commands already failed on ${repo.defaultBranch} before any ticket (not your doing; Kanbot's checks skip them): ${repo.baselineFailures.map((c) => `\`${c}\``).join(", ")}`,
+          ),
+        ]
+      : []),
     section("project_claude_md", clip(claudeMd, "CLAUDE.md in the repository")),
     repo.cwd
       ? onBranch

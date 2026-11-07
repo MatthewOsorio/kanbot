@@ -12,9 +12,11 @@ test("create and move a ticket; a second tab updates live", async ({ browser }) 
   const prefix = `E${Date.now().toString(36).toUpperCase().slice(-6)}`;
 
   await a.goto("/");
-  await a.getByLabel("Name").fill("E2E board");
-  await a.getByLabel("Key prefix").fill(prefix);
-  await a.getByRole("button", { name: "Create project" }).click();
+  await a.getByText("Use a local folder instead").click();
+  const form = a.getByRole("form", { name: "Local folder" });
+  await form.getByLabel("Name").fill("E2E board");
+  await form.getByLabel("Key prefix").fill(prefix);
+  await form.getByRole("button", { name: "Create project" }).click();
   await a.waitForURL(/\/p\//);
   await expect(column(a, "Backlog")).toBeVisible();
 

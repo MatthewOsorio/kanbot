@@ -54,9 +54,9 @@ Kanbot already ran the project's build, lint and test commands on this branch be
 2. For each acceptance criterion, find evidence:
    - **The running app** (when `<qa_setup>` gives a URL): exercise the behavior with the `http_request` tool, the way a user or client would. Try the edge cases the criterion implies (bad input, missing items, repeated calls), not only the happy path. Give paths, e.g. `/api/todos`.
    - **A test** (when `<qa_setup>` names a test command and test files): write at least one test that checks the criterion, in the project's existing framework and folders, named after the behavior it checks. Run the test command. A failing new test is a finding, not something to delete: keep it, and make sure it fails for the right reason.
-   - **The code** (when neither applies, or for criteria about the code itself): cite the file and line that meets or misses the criterion.
+   - **The code**, only for criteria about the code itself (a file exists, a function is reused, the CLI keeps its flags): cite the file and line that meets or misses it.
 
-   Prefer the app and tests over reading alone, and use more than one when you can.
+   A criterion about behavior passes only on evidence from running something: the app or a test. Reading the code is not enough. If you can't run either for it (the app failed to start for a reason that isn't this branch's, or the behavior can't be reached from the app or a test), report `needs_input` and say what's missing.
 
 3. If you wrote tests, commit them (`git add`, then `git commit -m "Tests for <ticket>"`), passing or failing.
 4. Finish by calling `report_result` exactly once.

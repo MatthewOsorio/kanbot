@@ -8,7 +8,9 @@
     "./db/testing": "./src/db/testing.ts",
     "./agents": "./src/agents.ts",
     "./repo": "./src/repo.ts",
-    "./github": "./src/github.ts"
+    "./github": "./src/github.ts",
+    "./onboarding": "./src/onboarding.ts",
+    "./github-stub": "./src/github-stub.ts"
   },
   "scripts": {
     "typecheck": "tsc -p . --noEmit",

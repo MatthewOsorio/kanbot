@@ -1,3 +1,4 @@
+import { AgentsDisabledError, QaSetupError } from "@kanbot/shared/db";
 import { z } from "zod";
 
 export class HttpError extends Error {
@@ -22,6 +23,13 @@ export function route(fn: (req: Request, ctx: Ctx) => Promise<Response>) {
     } catch (e) {
       if (e instanceof HttpError)
         return Response.json({ error: { code: e.code, message: e.message } }, { status: e.status });
+      if (e instanceof AgentsDisabledError)
+        return Response.json(
+          { error: { code: "unprotected", message: e.message } },
+          { status: 409 },
+        );
+      if (e instanceof QaSetupError)
+        return Response.json({ error: { code: "qa_setup", message: e.message } }, { status: 409 });
       if (e instanceof z.ZodError)
         return Response.json(
           { error: { code: "invalid_body", message: z.prettifyError(e) } },

@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
 
 const PORT = 3100;
@@ -11,6 +13,13 @@ const SECRETS = {
 };
 Object.assign(process.env, SECRETS);
 export const AUTH_STATE = "e2e/.auth.json";
+// Onboarding (§10) talks to a GitHub stub that global-setup starts; the worker clones into a temp folder.
+export const GITHUB_STUB_PORT = 3199;
+export const E2E_TMP = join(tmpdir(), "kanbot-e2e");
+const GITHUB = {
+  KANBOT_GITHUB_API: `http://127.0.0.1:${GITHUB_STUB_PORT}`,
+  KANBOT_REPOS_DIR: join(E2E_TMP, "repos"),
+};
 
 export default defineConfig({
   testDir: "e2e",
@@ -20,7 +29,7 @@ export default defineConfig({
     {
       command: `next dev -H 127.0.0.1 -p ${PORT}`,
       url: `http://127.0.0.1:${PORT}`,
-      env: { DATABASE_URL: TEST_DATABASE_URL, NEXT_DIST_DIR: ".next-e2e", ...SECRETS },
+      env: { DATABASE_URL: TEST_DATABASE_URL, NEXT_DIST_DIR: ".next-e2e", ...SECRETS, ...GITHUB },
       reuseExistingServer: false,
       timeout: 120_000,
     },
@@ -28,7 +37,13 @@ export default defineConfig({
       // The worker on the replay runtime: agents play fixtures/runs, never the real API (requirements §8).
       command: "node --import tsx src/main.ts",
       cwd: "../worker",
-      env: { DATABASE_URL: TEST_DATABASE_URL, KANBOT_RUNTIME: "replay", ANTHROPIC_API_KEY: "" },
+      env: {
+        DATABASE_URL: TEST_DATABASE_URL,
+        KANBOT_RUNTIME: "replay",
+        ANTHROPIC_API_KEY: "",
+        ...SECRETS,
+        ...GITHUB,
+      },
       wait: { stdout: /kanbot worker up/ },
       reuseExistingServer: false,
       timeout: 60_000,

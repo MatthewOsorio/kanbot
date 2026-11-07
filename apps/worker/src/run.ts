@@ -31,6 +31,8 @@ import {
   type Db,
   type Tx,
 } from "@kanbot/shared/db";
+import { decryptEnv } from "@kanbot/shared/github";
+import { baselineFailures, QA_SETUP_MESSAGE, qaRunnable } from "@kanbot/shared/onboarding";
 import { git, removeWorktree, type ProjectConfig } from "@kanbot/shared/repo";
 import { and, count, desc, eq, isNotNull, max, ne, sql } from "drizzle-orm";
 import { buildContext } from "./context";
@@ -47,6 +49,7 @@ import {
   pullImage,
   removeContainers,
   ensureWorktree,
+  openEnv,
   snapshot,
   WORKTREE_COLUMNS,
 } from "./worktree";
@@ -194,12 +197,13 @@ export async function recoverInterrupted(db: Db) {
  * Secrets never reach stored run events (requirements §14). NUL characters are dropped too: Postgres
  * jsonb rejects `\u0000`, so one in a tool's output would fail the run mid-way.
  */
-const redact = (payload: Record<string, unknown>) =>
+const redact = (payload: Record<string, unknown>, secrets: string[]) =>
   JSON.parse(
     redactText(
       JSON.stringify(payload, (_, v: unknown) =>
         typeof v === "string" ? v.replaceAll("\0", "") : v,
       ),
+      secrets,
     ),
   ) as Record<string, unknown>;
 
@@ -252,13 +256,15 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   let idle = 0;
   let testCommand: string | undefined;
   let sessionId: string | undefined;
+  // The project's env var values (§10), redacted from everything this run stores; set before the agent starts.
+  let secrets: string[] = [];
   const emit = async (e: RuntimeEvent) => {
     const n = ++seq;
     if (RECORD) recorded.push(e);
     await db.transaction(async (tx) => {
       await tx
         .insert(runEvents)
-        .values({ runId: run.id, seq: n, type: e.type, payload: redact(e.payload) });
+        .values({ runId: run.id, seq: n, type: e.type, payload: redact(e.payload, secrets) });
       await publish(tx, ticket.projectId, {
         type: "run.event",
         runId: run.id,
@@ -310,8 +316,11 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   let canEdit: ((rel: string) => boolean) | undefined;
   let config: ProjectConfig | undefined;
   let app: { url: string; stop: () => Promise<void> } | undefined;
+  let env: Awaited<ReturnType<typeof openEnv>> | undefined;
   try {
     config = await projectConfigOf(db, project);
+    env = await openEnv(decryptEnv(project.env));
+    secrets = Object.values(env.vars);
     testCommand = config.commands.test;
     // FR-49: a ticket reaching Done loses its worktree (the branch stays) before Archie reads the checkout.
     if (run.columnSlug === "done" && ticket.worktreePath && project.repoPath)
@@ -335,6 +344,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         project.defaultBranch,
         { ...ticket, key },
         config,
+        env,
       );
       if (ticket.worktreePath !== wt.path || ticket.branchName !== wt.branch)
         await db
@@ -348,7 +358,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     // QA checks the criteria against the running app (§4); one that won't start is for Testy to report.
     let appError: string | undefined;
     if (run.columnSlug === "qa" && wt && config.commands.start) {
-      const started = await startApp(config.commands.start, wt.path, config.image);
+      const started = await startApp(config.commands.start, wt.path, config.image, env);
       if ("url" in started) app = started;
       else appError = started.error;
     }
@@ -358,6 +368,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       hotspots: config.hotspots,
       commands: config.commands,
       testGlobs: config.testGlobs,
+      baselineFailures: baselineFailures(project.baseline),
       app: app ? { url: app.url } : appError ? { error: appError } : undefined,
     });
     const scenario = ticket.labels.find((l) => l.startsWith("replay:"))?.slice(7) ?? "default";
@@ -384,7 +395,9 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         resumeSessionId: run.resumeSessionId ?? undefined,
         appUrl: app?.url,
         // Project commands the agent runs go to the project's image (§7).
-        bash: config.image ? containerBash(config.image, cwd, config.commands, run.id) : undefined,
+        bash: config.image
+          ? containerBash(config.image, cwd, config.commands, run.id, env.file)
+          : undefined,
       },
       emit,
     );
@@ -398,6 +411,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         wt && before ? { path: wt.path, base: before.head } : null,
         prompt,
         cwd,
+        secrets,
       );
   } catch (e) {
     const stop = (o: Outcome) => finish(db, run.id, { ...o, sessionId });
@@ -415,12 +429,13 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       });
     if (stall.signal.aborted)
       return stop({ state: "awaiting_input", error: String(stall.signal.reason) });
-    return stop({ state: "failed", error: (e as Error).message });
+    return stop({ state: "failed", error: redactText((e as Error).message, secrets) });
   } finally {
     await app?.stop().catch(() => {});
     // Containers of agent commands the Bash tool's timeout or a cancel left running.
     if (config?.image) await removeContainers(["--filter", `label=kanbot=${run.id}`]);
     if (scratch) await rm(scratch, { recursive: true, force: true });
+    await env?.dispose();
   }
 
   const outcome = outcomeOf(result);
@@ -446,11 +461,18 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       outcome.touched = await changedSince(wt.path, base.trim());
       // The checks gate (§8): a branch that doesn't build, lint and test goes back before review.
       if (outcome.state === "succeeded" && config) {
-        const failed = await runChecks(config.commands, wt.path, config.image);
+        const checksEnv = await openEnv(decryptEnv(project.env));
+        const failed = await runChecks(
+          config.commands,
+          wt.path,
+          config.image,
+          baselineFailures(project.baseline),
+          checksEnv,
+        ).finally(() => checksEnv.dispose());
         if (failed) {
           outcome.state = "changes_requested";
           outcome.error = `Kanbot checks: \`${failed.command}\` failed`;
-          outcome.checks = failed;
+          outcome.checks = { ...failed, output: redactText(failed.output, secrets) };
         }
       }
     }
@@ -560,12 +582,15 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
     const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
     const from = cols.find((c) => c.id === ticket.columnId)!;
     const [project] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
-    const { bounceLimit } = await projectConfigOf(tx, project!);
-    const rule = afterRun(run.columnSlug, o.state, {
+    const config = await projectConfigOf(tx, project!);
+    let rule = afterRun(run.columnSlug, o.state, {
       verdict: o.verdict?.verdict,
       bounces: ticket.bounceCount,
-      bounceLimit,
+      bounceLimit: config.bounceLimit,
     });
+    // §4: QA without the app running would only read the code, so the ticket waits here for a start command.
+    const noQa = rule.to === "qa" && !!project!.repoPath && !qaRunnable(config);
+    if (noQa) rule = { to: null, flag: "needs_input", bounce: false };
     // Re-read: storeResults may have replaced the touch set (Plan B).
     const [{ touchPaths }] = (await tx
       .select({ touchPaths: tickets.touchPaths })
@@ -592,7 +617,8 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         error: o.error,
         costUsd: run.costUsd,
         ...(rule.bounce && { bounce: ticket.bounceCount + 1 }),
-        ...(rule.reason && { reason: `Bounce limit (${bounceLimit}) reached` }),
+        ...(rule.reason && { reason: `Bounce limit (${config.bounceLimit}) reached` }),
+        ...(noQa && { reason: QA_SETUP_MESSAGE }),
       },
       actor,
     );
@@ -640,7 +666,9 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         type: "notification",
         kind: rule.flag as "needs_input" | "failed",
         ticketId: ticket.id,
-        message: `${ticket.title}: blocked, needs your answer`,
+        message: noQa
+          ? `${ticket.title}: ${QA_SETUP_MESSAGE}, then drag it to QA`
+          : `${ticket.title}: blocked, needs your answer`,
       });
   });
 }

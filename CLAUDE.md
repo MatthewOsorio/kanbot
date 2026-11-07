@@ -11,6 +11,7 @@ apps/web/            Next.js 16 App Router: board UI + REST API + SSE
   app/api/**/route.ts  thin handlers: parse with zod, call lib/, wrap with route() for {error:{code,message}}
   lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations, overlap check, diff, acceptProposals (epics)
   lib/runs.ts          run history, run log paging, cancel, retry, revise plan
+  lib/onboarding.ts    onboarding's GitHub calls: repo list, CI PR, branch protection; the setup page is app/p/[projectId]/setup
   lib/auth.ts          the signed session cookie, OAuth state, originOf();  proxy.ts  localhost + same-origin + session on every route
   app/api/github/**, app/api/auth/**   the GitHub App's two-click setup and Sign in with GitHub;  app/login/  Connect or Sign in
   lib/events.ts        one LISTEN client per process fans out to SSE (publish() itself is in shared)
@@ -20,6 +21,7 @@ apps/web/            Next.js 16 App Router: board UI + REST API + SSE
 apps/worker/         Node process (tsx): claims queued runs, runs agents, applies verdicts
   src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery, schedules the nightly cleanup
   src/cleanup.ts       nightlyCleanup: old run_events, worktrees left in Done, unused Kanbot-built images
+  src/onboard.ts       onboarding's worker steps: clone + detect, the baseline (§10)
   src/run.ts           claimNext (SKIP LOCKED queue), executeRun, outcomeOf, finish (verdict → transition, one tx)
   src/context.ts       the context bundle (prompt) for a run (branch context, in-flight tickets)
   src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate), startApp (QA's app on a free PORT), projectImage (builds the devcontainer's Dockerfile), dockerRun/containerBash (project commands in the project's image)
@@ -31,7 +33,8 @@ packages/shared/     shared by web and worker
   src/transitions.ts   the transition table as data (afterRun);  src/verdict.ts  report_result schema
   src/agents.ts        agent file loader (server-only export "@kanbot/shared/agents")
   src/repo.ts          git(), .kanbot/project.yml loader, overlap(), branchName() (server-only "@kanbot/shared/repo")
-  src/github.ts        the GitHub App's credentials, AES-256-GCM in settings.github_app (server-only "@kanbot/shared/github")
+  src/github.ts        the GitHub App's credentials, AES-256-GCM in settings.github_app; gh(), appJwt(), repoToken() (server-only "@kanbot/shared/github"); github-stub.ts for tests
+  src/onboarding.ts    onboarding steps, detect(), starterWorkflow(), protection rules ("@kanbot/shared/onboarding")
   src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd, projectConfigOf (settings, seeded once from project.yml)
   src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
   drizzle/             generated SQL migrations (commit them)
