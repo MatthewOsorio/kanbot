@@ -1,6 +1,6 @@
 // The M3 build loop against the replay runtime, on a real git repo (fixtures/sample-repo): no API calls.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { activeRunStates, DEFAULT_COLUMNS, uuidv7 } from "@kanbot/shared";
@@ -27,7 +27,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
 import { claimNext, executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
-import { checkAfterRun, ensureWorktree, snapshot } from "../src/worktree";
+import { checkAfterRun, ensureWorktree, projectImage, snapshot } from "../src/worktree";
 
 const db = createDb(TEST_DATABASE_URL);
 const runtime = new ReplayRuntime();
@@ -552,6 +552,51 @@ describe.skipIf(!hasDocker)("project commands in the project's image (M5, §7)",
     expect(seen.running).not.toBe(""); // it really was a container
     expect(leftovers()).toBe("");
   }, 120_000);
+
+  it("builds the image from the devcontainer's Dockerfile on the default branch, once", async () => {
+    const { project, repo, move } = await setup("default");
+    // The owner's repo has a devcontainer that builds (paths relative to .devcontainer/, context the repo).
+    mkdirSync(join(repo, ".devcontainer"));
+    writeFileSync(
+      join(repo, ".devcontainer", "devcontainer.json"),
+      `{\n  // dev image\n  "build": { "dockerfile": "Dockerfile", "context": ".." },\n}\n`,
+    );
+    writeFileSync(
+      join(repo, ".devcontainer", "Dockerfile"),
+      `FROM ${IMAGE}\nCOPY package.json /kanbot-built/\n`,
+    );
+    await git(repo, ["add", ".devcontainer"]);
+    await git(repo, ["commit", "-q", "-m", "devcontainer"]);
+    const config = await projectConfigOf(db, project);
+    expect(config.dockerfile).toEqual({ file: ".devcontainer/Dockerfile", context: "." });
+
+    await move("qa");
+    let image = "";
+    const probe: typeof runtime = {
+      run: async (req, emit) => {
+        image = docker(["ps", "--filter", "label=kanbot", "--format", "{{.Image}}"]).trim();
+        expect((await fetch(req.appUrl!)).status).toBe(200);
+        return runtime.run(req, emit);
+      },
+    };
+    await executeRun(db, probe, (await claimNext(db))!, new AbortController().signal);
+    expect(image).toMatch(new RegExp(`^kanbot-${project.keyPrefix.toLowerCase()}:[0-9a-f]{12}$`));
+    // The COPY came from the default branch's tree (the build context).
+    expect(docker(["run", "--rm", image, "ls", "/kanbot-built"]).trim()).toBe("package.json");
+    // Same default branch, same tag: no rebuild.
+    expect(await projectImage(repo, "main", config, project.keyPrefix)).toBe(image);
+    // The owner's Image wins over the devcontainer.
+    expect(await projectImage(repo, "main", { ...config, image: IMAGE }, project.keyPrefix)).toBe(
+      IMAGE,
+    );
+    docker(["rmi", image]);
+    // A Dockerfile that doesn't build fails with the build's output.
+    writeFileSync(join(repo, ".devcontainer", "Dockerfile"), `FROM ${IMAGE}\nRUN exit 7\n`);
+    await git(repo, ["commit", "-q", "-am", "broken"]);
+    await expect(projectImage(repo, "main", config, project.keyPrefix)).rejects.toThrow(
+      /Building the devcontainer image kanbot-.* failed:[\s\S]*exit 7/,
+    );
+  }, 300_000);
 });
 
 describe("post-run checks", () => {

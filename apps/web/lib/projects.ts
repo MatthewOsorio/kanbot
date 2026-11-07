@@ -151,16 +151,16 @@ export type Card = Board["tickets"][number];
 export async function getProjectSettings(id: string) {
   const [p] = await db.select().from(projects).where(eq(projects.id, id));
   if (!p) throw notFound("Project not found");
-  const { commands, image, testGlobs, hotspots, bounceLimit, concurrency } = await projectConfigOf(
-    db,
-    p,
-  );
+  const { commands, image, dockerfile, testGlobs, hotspots, bounceLimit, concurrency } =
+    await projectConfigOf(db, p);
   return {
     id,
     name: p.name,
     keyPrefix: p.keyPrefix,
     commands,
     image: image ?? "",
+    // Read-only: what the repo's devcontainer builds when Image is empty (§7).
+    dockerfile: dockerfile?.file ?? null,
     testGlobs,
     hotspots,
     bounceLimit,

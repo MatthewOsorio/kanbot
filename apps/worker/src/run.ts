@@ -43,6 +43,7 @@ import {
   runChecks,
   startApp,
   containerBash,
+  projectImage,
   removeContainers,
   ensureWorktree,
   snapshot,
@@ -317,6 +318,16 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         await db.update(tickets).set({ worktreePath: null }).where(eq(tickets.id, ticket.id));
     if (WORKTREE_COLUMNS.has(run.columnSlug)) {
       if (!project.repoPath) throw new Error("Link a local repo to this project before building");
+      // Builds the devcontainer's image when the project has no Image of its own (§7).
+      config = {
+        ...config,
+        image: await projectImage(
+          project.repoPath,
+          project.defaultBranch,
+          config,
+          project.keyPrefix,
+        ),
+      };
       wt = await ensureWorktree(
         project.repoPath,
         project.defaultBranch,

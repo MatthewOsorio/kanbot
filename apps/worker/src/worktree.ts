@@ -1,7 +1,7 @@
 import { exec, execFile, spawn } from "node:child_process";
 import { createServer, type AddressInfo } from "node:net";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, posix, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { uuidv7 } from "@kanbot/shared";
 import { branchName, git, type ProjectConfig } from "@kanbot/shared/repo";
@@ -249,6 +249,67 @@ export function dockerRun(
     "-c",
     command,
   ];
+}
+
+const BUILD_MS = 20 * 60_000;
+
+/**
+ * The image to run project commands in (§7): the owner's Image if set, else the one the repo's
+ * devcontainer Dockerfile builds, else none (the worker's toolchain). The build always comes from the
+ * default branch (`git archive`), never a worktree, so agents can't change it; its tag is the context's
+ * tree hash, so it rebuilds only when the context changes there.
+ */
+export async function projectImage(
+  repoPath: string,
+  defaultBranch: string,
+  config: Pick<ProjectConfig, "image" | "dockerfile">,
+  key: string,
+): Promise<string | undefined> {
+  if (config.image || !config.dockerfile) return config.image;
+  const { file, context } = config.dockerfile;
+  const inContext = context === "." ? file : posix.relative(context, file);
+  if (inContext.startsWith("../"))
+    throw new Error(
+      `The devcontainer's Dockerfile ${file} is outside its build context ${context}`,
+    );
+  const tree = `${defaultBranch}:${context === "." ? "" : context}`;
+  const hash = (await git(repoPath, ["rev-parse", tree])).trim().slice(0, 12);
+  const tag = `kanbot-${key.toLowerCase().replace(/[^a-z0-9]/g, "")}:${hash}`;
+  const built = await execFileP("docker", ["image", "inspect", tag]).then(
+    () => true,
+    () => false,
+  );
+  if (!built) await buildImage(repoPath, tree, inContext, tag);
+  return tag;
+}
+
+/** `git archive <tree> | docker build -f <file> -t <tag> -`, without a shell. Throws with the output's tail. */
+function buildImage(repoPath: string, tree: string, file: string, tag: string) {
+  return new Promise<void>((ok, fail) => {
+    const archive = spawn("git", ["archive", "--format=tar", tree], {
+      cwd: repoPath,
+      windowsHide: true,
+    });
+    const build = spawn("docker", ["build", "--label", LABEL, "-f", file, "-t", tag, "-"], {
+      windowsHide: true,
+    });
+    archive.on("error", fail);
+    build.on("error", fail);
+    build.stdin.on("error", () => {}); // docker exiting early is reported by its exit code
+    archive.stdout.pipe(build.stdin);
+    let output = "";
+    const keep = (b: Buffer) => (output = (output + b.toString()).slice(-8_000));
+    archive.stderr.on("data", keep);
+    build.stdout.on("data", keep);
+    build.stderr.on("data", keep);
+    const timer = setTimeout(() => (archive.kill(), build.kill()), BUILD_MS);
+    build.once("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) return ok();
+      const tail = output.trimEnd().split("\n").slice(-CHECK_TAIL_LINES).join("\n");
+      fail(new Error(`Building the devcontainer image ${tag} failed:\n${tail}`));
+    });
+  });
 }
 
 /** Removes the containers a `docker ps` filter matches (e.g. a run's leftovers). Never throws. */

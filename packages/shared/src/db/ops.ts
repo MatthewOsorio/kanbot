@@ -23,6 +23,7 @@ export async function projectConfigOf(
         testGlobs: p.testGlobs ?? [],
         hotspots: p.hotspots ?? [],
         image: p.image ?? undefined,
+        dockerfile: p.dockerfile ?? undefined,
       })
     : projectConfig.parse({});
   if (!p.commands && p.repoPath) {
@@ -35,6 +36,7 @@ export async function projectConfigOf(
         testGlobs: c.testGlobs,
         hotspots: c.hotspots,
         image: c.image ?? null,
+        dockerfile: c.dockerfile ?? null,
       })
       .where(and(eq(projects.id, p.id), sql`${projects.commands} is null`))
       .returning({ id: projects.id });

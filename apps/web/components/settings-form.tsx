@@ -14,6 +14,7 @@ type Settings = {
   keyPrefix: string;
   commands: { install?: string; build?: string; test?: string; lint?: string; start?: string };
   image: string;
+  dockerfile: string | null;
   testGlobs: string[];
   hotspots: { name: string; paths: string[] }[];
   bounceLimit: number;
@@ -136,7 +137,16 @@ export function SettingsForm({ projectId }: { projectId: string }) {
               <span className="font-medium">Image</span>
               <span className="block text-muted-foreground">
                 The Docker image these commands run in, with the worktree mounted, e.g.{" "}
-                <code>node:22-bookworm</code>. Empty runs them on the worker&apos;s own toolchain.
+                <code>node:22-bookworm</code>.{" "}
+                {s.dockerfile ? (
+                  <>
+                    Leave it empty and Kanbot builds one from the repo&apos;s{" "}
+                    <code>{s.dockerfile}</code> (on the default branch); a value here is used
+                    instead.
+                  </>
+                ) : (
+                  "Empty runs them on the worker's own toolchain."
+                )}
               </span>
               <Input
                 className="font-mono"

@@ -19,7 +19,7 @@ apps/worker/         Node process (tsx): claims queued runs, runs agents, applie
   src/main.ts          LISTEN + 5 s poll, claim loop, crash recovery
   src/run.ts           claimNext (SKIP LOCKED queue), executeRun, outcomeOf, finish (verdict → transition, one tx)
   src/context.ts       the context bundle (prompt) for a run (branch context, in-flight tickets)
-  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate), startApp (QA's app on a free PORT), dockerRun/containerBash (project commands in the project's image)
+  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate), startApp (QA's app on a free PORT), projectImage (builds the devcontainer's Dockerfile), dockerRun/containerBash (project commands in the project's image)
   src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
   src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK; Kanbot's MCP server with report_result and QA's http_request), replay.ts (fixtures + record()), fence.ts (permission hook logic, appRequestUrl)
   test/                Vitest against kanbot_test with the replay runtime
@@ -52,7 +52,7 @@ pnpm eval:agents            golden tickets with REAL agents (costs money; ask fi
 
 The worker uses the real Claude Agent SDK unless `KANBOT_RUNTIME=replay` (needs `ANTHROPIC_API_KEY` in `.env`). Tests and CI only ever use replay. A real run costs money: Plan B was about $0.15–0.45 per plan in the M2 smoke test. `KANBOT_RECORD=1` saves real runs as replay scripts (see `.env.example`); `KANBOT_RUNTIME=replay pnpm eval:agents` checks the eval script for free.
 
-Project commands run in the project's image (`docker run`, Settings "Image") when it has one, else on the host toolchain; the Docker-backed worker tests skip when Docker isn't running. Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs, hotspots, bounce limit and concurrency live in the database (Settings page), seeded once from `.kanbot/project.yml` on its default branch. The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
+Project commands run in the project's image (`docker run`; from the repo's devcontainer, project.yml or Settings "Image") when it has one, else on the host toolchain; the Docker-backed worker tests skip when Docker isn't running. Build agents work in worktrees at `<repo>.kanbot-worktrees/<KEY-n>`, never in the checkout. A project's commands, test globs, hotspots, bounce limit and concurrency live in the database (Settings page), seeded once from `.kanbot/project.yml` on its default branch. The permission hook (`fence.ts`) is the security boundary for agent tools: the SDK auto-approves read-only shell commands in every mode, so never rely on `allowedTools` alone.
 
 `pnpm test:e2e` can run while `pnpm dev` is running: it uses `NEXT_DIST_DIR=.next-e2e`, its own database and its own replay worker. Worker tests (`pnpm test`) share `kanbot_test` and cancel any leftover active runs there first.
 
