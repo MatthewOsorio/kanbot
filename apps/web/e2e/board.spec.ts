@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { request } from "node:http";
+import { SESSION_COOKIE, signSession } from "../lib/auth";
+import { OWNER_ID } from "./global-setup";
 
 const column = (p: Page, name: string) => p.getByRole("region", { name, exact: true });
 
@@ -68,11 +70,13 @@ test("create and move a ticket; a second tab updates live", async ({ browser }) 
   await expect(column(a, "Ready").getByText("Live ticket")).toBeVisible();
 });
 
-// No auth until M5: a DNS-rebound Host or a cross-site POST must not reach the API (proxy.ts).
+// Even with the owner's session, a DNS-rebound Host or a cross-site POST must not reach the API (proxy.ts).
 test("refuses foreign hosts and cross-site writes", async ({ baseURL }) => {
   const send = (method: string, headers: Record<string, string>) =>
     new Promise<number>((resolve, reject) => {
-      const req = request(new URL("/api/projects", baseURL), { method, headers }, (res) => {
+      const cookie = `${SESSION_COOKIE}=${signSession(OWNER_ID)}`;
+      const opts = { method, headers: { cookie, ...headers } };
+      const req = request(new URL("/api/projects", baseURL), opts, (res) => {
         res.resume();
         resolve(res.statusCode!);
       });

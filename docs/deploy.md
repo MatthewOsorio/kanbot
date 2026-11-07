@@ -9,7 +9,7 @@ Kanbot needs one Linux machine with Docker that stays on while agents work. Two 
 
 Both use the same pieces: a `kanbot` user, **rootless Docker** (root inside Kanbot's containers is that unprivileged user, never the machine's root), the code in `/srv/kanbot/app`, and a `.env`. Only the parts around them differ.
 
-> **Never make Kanbot reachable from other machines before login exists (M5 phase 3).** Until then the app has no authentication and refuses any Host other than `localhost`. Setup A is fine now, because it only listens on localhost. For setup B, don't start Caddy (`COMPOSE_PROFILES=app,public`) until Sign in with GitHub has landed.
+> **Kanbot answers only on `localhost` for now.** Sign in with GitHub exists, but the app still refuses any other Host name, so Caddy on a domain gets 403 until M6 opens the app to it. Setup A is fine as it is. For setup B, don't start Caddy (`COMPOSE_PROFILES=app,public`) yet.
 
 ## What you need
 
@@ -125,15 +125,17 @@ If the repository is private, add a read-only **deploy key** first: generate one
 Create `/srv/kanbot/app/.env`, readable only by `kanbot` (`chmod 600 .env`):
 
 ```sh
-COMPOSE_PROFILES=app             # setup A; on a server, app,public (adds Caddy) once phase 3 has landed
+COMPOSE_PROFILES=app             # setup A; on a server, app,public (adds Caddy) once M6 opens the app to a domain
 POSTGRES_PASSWORD=<a long random string: openssl rand -hex 32>
 ANTHROPIC_API_KEY=<your key>
 DOCKER_SOCKET=/run/user/1000/docker.sock
 KANBOT_REPOS_DIR=/srv/kanbot/repos
+KANBOT_SESSION_SECRET=<openssl rand -base64 32>   # signs the login cookie; changing it signs you out
+KANBOT_ENCRYPTION_KEY=<openssl rand -base64 32>   # encrypts the GitHub App's credentials; changing it loses them
 KANBOT_DOMAIN=kanbot.example.com   # server only
 ```
 
-Compose reads this file to fill in `docker-compose.yml`. Each container gets only the variables its service lists, never the whole file. Phase 3 adds the session secret and the encryption key for the GitHub App credentials here.
+Compose reads this file to fill in `docker-compose.yml`. Each container gets only the variables its service lists, never the whole file.
 
 Optional: `KANBOT_WEB_PORT` and `KANBOT_DB_PORT` (default 3000 and 5432) if those ports are taken, e.g. by a `pnpm dev` on Windows in setup A. `KANBOT_DEFAULT_IMAGE` (default `node:24-bookworm`) is the image for projects that have none of their own (no devcontainer, nothing in Settings).
 
@@ -148,6 +150,14 @@ docker compose logs worker   # "kanbot worker up (runtime: sdk)"
 ```
 
 Then open `http://localhost:3000` (setup A: WSL forwards it to your Windows browser), or `https://kanbot.example.com` (setup B).
+
+The first time, Kanbot shows **Connect GitHub**:
+
+1. Click it. GitHub opens a pre-filled App; click **Create**.
+2. Pick the repos Kanbot may work on (a side project, not necessarily Kanbot itself) and click **Install**.
+3. Back in Kanbot, click **Sign in with GitHub**.
+
+The account that created the App is the only one that can sign in. Always use the same address (`localhost`, not `127.0.0.1`): the App only knows the one it was created from. More repos later: **Add repos on GitHub** on Home.
 
 What runs where:
 - `db` is Postgres 16, on 127.0.0.1 only.

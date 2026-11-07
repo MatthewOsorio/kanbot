@@ -11,6 +11,8 @@ apps/web/            Next.js 16 App Router: board UI + REST API + SSE
   app/api/**/route.ts  thin handlers: parse with zod, call lib/, wrap with route() for {error:{code,message}}
   lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations, overlap check, diff, acceptProposals (epics)
   lib/runs.ts          run history, run log paging, cancel, retry, revise plan
+  lib/auth.ts          the signed session cookie, OAuth state, originOf();  proxy.ts  localhost + same-origin + session on every route
+  app/api/github/**, app/api/auth/**   the GitHub App's two-click setup and Sign in with GitHub;  app/login/  Connect or Sign in
   lib/events.ts        one LISTEN client per process fans out to SSE (publish() itself is in shared)
   components/          board.tsx (dnd-kit), ticket-drawer.tsx (dialog: tabs, Live log, Diff), home.tsx, brand.tsx (Wordmark, SELECT), theme-toggle.tsx, markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
   app/globals.css      design tokens (slate + indigo, status colors bg-running/needs/failed/ok), light and .dark; agent colors come from agent frontmatter
@@ -29,6 +31,7 @@ packages/shared/     shared by web and worker
   src/transitions.ts   the transition table as data (afterRun);  src/verdict.ts  report_result schema
   src/agents.ts        agent file loader (server-only export "@kanbot/shared/agents")
   src/repo.ts          git(), .kanbot/project.yml loader, overlap(), branchName() (server-only "@kanbot/shared/repo")
+  src/github.ts        the GitHub App's credentials, AES-256-GCM in settings.github_app (server-only "@kanbot/shared/github")
   src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd, projectConfigOf (settings, seeded once from project.yml)
   src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
   drizzle/             generated SQL migrations (commit them)
@@ -76,4 +79,4 @@ If `pnpm dev` returns 500 with a Turbopack panic about `globals.css` / exit code
 - A known-limited shortcut gets a `shortcut: <limit>, <when to upgrade>` comment.
 - One `.env` at the repo root; `.env.example` lists every variable. Never commit secrets.
 - Dependencies: pnpm 12 enforces a minimum release age. Pick a mature version rather than adding `minimumReleaseAgeExclude` entries.
-- The app has no auth until M5 and binds to 127.0.0.1. Don't expose it.
+- Every route needs the owner's session (Sign in with GitHub, `proxy.ts`), and the app still binds to 127.0.0.1 and answers only on localhost: don't expose it (a public server is M6). Set `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY` in `.env`. e2e and browser checks never switch auth off: `e2e/global-setup.ts` stores a fake App and signs a session with test secrets (`playwright.config.ts`), and every spec runs with that cookie.

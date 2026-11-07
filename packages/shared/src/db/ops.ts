@@ -142,7 +142,14 @@ export type Settings = typeof settings.$inferSelect;
 export async function getSettings(tx: Pick<Tx, "select">): Promise<Settings> {
   const [s] = await tx.select().from(settings);
   return (
-    s ?? { id: 1, paused: false, pausedReason: null, dailyBudgetUsd: 5, updatedAt: new Date() }
+    s ?? {
+      id: 1,
+      paused: false,
+      pausedReason: null,
+      dailyBudgetUsd: 5,
+      githubApp: null,
+      updatedAt: new Date(),
+    }
   );
 }
 

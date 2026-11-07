@@ -14,11 +14,11 @@ Last updated 2026-11-06 (QA rework and UI revamp after M4.5).
     - Testy McTestface (QA), who checks each criterion against the app the worker starts, with tests where the project has a test setup.
   - Bounce-backs and the bounce limit, the overlap check, stall detection, Ponytail, and the golden-ticket eval.
   - Unblocking (M4): Blocked with Rubber Duckworth, Resume with an answer, session resume on bounce-backs, in-app notifications; the daily cap, Pause all and automatic resume after an outage; Archie's retro and worktree removal at Done; ticket links; project Settings; the cost total on each ticket; CI.
-  - M5 so far (in progress, `docs/m5-report.md`): project commands, the QA app and agents' project commands run in the project's own container image, taken from the repo's devcontainer (named, or built from its Dockerfile) or `project.yml`, or set in Settings (§7); the deploy files (compose services, Dockerfile, Caddy, deploy workflow, `docs/deploy.md`) and the nightly cleanup. Kanbot runs on the owner's PC in its own WSL distro; a public server is optional and later.
+  - M5 so far (in progress, `docs/m5-report.md`): project commands, the QA app and agents' project commands run in the project's own container image, taken from the repo's devcontainer (named, or built from its Dockerfile) or `project.yml`, or set in Settings (§7); the deploy files (compose services, Dockerfile, Caddy, deploy workflow, `docs/deploy.md`) and the nightly cleanup; the GitHub App's two-click setup and Sign in with GitHub, required on every route (§10, §12). Kanbot runs on the owner's PC in its own WSL distro; a public server is optional and later.
   - Quality gates and epics (M4.5): the worker's checks gate (build, lint and test after every build run, before Code Review); Nancy's security pass with Cloudflare's security-audit skill; epics, where Plan B splits a ticket or a technical doc into proposed tickets the owner accepts into Backlog.
   - The UI revamp (after M4.5): light and dark themes with a toggle, slate and indigo design tokens, Plus Jakarta Sans and JetBrains Mono, and agent colors: each agent file names a color, which marks its column, its cards and its glyph avatar. The ticket drawer is a centered dialog, and its artifacts and diff files name the agent that made them (`runs.files_changed`).
-- **How it runs:** locally only, bound to 127.0.0.1, with no login. Tested on Windows only. Project commands, image, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
-- **Next: the rest of M5 (ship and deploy):** the server and login, the GitHub App and onboarding, Captain Ship-It, CI status tracking and the PR Review gate.
+- **How it runs:** locally only, bound to 127.0.0.1, behind Sign in with GitHub (the owner only). Tested on Windows only. Project commands, image, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
+- **Next: the rest of M5 (ship and deploy):** onboarding, Captain Ship-It, CI status tracking and the PR Review gate.
 
 The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it. What each milestone built, and why, is in `docs/m1-report.md` to `m4-report.md` `m4.5-report.md` and `m5-report.md` (in progress).
 
@@ -607,7 +607,15 @@ Kanbot creates its GitHub App from a manifest, so the owner never copies keys or
 1. During onboarding the owner clicks **Connect GitHub**. The browser opens github.com showing an app pre-filled by Kanbot: name, the permissions above, a webhook URL pointing at the server, and a callback URL for sign-in. The owner clicks **Create**.
 2. GitHub asks where to install it. The owner picks repos (or all repositories) and clicks **Install**.
 
-GitHub redirects back to Kanbot, which exchanges the one-time code for the app's ID, private key and webhook secret and stores them encrypted in the database, with the encryption key in the server's `.env`. The same app provides Sign in with GitHub for Kanbot's own login, restricted to the owner's account. Adding repos later is one link from Settings.
+GitHub redirects back to Kanbot, which exchanges the one-time code for the app's ID, private key, OAuth client and webhook secret and stores them encrypted (AES-256-GCM) in `settings.github_app`, with the encryption key (`KANBOT_ENCRYPTION_KEY`) in the `.env`. Kanbot then sends the owner on to the App's install page, the second click. The same app provides Sign in with GitHub for Kanbot's own login, restricted to the owner: the account that created the App (the manifest exchange names it), so there is nothing to configure. Adding repos later is the **Add repos on GitHub** link on Home.
+
+Built details (M5):
+
+- **One App per Kanbot.** Setup runs only while no App is stored, so nobody can swap in their own App later. To start over, delete the App on GitHub and clear `settings.github_app`.
+- **Localhost only.** Before an App exists, anyone who can reach the setup page could connect their own App and become the owner. Setup is guarded by the localhost-only rule (below), so on a server the first setup goes over an SSH tunnel (M6).
+- **The App's name** is `kanbot-<6 hex>`, because App names are unique across GitHub.
+- **URLs** come from the origin the browser used, so the same address must be used for sign-in later: an App created on `http://localhost:3000` signs in there, not on `127.0.0.1`.
+- **No webhook while Kanbot polls (WSL).** GitHub refuses a manifest whose hook URL is localhost, even an inactive one (found on the first real try, 2026-11-07), so the manifest leaves out `hook_attributes` and `default_events`. A public server adds them in the App settings (or with `PATCH /app/hook/config`) (M6).
 
 ### Branch protection on main
 
@@ -677,7 +685,7 @@ Ten tables plus a single-row `settings` table cover v1; all IDs are UUIDv7, all 
 | `comments` | id, ticket\_id, author\_kind (`user`, `agent`), agent\_slug, body\_md, file, line, resolved, created\_at | Review line comments use `file` and `line`. |
 | `activity` | id, ticket\_id, actor\_kind, actor, action (`created`, `moved`, `run_started`, `run_finished`, `commented`, `edited`), data (jsonb), created\_at | Drives the ticket timeline and the audit trail. Criteria changes are `edited` with `fields: ["criteria"]`. |
 
-Global settings (daily budget, global concurrency, serious mode, pause-all flag, encrypted GitHub App credentials) live in a single-row `settings` table (id 1; a missing row means the defaults). Built so far: `paused`, `paused_reason` (set when Kanbot paused itself) and `daily_budget_usd`; each other field arrives with its first user. Until then global concurrency is a constant in the worker (per-project concurrency is in `projects.settings`). `projects.repo_path` is an optional absolute path to a local checkout; onboarding fills it with the clone path (M5).
+Global settings (daily budget, global concurrency, serious mode, pause-all flag, encrypted GitHub App credentials) live in a single-row `settings` table (id 1; a missing row means the defaults). Built so far: `paused`, `paused_reason` (set when Kanbot paused itself), `daily_budget_usd` and `github_app` (the App's credentials and owner, encrypted JSON, §10); each other field arrives with its first user. Until then global concurrency is a constant in the worker (per-project concurrency is in `projects.settings`). `projects.repo_path` is an optional absolute path to a local checkout; onboarding fills it with the clone path (M5).
 
 ## 12. API and real-time events
 
@@ -714,7 +722,7 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | GET | `/api/costs?groupBy=day\|agent\|ticket&from&to` | Cost reports. | M6 |
 | GET / PATCH | `/api/settings` | Read Pause all, the pause reason, the daily cap and today's spend; body `{paused?, dailyBudgetUsd?}` pauses or resumes all agents and sets the cap. Resuming clears the pause reason. | Built |
 
-GitHub endpoints (all M5): `POST /api/webhooks/github` receives signature-verified webhooks; `POST /api/tickets/:id/merge` merges only when GitHub reports a human approval and green checks. "Start anyway" is the move's `startAnyway` flag rather than its own endpoint. `GET /api/github/setup` starts the two-click GitHub App setup and `GET /api/github/callback` completes it; `/api/auth/*` handles Sign in with GitHub.
+GitHub endpoints (all M5): `POST /api/webhooks/github` receives signature-verified webhooks; `POST /api/tickets/:id/merge` merges only when GitHub reports a human approval and green checks. "Start anyway" is the move's `startAnyway` flag rather than its own endpoint. `GET /api/github/setup` starts the two-click GitHub App setup and `GET /api/github/callback` completes it (both built); `/api/auth/login`, `/api/auth/callback` and `POST /api/auth/logout` handle Sign in with GitHub (built).
 
 ### SSE stream
 
@@ -730,7 +738,14 @@ GitHub endpoints (all M5): `POST /api/webhooks/github` receives signature-verifi
 - `notification` — `{kind, ticketId?, message}`: a ticket now waits for the owner (`needs_input`, `failed`, sent when Duckworth is done), or Kanbot paused itself (`paused`, global, no ticket). The board shows a browser notification when permitted and the tab is hidden.
 - `settings.updated` — `{paused}`, sent to every project's stream; the worker stops its runs when `paused`
 
-The app is publicly reachable on the DigitalOcean server, so every route except the GitHub webhook requires login: Sign in with GitHub through the Kanbot GitHub App, restricted to the owner's account, with a secure, HTTP-only session cookie. The webhook endpoint is authenticated by its HMAC signature instead.
+Every route requires login: Sign in with GitHub through the Kanbot GitHub App, restricted to the owner's account. Exceptions are the login page, `/api/auth/*`, the two GitHub setup routes and Next's own assets, plus, once webhooks exist (M6), the webhook endpoint, which is authenticated by its HMAC signature instead.
+
+Built in M5:
+
+- **The session** is a cookie (`kanbot_session`) holding the owner's GitHub id and an expiry (30 days), signed with HMAC-SHA256 under `KANBOT_SESSION_SECRET`. It is HTTP-only and `SameSite=Lax`, and `Secure` on any host but this machine's. There's no session table: signing out clears the cookie, and changing the secret signs everyone out.
+- **`apps/web/proxy.ts`** checks the cookie's signature on every request (never the database). Without a valid one, `/api/*` answers 401 `unauthorized` and pages redirect to `/login`.
+- **The proxy's older rules still come first:** only a localhost Host gets in, and writes must come from Kanbot's own origin. Opening Kanbot to a domain is M6.
+- **GitHub round trips** carry a one-time `state` in a short-lived cookie (CSRF). The user's OAuth token is used once, to read who signed in, and is never stored.
 
 ## 13. UI requirements
 
@@ -845,8 +860,7 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | `blockWritesOutsideWorkingDirectories` | §7, §14 | Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
 | Running Kanbot in its own WSL distro with rootless Docker | §7 | The files and `docs/deploy.md` (setup A) exist; the stack was checked in WSL on rootful Docker. The owner sets up the `kanbot` distro, which checks rootless Docker for real. |
 | Disk over 90% full: no new runs and a banner | §8 failure handling | The nightly cleanup exists; the guard itself was never built (found 2026-11-06). |
-| Sign in with GitHub; auth on every route | §12 | No auth yet. The dev server binds to 127.0.0.1, and `apps/web/proxy.ts` refuses any Host other than localhost (DNS rebinding) and cross-origin writes (CSRF). |
-| GitHub App two-click setup, onboarding walkthrough with command detection and branch-protection check | §10, FR-3, FR-45 | |
+| Onboarding walkthrough with command detection and branch-protection check | §10, FR-3, FR-45 | The GitHub App's two-click setup and Sign in with GitHub are built (phase 3). |
 | `projects`: github\_owner, github\_repo, baseline; clone and default-branch validation | FR-1, FR-3 | Need the GitHub App and onboarding. Projects are name, key prefix, default branch and an optional local `repo_path`. |
 | `tickets`: pr\_number, pr\_url, head\_sha, ci\_state, review\_state | §11 | |
 | Agent file for Captain Ship-It; PR creation, CI status, PR Review gate, merge detection, webhooks with polling fallback | §4, FR-43, FR-44, FR-46, FR-47, FR-48 | Ship stays a gate until then. |
@@ -861,7 +875,11 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 
 | Item | Spec | Notes |
 | --- | --- | --- |
-| A public server: Caddy, HTTPS, webhooks, the deploy workflow on a real host | §7, FR-44 | Moved from M5 (2026-11-06): Kanbot runs locally in WSL for now. The files and `docs/deploy.md` (setup B) exist; checking them needs a server and a domain. Login must exist first. |
+| A public server: Caddy, HTTPS, webhooks, the deploy workflow on a real host | §7, FR-44 | Moved from M5 (2026-11-06): Kanbot runs locally in WSL for now. The files and `docs/deploy.md` (setup B) exist; checking them needs a server and a domain. Login exists (M5), but `proxy.ts` still answers only on localhost. A server also needs:
+- the domain allowed in the proxy;
+- `X-Forwarded-Proto` trusted from Caddy, for the cookie and the App's URLs;
+- the App's webhook and events added, with its callback URLs for the domain;
+- the first setup done over an SSH tunnel. |
 | Agent files for Dr. Rabbit Hole and Marge Conflict | §4, §9 | Until Marge ships, every conflicting rebase goes to Blocked. |
 | Onboarding steps 8–9: Plan B suggests hotspot groups; Kanbot drafts CLAUDE.md and `.claude/claude-security-guidance.md` as a PR | §10 | Moved from M5 on 2026-11-06: not needed for M5's done-when, and each is agent work with its own eval spend. Hotspots are edited in Settings meanwhile. |
 | Agents and Costs pages | §13 | |

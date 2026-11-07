@@ -19,8 +19,8 @@ Status: **in progress (living document, updated as each phase lands).** Branch `
 | 1b | Kanbot builds the image from a devcontainer's Dockerfile by itself | **done** (2026-11-06) |
 | 2 | Dockerfiles, compose `web`/`worker`/`caddy`, deploy workflow, nightly cleanup, `docs/deploy.md` | **done locally** (2026-11-06) |
 | 2b | Run Kanbot in WSL; a default image so project code never runs in the worker's container | **done** (2026-11-06); the owner's own `kanbot` distro is set up from `docs/deploy.md` |
-| 3 | GitHub App two-click setup, Sign in with GitHub, auth on every route | next |
-| 4 | Onboarding (§10 steps 1–7 and 10) | not started |
+| 3 | GitHub App two-click setup, Sign in with GitHub, auth on every route | **done** (2026-11-07) |
+| 4 | Onboarding (§10 steps 1–7 and 10) | next |
 | 5 | Captain Ship-It, CI status, PR Review gate, merge detection, rebase before runs | not started |
 | 6 | Leftovers: `blockWritesOutsideWorkingDirectories`, SDK `sandbox`, SSE `Last-Event-ID`, the disk-over-90% guard | not started |
 
@@ -36,9 +36,26 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - **2026-11-06.** Owner review: is a Droplet needed at all? No: M5's goal can be reached on the owner's PC. Decided: run Kanbot in its own WSL distro, the public server becomes optional (M6). While explaining how projects get their image, a security gap came up: a project with no image ran its code inside the worker's container, which holds the Docker socket. Phase 2b covers both.
 - **2026-11-06.** Phase 2b done. The full stack ran in the owner's Ubuntu WSL (its native Docker Engine, separate from Docker Desktop), reached from Windows at `localhost`, and a replay ticket went from In Progress through review to "QA passed, awaiting approval". The check found three bugs, all fixed: the web container had neither git nor the repos (adding a project with a repo failed), a failed image download was reported as the agent's failing tests (bouncing the ticket), and WSL stopping an idle distro restarted the stack. Next: phase 3.
 - **2026-11-06.** Stopped for the day. To pick up: (1) the owner sets up the `kanbot` WSL distro from `docs/deploy.md` setup A, which is the first real test of rootless Docker; (2) phase 3, the GitHub App and Sign in with GitHub, on localhost. Branch `m5-ship-and-deploy` has phases 1, 1b, 2 and 2b committed and is not pushed.
+- **2026-11-07.** Picked up. The `kanbot` WSL distro isn't set up yet; the owner chose to do phase 3 first.
+
+  Owner decisions:
+  - auth is never switched off; tests and browser checks sign a session with test secrets;
+  - the owner is the account that creates the App;
+  - before an App exists, setup is reachable on localhost only (a server's first setup goes over an SSH tunnel).
+
+  The owner also asked which repos the App is for: the ones Kanbot manages, picked at install time, not Kanbot's own repo.
+- **2026-11-07.** Phase 3 built: the two-click setup, Sign in with GitHub, and a session required on every route. Tests, e2e and the browser check pass. The browser check found a bug: Next reports `localhost` as the origin of a request made to `127.0.0.1`, so GitHub would have sent the owner back to a host without their state cookie. URLs and cookies now use the browser's own Host. The owner then did the real round trip; it worked after one fix (below). Next: phase 4.
+- **2026-11-07.** Real round trip done: the App `kanbot-6527ff` is created and installed on `MatthewOsorio/NetGPT`, and the owner signed in. GitHub refused the first manifest because its (inactive) webhook URL was localhost, so the manifest no longer has a webhook.
 
 ## What you can do
 
+- **Sign in with GitHub.**
+  1. Put `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY` in `.env` (`openssl rand -base64 32` each) and start `pnpm dev`.
+  2. Open `http://localhost:3000` and click **Connect GitHub**.
+  3. On GitHub, click **Create**, then pick the repos Kanbot may work on and click **Install**.
+  4. Click **Sign in with GitHub**.
+
+  Only the account that created the App can sign in. Every page and API call needs the session; the sign-out button is in the header. **Add repos on GitHub** on Home changes which repos the App can reach.
 - **Run Kanbot in WSL**, apart from your Windows files: `docs/deploy.md` setup A. You get a `kanbot` WSL distro with its own rootless Docker, and Kanbot at `http://localhost:3000` in your Windows browser.
 - **Run a project's commands in its own image.** In Settings, set **Image** (e.g. `node:22-bookworm`, `python:3.12`, `golang:1.23`). From then on, install, the checks gate (build, lint, test), the QA app and agents' own `{test}`-style commands run in that image, with the worktree mounted. Leave it empty to use what the repo says (below).
 - **Nothing to set when the repo says which tools it needs.** On a project's first read, Kanbot looks at the default branch:
@@ -52,7 +69,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 
 ## How to run it
 
-`pnpm db:migrate` (two new migrations, `0010_project-image` and `0011_project-dockerfile`), then `pnpm dev`. Docker must be running for a project with an image. Nothing new to configure.
+`pnpm db:migrate` (three new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`), then `pnpm dev`. Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
 
 ## What was built
 
@@ -105,6 +122,32 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - **Deleted tickets' worktrees.** Deleting a ticket removes its worktree from the web app, which can't write to a read-only mount. The nightly cleanup now also removes worktree folders whose name is no ticket's key. This also covers the old `shortcut:` about a cancelled agent still holding the folder.
 - **`docs/deploy.md`** is now "Running Kanbot": setup A (a WSL distro named `kanbot`, with Windows drives and interop turned off in `/etc/wsl.conf`, kept running by a logon task) and setup B (any Ubuntu server; DigitalOcean as the example). The `kanbot` user, rootless Docker, the clone and the `.env` are shared.
 
+### Phase 3: the GitHub App, Sign in with GitHub, auth on every route
+
+- **Credentials.** `packages/shared/src/github.ts` (server-only, `@kanbot/shared/github`) handles them.
+  - `encrypt`/`decrypt` use AES-256-GCM under `KANBOT_ENCRYPTION_KEY`, and a tampered value or another key throws.
+  - `saveGitHubApp` writes `settings.github_app` (migration `0012_github-app`) only while it is null.
+  - `loadGitHubApp` reads it back.
+  - The worker will use the same module for installation tokens in phase 5.
+- **Setup.**
+  - `GET /api/github/setup` answers with a self-submitting form that POSTs the manifest to `github.com/settings/apps/new`. The manifest holds the §10 permissions, the callback and redirect URLs and `setup_url`. It has no webhook: GitHub refuses a localhost hook URL even when inactive (found on the owner's first real try).
+  - `GET /api/github/callback` checks the state, exchanges the code (`/app-manifests/{code}/conversions`), saves the App with its owner and sends the owner to the App's install page.
+  - Once an App exists, setup redirects to `/login`.
+- **Sign in.**
+  - `/api/auth/login` sends the owner to GitHub's OAuth page.
+  - `/api/auth/callback` checks the state, exchanges the code and reads `GET /user`. Only the App owner's id gets a session; anyone else lands on `/login?error=not_owner`.
+  - `POST /api/auth/logout` clears the cookie.
+- **The session** (`apps/web/lib/auth.ts`) is `base64url({uid, exp}).HMAC-SHA256`, 30 days, HTTP-only, `SameSite=Lax`, and `Secure` off this machine. It is compared in constant time.
+- **`proxy.ts`** keeps its localhost and same-origin rules first, then requires the session on everything except `/login`, `/api/auth/*`, the two setup routes and `/_next/`. `/api/*` gets 401 `unauthorized`; pages redirect to `/login`.
+- **UI.**
+  - `/login` shows Connect GitHub before an App exists, and Sign in after, with the owner's login and a message for each error.
+  - Home and the board get a sign-out button.
+  - Home gets **Add repos on GitHub**. It went on Home rather than Settings, because the App is global and Settings is per project.
+- **Tests.**
+  - `playwright.config.ts` sets test secrets.
+  - `e2e/global-setup.ts` stores a fake App and saves a signed session as the specs' `storageState`.
+  - `e2e/auth.spec.ts` covers the rest: 401 without a cookie, 401 with a forged one, a page redirecting to `/login` with Sign in, setup refusing a second App, and a callback with the wrong state refused.
+
 ## Key decisions
 
 - **One `docker run` per command, not a long-lived container per run.** It needs no lifecycle code, and the shared cache volume keeps repeated installs fast. Starting a container adds about a second per command.
@@ -120,6 +163,10 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - **The worker runs as root inside its container.** Under rootless Docker that is the host's unprivileged `kanbot` user. Container uid 1000 would map to a subordinate uid and own neither the socket nor the repos. The Agent SDK runs in `dontAsk` mode, not `bypassPermissions`, so it doesn't refuse root.
 - **Images are built on the server, not pushed to a registry.** One machine, one owner: a registry would be one more credential and service for nothing.
 - **The backup is a host cron job, not a service.** It is one line in `docs/deploy.md`; a container would need the Spaces credentials and a scheduler.
+- **No session table (phase 3).** One owner, one cookie: a signed id and an expiry need no storage, and the proxy checks it without a database call. Signing out clears the cookie. A stolen cookie stays valid until it expires (30 days) or the secret changes; fine for a localhost app with one user.
+- **The owner is whoever created the App (owner's choice).** GitHub's manifest exchange names that account, so nothing needs configuring, and an App created under a GitHub organization would name the organization; not a case for one person's Kanbot.
+- **Plain `fetch` and `node:crypto`, no Octokit or auth library.** Five GitHub calls and an HMAC. Phase 5's installation tokens (an RS256 JWT) are also a few lines of `node:crypto`.
+- **URLs from the browser's Host header, not Next's `req.url`.** Next names its bind host, so a visit to `127.0.0.1` came back as `localhost`, and cookies set on one host aren't sent to the other. The proxy has already checked Host, so it is trusted.
 - **Git Bash on Windows** turns the `/c/…` mount path back into `C:/…`, so on Windows the rewritten agent command is prefixed with `MSYS_NO_PATHCONV=1`. Windows is dev only; on Linux the path is unchanged.
 
 ## Changes to the spec (`requirements.md`)
@@ -129,6 +176,13 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - §7 "Deployment": the containers (with `migrate` and the `app` profile), isolation under rootless Docker (the worker is container root), backups as a host cron job, the nightly cleanup, and deploys built on the server after CI. The "Still to build" row for compose and Dockerfiles became "the real deployment on the Droplet" (in 2b: "Running Kanbot in its own WSL distro", with the public server on the M6 table). A row was added for the disk-over-90% guard (§8), which was never built and was found missing while reading §8 for the cleanup.
 - Phase 2b, §7 "Deployment": two setups (WSL now, a server later and optional), the `app`/`public` profiles and `COMPOSE_PROFILES`, the web app on 127.0.0.1, `KANBOT_DEFAULT_IMAGE` in the image order, backups and deploys for both setups. §10 "Events": polling is the only path in WSL. §1 non-goals, §15 portability and security, the tech-stack table, "Hosting" in §17 and "Where things stand" no longer say Droplet.
 - §9 and §11: `image` is a project setting; `image` and `dockerfile` are `projects` columns. §14: project commands run in the image when the project has one.
+- Phase 3:
+  - §10 "Two-click setup": what's stored and where, the owner as the App's creator, the Add repos link on Home (not Settings), one App per Kanbot, localhost-only setup, no webhook while local, and an App tied to the address it was created from.
+  - §11: `settings.github_app`.
+  - §12: auth on every route as built (cookie, proxy, 401 and redirect, state), and the GitHub endpoints marked built.
+  - §16: the auth row came off, and the GitHub App row is now onboarding only. The M6 public-server row lists what a domain needs: the proxy, `X-Forwarded-Proto`, the webhook, and setup over an SSH tunnel.
+  - "Where things stand": login and the App.
+  - §10: no webhook in the manifest while local (GitHub refuses a localhost hook URL).
 - "Where things stand" and §10 updated; the phase-1 row came off "Still to build". Onboarding steps 8–9 went onto the M6 table.
 
 ## Checks run
@@ -165,6 +219,23 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
     - the first try found the three bugs listed in the progress log. The worker's start time showed the distro had been stopped while idle and Docker brought the stack back, which is why `docs/deploy.md` adds the logon task.
 
     The check stack, its images, volumes and folder were removed afterwards; the Ubuntu distro's earlier containers and images were left alone.
+- Phase 3:
+  - `pnpm typecheck`, `pnpm lint`: clean.
+  - `pnpm test`: 38 shared + 113 worker tests pass. New: encrypt and decrypt round-trip with a fresh IV each time, and a tampered value, another key and a short key are refused.
+  - `pnpm test:e2e`: 14 pass, including the two new auth specs. Every older spec now runs signed in.
+  - Browser check (`next dev` on :3200 against a fresh database, Playwright), 19 checks pass:
+    - signed out, `/` redirects to `/login` with Connect GitHub;
+    - Connect GitHub POSTs the manifest to github.com with the right callback and redirect URLs and `administration: write`, and sets an HTTP-only state cookie;
+    - with an App stored and a signed cookie, Home shows Add repos on GitHub with the right link, and the board shows the sign-out button;
+    - Sign out clears the cookie and stays on `127.0.0.1`; the board then redirects to `/login`, which shows Sign in.
+
+    Both themes were checked. Screenshots: `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\68abe618-96fd-4c6e-98c8-3363c11aaf1b\scratchpad\p3-{connect,home,board,signin}-{light,dark}.png` and `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\68abe618-96fd-4c6e-98c8-3363c11aaf1b\scratchpad\p3-github-manifest.png`.
+  - **The real round trip** (owner, `pnpm dev` on localhost:3000): Connect GitHub, Create, Install on `MatthewOsorio/NetGPT` only, Sign in. The first try found GitHub refusing the localhost webhook (fixed: no webhook in the manifest). Afterwards a read-only script checked:
+    - `settings.github_app` is encrypted, and holds App `kanbot-6527ff` (id 5660007), owner MatthewOsorio, a private key and a client secret;
+    - with an App JWT signed from that key, GitHub's `GET /app` shows exactly the §10 permissions and no events;
+    - one installation (selected repos), whose installation token lists `MatthewOsorio/NetGPT` (default branch `main`);
+    - the server log shows the setup, the manifest callback and the OAuth callback all ending in redirects, with no errors.
+  - Not checked: a second GitHub account being refused (the owner has none at hand). The `user.id !== ownerId` check is one line.
 - Not checked: a real agent's Bash call going through the rewrite inside the SDK. It would need a paid run; the hook is a few lines, and the rewritten command itself was run through a shell.
 
 ## Open items
@@ -174,6 +245,9 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - The logon task that keeps the WSL distro running is documented but untested; WSL's idle shutdown was seen in the check.
 - The images are about 2.3 GB each, because they carry the whole workspace's `node_modules`, dev dependencies included. Fine for one machine; trim with `pnpm deploy --prod` if disk or deploy time matters.
 - The disk-over-90% guard (§8) was never built. It is now on the M5 "Still to build" list for phase 6.
+
+- The GitHub App knows the address it was created from: one created on `localhost:3000` can't sign in on `127.0.0.1:3000` or another port. A second address needs a callback URL added in the App's settings on GitHub.
+- Health still reports GitHub as `unknown`; it comes with phase 5's use of the App.
 
 - Settings are seeded once. A repo that adds a devcontainer later needs its Image set in Settings, or a future "re-detect" button.
 - Devcontainer `features`, `postCreateCommand` and docker-compose devcontainers aren't applied (`shortcut:` comment on `devcontainer()`).

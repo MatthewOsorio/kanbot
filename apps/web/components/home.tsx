@@ -5,15 +5,22 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wordmark } from "@/components/brand";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
+import { SignOut, ThemeToggle } from "@/components/theme-toggle";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/client";
 
 type Project = { id: string; name: string; keyPrefix: string };
 
-/** Home: projects and the new-project form. `agents` are the shipped agents (app/page.tsx reads their files). */
-export function Home({ agents }: { agents: { slug: string; name: string }[] }) {
+/** Home: projects and the new-project form. `agents` are the shipped agents (app/page.tsx reads their files);
+ * `installUrl` is the GitHub App's install page, where the owner adds repos later (§10). */
+export function Home({
+  agents,
+  installUrl,
+}: {
+  agents: { slug: string; name: string }[];
+  installUrl?: string;
+}) {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState("");
@@ -43,7 +50,19 @@ export function Home({ agents }: { agents: { slug: string; name: string }[] }) {
     <div className="mx-auto max-w-5xl px-6 pb-16">
       <header className="flex items-center justify-between py-5">
         <Wordmark />
-        <ThemeToggle />
+        <div className="flex items-center gap-1">
+          {installUrl && (
+            <a
+              href={installUrl}
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+              title="Pick which repos Kanbot's GitHub App can work on"
+            >
+              Add repos on GitHub
+            </a>
+          )}
+          <ThemeToggle />
+          <SignOut />
+        </div>
       </header>
       <main className="grid gap-10 pt-6 lg:grid-cols-[1fr_22rem]">
         <div className="space-y-10">

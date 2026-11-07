@@ -3,16 +3,24 @@ import { defineConfig } from "@playwright/test";
 const PORT = 3100;
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgres://kanbot:kanbot@localhost:5432/kanbot_test";
+// Test-only secrets: global-setup stores a fake GitHub App and signs the owner's session with them, so
+// every spec runs signed in (auth is never switched off, requirements §12).
+const SECRETS = {
+  KANBOT_SESSION_SECRET: "e2e-session-secret-0123456789abcdef",
+  KANBOT_ENCRYPTION_KEY: "ZTJlLWVuY3J5cHRpb24ta2V5LTAxMjM0NTY3ODlhYmM=",
+};
+Object.assign(process.env, SECRETS);
+export const AUTH_STATE = "e2e/.auth.json";
 
 export default defineConfig({
   testDir: "e2e",
   globalSetup: "./e2e/global-setup.ts",
-  use: { baseURL: `http://127.0.0.1:${PORT}` },
+  use: { baseURL: `http://127.0.0.1:${PORT}`, storageState: AUTH_STATE },
   webServer: [
     {
       command: `next dev -H 127.0.0.1 -p ${PORT}`,
       url: `http://127.0.0.1:${PORT}`,
-      env: { DATABASE_URL: TEST_DATABASE_URL, NEXT_DIST_DIR: ".next-e2e" },
+      env: { DATABASE_URL: TEST_DATABASE_URL, NEXT_DIST_DIR: ".next-e2e", ...SECRETS },
       reuseExistingServer: false,
       timeout: 120_000,
     },

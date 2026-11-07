@@ -42,7 +42,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SELECT, Wordmark } from "@/components/brand";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { SignOut, ThemeToggle } from "@/components/theme-toggle";
 import { TicketDrawer } from "@/components/ticket-drawer";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -293,6 +293,7 @@ export function Board({ projectId }: { projectId: string }) {
             Settings
           </Link>
           <ThemeToggle />
+          <SignOut />
         </div>
       </header>
       {settings && <Banner settings={settings} health={health} />}

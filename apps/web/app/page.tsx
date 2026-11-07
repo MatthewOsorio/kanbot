@@ -1,6 +1,8 @@
 import { DEFAULT_COLUMNS } from "@kanbot/shared";
 import { loadAgent } from "@kanbot/shared/agents";
+import { loadGitHubApp } from "@kanbot/shared/github";
 import { Home } from "@/components/home";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic"; // agent files are read per request, like the board's
 
@@ -16,6 +18,8 @@ function shippedAgents() {
   });
 }
 
-export default function Page() {
-  return <Home agents={shippedAgents()} />;
+export default async function Page() {
+  const app = await loadGitHubApp(db);
+  const installUrl = app ? `https://github.com/apps/${app.slug}/installations/new` : undefined;
+  return <Home agents={shippedAgents()} installUrl={installUrl} />;
 }
