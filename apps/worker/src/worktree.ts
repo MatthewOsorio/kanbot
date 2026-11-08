@@ -185,7 +185,7 @@ function commandEnv() {
 }
 
 /** The sidecar that owns a QA app's network and forwards to whatever port the app listens on (§4). */
-export const FORWARDER_IMAGE = "alpine/socat:1.8.0.3";
+const FORWARDER_IMAGE = "alpine/socat:1.8.0.3";
 /** The forwarder's port inside the app's network namespace; the host's 127.0.0.1:<port> maps to it. */
 const FORWARD_PORT = 39999;
 

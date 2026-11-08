@@ -6,7 +6,7 @@ import type { Db, Tx } from "./db";
 import { settings } from "./db/schema";
 
 /** What GitHub's manifest conversion returns that Kanbot keeps; the owner is the account that created the App. */
-export const gitHubApp = z.object({
+const gitHubApp = z.object({
   id: z.number(),
   slug: z.string(),
   clientId: z.string(),
@@ -257,7 +257,7 @@ export function upsertPr(
       });
 }
 
-export type RepoInfo = {
+type RepoInfo = {
   owner: string;
   name: string;
   defaultBranch: string;

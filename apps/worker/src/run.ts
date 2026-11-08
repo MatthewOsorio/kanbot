@@ -572,7 +572,7 @@ type Outcome = {
 };
 
 /** Maps the runtime's result to a run state (requirements §8 report step and failure handling). */
-export function outcomeOf(r: RuntimeResult): Outcome {
+function outcomeOf(r: RuntimeResult): Outcome {
   if (r.stop === "budget")
     return { state: "budget_exceeded", error: r.error ?? "Run budget exceeded" };
   if (r.stop === "max_turns") return { state: "failed", error: "Reached the agent's max turns" };

@@ -38,7 +38,7 @@ export const removeWorktree = (repoPath: string, path: string) =>
     },
   );
 
-/** `.kanbot/project.yml` (requirements §9). Settings UI and DB columns arrive with Settings (M4). */
+/** `.kanbot/project.yml` (requirements §9); it seeds a project's settings once (projectConfigOf). */
 export const projectConfig = z.object({
   commands: z
     .object({

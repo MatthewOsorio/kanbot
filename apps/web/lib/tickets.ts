@@ -349,7 +349,7 @@ export async function getDiff(id: string) {
 const DIFF_CAP = 1_000_000;
 
 /** Confirmed blockers that aren't Done yet, as keys (§9 "blocked by"). */
-export async function unfinishedBlockers(tx: Tx, ticketId: string) {
+async function unfinishedBlockers(tx: Tx, ticketId: string) {
   const rows = await tx
     .select({ number: tickets.number, keyPrefix: projects.keyPrefix })
     .from(ticketLinks)

@@ -105,7 +105,7 @@ export function approveShip(ticketId: string) {
     if (!ship) throw new HttpError(409, "column_gone", "This board has no Ship column");
     await tx.update(tickets).set({ statusFlag: "none" }).where(eq(tickets.id, ticketId));
     await moveToColumnEnd(tx, ticket, column, ship, OWNER);
-    // Captain Ship-It opens the PR (M5 phase 5); until its agent file exists this starts nothing.
+    // Captain Ship-It writes the PR description; the worker then pushes and opens the PR (FR-43).
     await startColumnAgent(tx, ticket.projectId, ticketId, ship, OWNER);
   });
 }

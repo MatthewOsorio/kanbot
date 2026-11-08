@@ -8,7 +8,7 @@ type Status = "ok" | "degraded" | "down" | "unknown";
 
 /**
  * Health of the parts the board depends on (requirements §8). The worker is "up" while it holds a
- * Postgres connection named kanbot-worker; Anthropic is judged from the latest runs. GitHub arrives in M5.
+ * Postgres connection named kanbot-worker; Anthropic is judged from the latest runs. GitHub stays "unknown" until phase 5c.
  */
 export async function GET() {
   try {

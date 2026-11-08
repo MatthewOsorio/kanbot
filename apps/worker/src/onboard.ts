@@ -20,7 +20,7 @@ import { redactText } from "./runtime/replay";
 import { openEnv, projectImage, runBaseline, worktreesRoot } from "./worktree";
 
 /** Where clones live: KANBOT_REPOS_DIR (compose sets it), else `.kanbot-repos` at the repo root (`pnpm dev`). */
-export const reposDir = () =>
+const reposDir = () =>
   resolve(
     process.env.KANBOT_REPOS_DIR ||
       fileURLToPath(new URL("../../../.kanbot-repos", import.meta.url)),

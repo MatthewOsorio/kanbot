@@ -48,7 +48,7 @@ const script = z.object({
   screenshots: z.array(z.object({ name: z.string(), file: z.string() })).default([]),
 });
 
-export const fixturesDir = () => resolve(process.env.KANBOT_FIXTURES_DIR ?? "../../fixtures/runs");
+const fixturesDir = () => resolve(process.env.KANBOT_FIXTURES_DIR ?? "../../fixtures/runs");
 
 // Replay commits need an identity even where git has none configured (CI).
 const IDENTITY = ["-c", "user.name=Kanbot replay", "-c", "user.email=replay@kanbot.local"];

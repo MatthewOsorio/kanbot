@@ -70,16 +70,13 @@ export const artifactKinds = [
   "pr_description",
 ] as const;
 
-export type TicketType = (typeof ticketTypes)[number];
 export type Priority = (typeof priorities)[number];
-export type CriterionStatus = (typeof criterionStatuses)[number];
 export type ActivityAction = (typeof activityActions)[number];
 export type StatusFlag = (typeof statusFlags)[number];
 export type CiState = (typeof ciStates)[number];
 export type ReviewState = (typeof reviewStates)[number];
 export type RunState = (typeof runStates)[number];
 export type RunEventType = (typeof runEventTypes)[number];
-export type ArtifactKind = (typeof artifactKinds)[number];
 
 const nonEmpty = <T extends object>(o: T) => Object.keys(o).length > 0;
 
@@ -105,7 +102,7 @@ export const createProjectBody = z
         "Not a valid branch name",
       )
       .default("main"),
-    // Absolute path to a local checkout; Plan B reads it (read-only). Optional until onboarding clones repos (M5).
+    // Absolute path to a local checkout (the "local folder" option, tests, the eval); onboarding clones GitHub repos itself.
     repoPath: z.string().trim().min(1).max(1_000).optional(),
     // A GitHub repo the App can see (§10 onboarding); its default branch comes from GitHub. Used in API paths.
     githubOwner: z.string().regex(GITHUB_NAME).max(100).optional(),
@@ -192,7 +189,7 @@ const startCommand = z
   );
 
 /** Env vars Kanbot sets on project commands itself (§7), so a project can't override them. */
-export const RESERVED_ENV = ["PORT", "HOME", "PATH"];
+const RESERVED_ENV = ["PORT", "HOME", "PATH"];
 
 /** Project Settings (§13). An empty command clears it. */
 export const patchProjectBody = z

@@ -616,7 +616,6 @@ export function TicketDrawer(props: {
   );
 }
 
-/** Blocked (§13, UC-7): Duckworth's questions, an answer box and Resume for the run that got stuck. */
 type Proposal = {
   ref: string;
   title: string;
@@ -740,6 +739,7 @@ function EpicPanel({
   );
 }
 
+/** Blocked (§13, UC-7): Duckworth's questions, an answer box and Resume for the run that got stuck. */
 function BlockedPanel({
   ticket,
   onResume,

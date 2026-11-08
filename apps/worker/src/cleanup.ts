@@ -10,7 +10,7 @@ import { worktreesRoot } from "./worktree";
 const execFileP = promisify(execFile);
 
 /** Run logs are kept this long, except each ticket's last run (§11). */
-export const RUN_EVENTS_DAYS = 90;
+const RUN_EVENTS_DAYS = 90;
 
 /**
  * The nightly disk cleanup (§8 "Disk over 90% full", M5): run logs past retention, worktrees that
