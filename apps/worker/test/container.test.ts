@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { redactText } from "../src/runtime/replay";
+import { redactText } from "../src/runtime/redact";
 import { appPort, listeningPorts } from "../src/qa-app";
 import { containerBash, dockerRun, projectImage, shQuote } from "../src/docker";
 import { openEnv } from "../src/commands";

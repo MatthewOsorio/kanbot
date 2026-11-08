@@ -17,7 +17,8 @@ import { baselineFailures } from "@kanbot/shared/onboarding";
 import { git, removeWorktree, type ProjectConfig } from "@kanbot/shared/repo";
 import { and, count, eq } from "drizzle-orm";
 import { buildContext } from "./context";
-import { record, redactText } from "./runtime/replay";
+import { redact, redactText } from "./runtime/redact";
+import { record } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
 import { pullBranch, pullDefaultBranch, pushAndOpenPr } from "./ship";
 import {
@@ -37,20 +38,6 @@ import { stallDetector } from "./stall";
 
 /** Bundled plugins (§8); the worker runs with apps/worker as cwd, like agentsDir(). */
 const pluginsDir = () => resolve(process.env.KANBOT_PLUGINS_DIR ?? "../../plugins");
-
-/**
- * Secrets never reach stored run events (requirements §14). NUL characters are dropped too: Postgres
- * jsonb rejects `\u0000`, so one in a tool's output would fail the run mid-way.
- */
-const redact = (payload: Record<string, unknown>, secrets: string[]) =>
-  JSON.parse(
-    redactText(
-      JSON.stringify(payload, (_, v: unknown) =>
-        typeof v === "string" ? v.replaceAll("\0", "") : v,
-      ),
-      secrets,
-    ),
-  ) as Record<string, unknown>;
 
 /** Executes a claimed run end to end. `cancel` aborts when the owner cancels or moves the ticket. */
 export async function executeRun(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSignal) {

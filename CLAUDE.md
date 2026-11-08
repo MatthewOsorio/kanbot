@@ -31,7 +31,7 @@ apps/worker/         Node process (tsx): claims queued runs, runs agents, applie
   src/commands.ts      project commands: runChecks (the checks gate), runBaseline, openEnv, commitAs;  src/qa-app.ts  startApp (QA's app on a free PORT)
   src/docker.ts        projectImage (builds the devcontainer's Dockerfile), dockerRun/containerBash (project commands in the project's image)
   src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
-  src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK; Kanbot's MCP server with report_result and QA's http_request), browser.ts (QA's headless Chromium tools, fenced to the app's origin), replay.ts (fixtures + record()), fence.ts (permission hook logic, appRequestUrl)
+  src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK; Kanbot's MCP server with report_result and QA's http_request), browser.ts (QA's headless Chromium tools, fenced to the app's origin), replay.ts (fixtures + record()), redact.ts (secrets out of stored text), fence.ts (permission hook logic, appRequestUrl)
   test/                Vitest against kanbot_test with the replay runtime
 packages/shared/     shared by web and worker
   src/schemas.ts       zod API bodies + enums;  src/events.ts  SSE event union + NOTIFY channel

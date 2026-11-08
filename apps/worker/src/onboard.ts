@@ -16,7 +16,7 @@ import {
 import { detect, ENV_EXAMPLES, envNames, type Onboarding } from "@kanbot/shared/onboarding";
 import { git, loadProjectConfig, removeWorktree } from "@kanbot/shared/repo";
 import { eq, sql } from "drizzle-orm";
-import { redactText } from "./runtime/replay";
+import { redactText } from "./runtime/redact";
 import { openEnv, runBaseline } from "./commands";
 import { projectImage } from "./docker";
 import { worktreesRoot } from "./worktree";
