@@ -56,6 +56,6 @@ export async function idParam(ctx: Ctx): Promise<string> {
 
 /** Postgres unique-violation, unwrapped from drizzle's error. */
 export function isUniqueViolation(e: unknown): boolean {
-  const err = e as { code?: string; cause?: { code?: string } };
+  const err = e as { code?: string; cause?: { code?: string } } | null | undefined;
   return err?.code === "23505" || err?.cause?.code === "23505";
 }

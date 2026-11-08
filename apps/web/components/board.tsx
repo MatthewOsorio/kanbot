@@ -86,7 +86,7 @@ export function Board({ projectId }: { projectId: string }) {
     const es = new EventSource(`/api/events?projectId=${projectId}`);
     es.onopen = () => void load();
     es.onmessage = (m) => {
-      const event = JSON.parse(m.data) as BoardEvent;
+      const event = JSON.parse(m.data as string) as BoardEvent;
       setLastEvent(event);
       // FR-60: the in-app list is "Needs me"; the browser shows one too when allowed and we're not looking.
       if (

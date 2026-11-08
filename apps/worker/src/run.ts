@@ -307,7 +307,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     if (run.columnSlug === "in_progress" || run.columnSlug === "ship") {
       // The checks gate (§8): a branch that doesn't build, lint and test goes back before review,
       // and before Ship pushes it (Ship-It's docs edits run them again).
-      if (outcome.state === "succeeded" && config) {
+      if (outcome.state === "succeeded") {
         const checksEnv = await openEnv(decryptEnv(project.env));
         const failed = await runChecks(
           config.commands,
@@ -357,7 +357,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
 /** `{test}`-style placeholders → the project's commands; an entry naming a missing command is dropped. */
 export function expandTools(tools: readonly string[], commands: ProjectConfig["commands"]) {
   return tools.flatMap((t) => {
-    let missing = false;
+    let missing = false as boolean; // set in the replace callback
     const out = t.replace(/\{(install|build|test|lint)\}/g, (_, k: keyof typeof commands) => {
       const c = commands[k];
       if (!c) missing = true;

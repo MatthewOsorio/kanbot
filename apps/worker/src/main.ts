@@ -44,7 +44,7 @@ async function pump() {
   pumping = true;
   try {
     do {
-      again = false;
+      again = false as boolean; // a pump() during the awaits below sets it
       while (active.size < LIMITS.global) {
         const run = await claimNext(db);
         if (!run) break;
@@ -86,7 +86,8 @@ async function onboard() {
   }
 }
 
-const reachable = runtime instanceof ReplayRuntime ? async () => true : anthropicReachable;
+const reachable =
+  runtime instanceof ReplayRuntime ? () => Promise.resolve(true) : anthropicReachable;
 /** Restarts runs an outage or Pause all interrupted (§8); every minute, and when agents are unpaused. */
 const resume = () =>
   resumeInterrupted(db, reachable)

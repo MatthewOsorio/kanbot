@@ -213,7 +213,9 @@ const problems = results
   .map((r) => `${r.slug} did not reach QA (${r.column})`);
 let baseline: Result[] | null = null;
 try {
-  baseline = JSON.parse(readFileSync(join(evalsDir, "baseline.json"), "utf8")).results as Result[];
+  baseline = (
+    JSON.parse(readFileSync(join(evalsDir, "baseline.json"), "utf8")) as { results: Result[] }
+  ).results;
 } catch {
   console.log("No evals/baseline.json yet: run with --baseline to save this run as the baseline.");
 }

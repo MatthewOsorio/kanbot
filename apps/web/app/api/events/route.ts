@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
  * SSE stream of board events for one project (requirements §12).
  * shortcut: no Last-Event-ID replay; the client refetches the board on (re)connect instead. Upgrade if a client ever needs event history.
  */
-export async function GET(req: Request) {
+export function GET(req: Request) {
   const projectId = new URL(req.url).searchParams.get("projectId");
   if (!z.uuid().safeParse(projectId).success)
     return Response.json(

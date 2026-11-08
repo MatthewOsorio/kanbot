@@ -58,7 +58,8 @@ export function SetupWizard({ projectId }: { projectId: string }) {
     const es = new EventSource(`/api/events?projectId=${projectId}`);
     es.onopen = () => void load();
     es.onmessage = (m) => {
-      if ((JSON.parse(m.data) as { type: string }).type === "project.onboarding") void load();
+      if ((JSON.parse(m.data as string) as { type: string }).type === "project.onboarding")
+        void load();
     };
     return () => es.close();
   }, [projectId, load]);
