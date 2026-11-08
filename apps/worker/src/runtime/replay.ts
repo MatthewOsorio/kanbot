@@ -141,14 +141,14 @@ function withCriterionIds(report: unknown, prompt: string): unknown {
   );
 }
 
-const secret = process.env.ANTHROPIC_API_KEY;
 /**
  * Secrets never reach stored run events or recorded scripts (requirements §14): the API key and the
  * project's env vars (`more`), as written and as escaped inside JSON. Values under 8 characters are kept
  * (redacting "1" would mangle everything).
  */
 export const redactText = (s: string, more: string[] = []) =>
-  [secret, ...more]
+  // Read on each call: main.ts loads .env after this module is imported.
+  [process.env.ANTHROPIC_API_KEY, ...more]
     .filter((v): v is string => !!v && v.length >= 8)
     .flatMap((v) => [v, JSON.stringify(v).slice(1, -1)])
     .reduce((t, v) => t.replaceAll(v, "[redacted]"), s);

@@ -66,8 +66,6 @@ export const LIMITS = { global: 2, perProject: 1 };
 const STALL_REPEATS = 3;
 /** "About 15 turns" with no progress (§8); a turn often makes a few calls. Golden runs peak at 5. */
 const NO_PROGRESS_CALLS = 25;
-/** KANBOT_RECORD=1 saves each real run as a replay script (§8 recorded runs). */
-const RECORD = process.env.KANBOT_RECORD === "1";
 /** Bundled plugins (§8); the worker runs with apps/worker as cwd, like agentsDir(). */
 const pluginsDir = () => resolve(process.env.KANBOT_PLUGINS_DIR ?? "../../plugins");
 
@@ -252,6 +250,8 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   const dayCapped = run.budgetUsd != null && run.budgetUsd < agent.maxBudgetUsd;
   if (dayCapped) agent = { ...agent, maxBudgetUsd: run.budgetUsd! };
 
+  // KANBOT_RECORD=1 saves each real run as a replay script (§8 recorded runs).
+  const recording = process.env.KANBOT_RECORD === "1";
   const recorded: RuntimeEvent[] = [];
   const calls = new Map<string, number>();
   const stall = new AbortController();
@@ -263,7 +263,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   let secrets: string[] = [];
   const emit = async (e: RuntimeEvent) => {
     const n = ++seq;
-    if (RECORD) recorded.push(e);
+    if (recording) recorded.push(e);
     await db.transaction(async (tx) => {
       await tx
         .insert(runEvents)
@@ -444,7 +444,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       },
       emit,
     );
-    if (RECORD && scenario !== "default")
+    if (recording && scenario !== "default")
       await record(
         agent.slug,
         scenario,
