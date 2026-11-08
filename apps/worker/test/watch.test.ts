@@ -170,6 +170,7 @@ describe("CI (FR-46)", () => {
   it("moves straight to PR Review when the repo has no workflows", async () => {
     const { ticket } = await shipped();
     stub.setWorkflows([]);
+    stub.setChecks(ticket.headSha!, []); // a commit shipped within the same second as another test's shares its sha
     await watchGitHub(db);
     expect(await columnOf(ticket.id)).toBe("pr_review");
     expect((await ticketNow(ticket.id)).ciState).toBe("none");
