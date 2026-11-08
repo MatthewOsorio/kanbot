@@ -4,15 +4,14 @@ import {
   artifacts,
   cancelActiveRun,
   columns,
-  logActivity,
   moveToColumnEnd,
   OWNER,
   projectConfigOf,
   projects,
-  publish,
   runEvents,
   runs,
   startColumnAgent,
+  ticketChanged,
   tickets,
 } from "@kanbot/shared/db";
 import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
@@ -74,38 +73,19 @@ export function revisePlan(ticketId: string, requestMd: string) {
 /** "Approve plan" in the drawer: the same as dropping the ticket at the bottom of Ready. */
 export function approvePlan(ticketId: string) {
   return db.transaction(async (tx) => {
-    const { ticket, column } = await plannedTicket(tx, ticketId, "approved");
-    const [ready] = await tx
-      .select()
-      .from(columns)
-      .where(and(eq(columns.projectId, ticket.projectId), eq(columns.slug, "ready")));
-    if (!ready) throw new HttpError(409, "column_gone", "This board has no Ready column");
-    await tx.update(tickets).set({ statusFlag: "none" }).where(eq(tickets.id, ticketId));
-    await moveToColumnEnd(tx, ticket, column, ready, OWNER);
+    await approveInto(tx, await plannedTicket(tx, ticketId, "approved"), "ready", "Ready");
   });
 }
 
 /** "Approve and ship" in the drawer: QA passed, so the same as dropping the ticket at the bottom of Ship. */
 export function approveShip(ticketId: string) {
   return db.transaction(async (tx) => {
-    const [row] = await tx
-      .select({ ticket: tickets, column: columns })
-      .from(tickets)
-      .innerJoin(columns, eq(columns.id, tickets.columnId))
-      .where(eq(tickets.id, ticketId))
-      .for("update", { of: tickets });
-    if (!row) throw notFound("Ticket not found");
+    const row = await lockedTicket(tx, ticketId);
     const { ticket, column } = row;
     if (column.slug !== "qa" || ticket.statusFlag !== "awaiting_approval")
       throw new HttpError(409, "not_approvable", "Only a ticket that passed QA can be approved");
-    const [ship] = await tx
-      .select()
-      .from(columns)
-      .where(and(eq(columns.projectId, ticket.projectId), eq(columns.slug, "ship")));
-    if (!ship) throw new HttpError(409, "column_gone", "This board has no Ship column");
-    await tx.update(tickets).set({ statusFlag: "none" }).where(eq(tickets.id, ticketId));
-    await moveToColumnEnd(tx, ticket, column, ship, OWNER);
-    // Captain Ship-It opens the PR (M5 phase 5); until its agent file exists this starts nothing.
+    const ship = await approveInto(tx, row, "ship", "Ship");
+    // Captain Ship-It writes the PR description; the worker then pushes and opens the PR (FR-43).
     await startColumnAgent(tx, ticket.projectId, ticketId, ship, OWNER);
   });
 }
@@ -119,8 +99,7 @@ export async function planExists(tx: Tx, ticketId: string) {
   return !!plan;
 }
 
-/** Locks a ticket that is in Planning with a plan and no active run, or throws 409. */
-async function plannedTicket(tx: Tx, ticketId: string, verb: string) {
+async function lockedTicket(tx: Tx, ticketId: string) {
   const [row] = await tx
     .select({ ticket: tickets, column: columns })
     .from(tickets)
@@ -128,6 +107,29 @@ async function plannedTicket(tx: Tx, ticketId: string, verb: string) {
     .where(eq(tickets.id, ticketId))
     .for("update", { of: tickets });
   if (!row) throw notFound("Ticket not found");
+  return row;
+}
+
+/** Approval: clears the ticket's flag and moves it to the bottom of column `slug`. Returns that column. */
+async function approveInto(
+  tx: Tx,
+  { ticket, column }: Awaited<ReturnType<typeof lockedTicket>>,
+  slug: string,
+  name: string,
+) {
+  const [to] = await tx
+    .select()
+    .from(columns)
+    .where(and(eq(columns.projectId, ticket.projectId), eq(columns.slug, slug)));
+  if (!to) throw new HttpError(409, "column_gone", `This board has no ${name} column`);
+  await tx.update(tickets).set({ statusFlag: "none" }).where(eq(tickets.id, ticket.id));
+  await moveToColumnEnd(tx, ticket, column, to, OWNER);
+  return to;
+}
+
+/** Locks a ticket that is in Planning with a plan and no active run, or throws 409. */
+async function plannedTicket(tx: Tx, ticketId: string, verb: string) {
+  const row = await lockedTicket(tx, ticketId);
   if (row.column.slug !== "planning")
     throw new HttpError(409, "not_in_planning", `Plans can only be ${verb} in Planning`);
   if (!(await planExists(tx, ticketId)))
@@ -175,15 +177,7 @@ export function resumeRun(runId: string, answer: string) {
     const { bounceLimit } = await projectConfigOf(tx, project!);
     if (ticket.bounceCount >= bounceLimit) {
       await tx.update(tickets).set({ bounceCount: 0 }).where(eq(tickets.id, ticket.id));
-      await logActivity(tx, ticket.id, "edited", {
-        fields: ["bounceCount"],
-        change: "reset on resume",
-      });
-      await publish(tx, ticket.projectId, {
-        type: "ticket.updated",
-        ticketId: ticket.id,
-        fields: ["bounceCount"],
-      });
+      await ticketChanged(tx, ticket, ["bounceCount"], { change: "reset on resume" });
     }
     return restart(tx, run, ticket, {
       requestMd: answer || undefined,

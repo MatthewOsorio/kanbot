@@ -16,11 +16,13 @@ import {
 import { detect, ENV_EXAMPLES, envNames, type Onboarding } from "@kanbot/shared/onboarding";
 import { git, loadProjectConfig, removeWorktree } from "@kanbot/shared/repo";
 import { eq, sql } from "drizzle-orm";
-import { redactText } from "./runtime/replay";
-import { openEnv, projectImage, runBaseline, worktreesRoot } from "./worktree";
+import { redactText } from "./runtime/redact";
+import { openEnv, runBaseline } from "./commands";
+import { projectImage } from "./docker";
+import { worktreesRoot } from "./worktree";
 
 /** Where clones live: KANBOT_REPOS_DIR (compose sets it), else `.kanbot-repos` at the repo root (`pnpm dev`). */
-export const reposDir = () =>
+const reposDir = () =>
   resolve(
     process.env.KANBOT_REPOS_DIR ||
       fileURLToPath(new URL("../../../.kanbot-repos", import.meta.url)),

@@ -12,14 +12,13 @@ import {
   acceptanceCriteria,
   columns,
   createDb,
-  logActivity,
   moveToColumnEnd,
   projects,
-  publish,
   runs,
   settings,
   spendToday,
   startColumnAgent,
+  ticketChanged,
   tickets,
 } from "@kanbot/shared/db";
 import {
@@ -29,7 +28,8 @@ import {
 } from "@kanbot/shared/db/testing";
 import { git } from "@kanbot/shared/repo";
 import { and, eq, inArray } from "drizzle-orm";
-import { claimNext, executeRun } from "./run";
+import { claimNext } from "./queue";
+import { executeRun } from "./run";
 import { ReplayRuntime } from "./runtime/replay";
 import { SdkRuntime } from "./runtime/sdk";
 
@@ -149,13 +149,8 @@ for (;;) {
         await tx
           .insert(acceptanceCriteria)
           .values({ ticketId: run.ticketId, text: late, position: n });
-        const data = { fields: ["criteria"], change: "added", text: late };
-        await logActivity(tx, run.ticketId, "edited", data, owner);
-        await publish(tx, project!.id, {
-          type: "ticket.updated",
-          ticketId: run.ticketId,
-          fields: ["criteria"],
-        });
+        const ticket = { id: run.ticketId, projectId: project!.id };
+        await ticketChanged(tx, ticket, ["criteria"], { change: "added", text: late }, owner);
       });
     }
     await executeRun(db, runtime, run, new AbortController().signal);

@@ -216,6 +216,17 @@ export async function spendToday(tx: Pick<Tx, "select">) {
   return r!;
 }
 
+/** The position key for a new last card in a column. */
+export async function columnEnd(tx: Pick<Tx, "select">, columnId: string) {
+  const [last] = await tx
+    .select({ position: tickets.position })
+    .from(tickets)
+    .where(eq(tickets.columnId, columnId))
+    .orderBy(desc(sql`${tickets.position} collate "C"`))
+    .limit(1);
+  return generateKeyBetween(last?.position ?? null, null);
+}
+
 /** Moves a ticket to the bottom of another column (auto-moves and Retry); logs and publishes. */
 export async function moveToColumnEnd(
   tx: Tx,
@@ -224,13 +235,7 @@ export async function moveToColumnEnd(
   to: Column,
   actor: Actor,
 ) {
-  const [last] = await tx
-    .select({ position: tickets.position })
-    .from(tickets)
-    .where(eq(tickets.columnId, to.id))
-    .orderBy(desc(sql`${tickets.position} collate "C"`))
-    .limit(1);
-  const position = generateKeyBetween(last?.position ?? null, null);
+  const position = await columnEnd(tx, to.id);
   await tx
     .update(tickets)
     .set({ columnId: to.id, position, updatedAt: new Date() })

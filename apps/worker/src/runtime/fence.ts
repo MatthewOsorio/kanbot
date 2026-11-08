@@ -5,7 +5,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
  * The permission fence every agent tool call passes through (requirements §14), kept pure so it is
  * unit-tested without the SDK. Returns a denial reason, or null to let the SDK's own rules decide.
  */
-export type Fence = {
+type Fence = {
   cwd: string;
   /** Frontmatter `tools` after placeholder expansion, e.g. "Read", "Bash(git diff:*)". */
   tools: readonly string[];
@@ -79,7 +79,7 @@ function real(p: string): string {
 }
 
 /** Repo-relative path, or null when `p` resolves outside `cwd`. */
-export function insideCwd(cwd: string, p: string): string | null {
+function insideCwd(cwd: string, p: string): string | null {
   const rel = relative(real(cwd), real(resolve(cwd, p)));
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
     ? rel.replaceAll("\\", "/")

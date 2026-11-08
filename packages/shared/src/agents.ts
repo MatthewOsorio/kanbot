@@ -7,7 +7,7 @@ import { z } from "zod";
  * Agent file frontmatter (requirements §8). `statusLines` is UI-only. In `tools`, `{install}`,
  * `{build}`, `{test}` and `{lint}` expand to the project's commands (dropped when it has none).
  */
-export const agentFrontmatter = z.object({
+const agentFrontmatter = z.object({
   slug: z.string().regex(/^[a-z0-9-]+$/),
   name: z.string().min(1),
   tagline: z.string().min(1),

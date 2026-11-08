@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { runEventTypes, uuidv7 } from "@kanbot/shared";
 import { git } from "@kanbot/shared/repo";
+import { redactText } from "./redact";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./types";
 
 /**
@@ -48,7 +49,7 @@ const script = z.object({
   screenshots: z.array(z.object({ name: z.string(), file: z.string() })).default([]),
 });
 
-export const fixturesDir = () => resolve(process.env.KANBOT_FIXTURES_DIR ?? "../../fixtures/runs");
+const fixturesDir = () => resolve(process.env.KANBOT_FIXTURES_DIR ?? "../../fixtures/runs");
 
 // Replay commits need an identity even where git has none configured (CI).
 const IDENTITY = ["-c", "user.name=Kanbot replay", "-c", "user.email=replay@kanbot.local"];
@@ -140,18 +141,6 @@ function withCriterionIds(report: unknown, prompt: string): unknown {
     JSON.stringify(report).replace(/\$criterion(\d+)/g, (m, n: string) => ids[Number(n) - 1] ?? m),
   );
 }
-
-const secret = process.env.ANTHROPIC_API_KEY;
-/**
- * Secrets never reach stored run events or recorded scripts (requirements §14): the API key and the
- * project's env vars (`more`), as written and as escaped inside JSON. Values under 8 characters are kept
- * (redacting "1" would mangle everything).
- */
-export const redactText = (s: string, more: string[] = []) =>
-  [secret, ...more]
-    .filter((v): v is string => !!v && v.length >= 8)
-    .flatMap((v) => [v, JSON.stringify(v).slice(1, -1)])
-    .reduce((t, v) => t.replaceAll(v, "[redacted]"), s);
 
 /**
  * Saves a real run as a replay script (requirements §8 recorded runs, KANBOT_RECORD=1): its events,

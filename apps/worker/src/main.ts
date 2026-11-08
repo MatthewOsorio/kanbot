@@ -6,13 +6,13 @@ import { onboardNext, requeueOnboarding } from "./onboard";
 import {
   afterPrevious,
   claimNext,
-  executeRun,
-  finish,
   LIMITS,
   PAUSED_ERROR,
   recoverInterrupted,
   resumeInterrupted,
-} from "./run";
+} from "./queue";
+import { executeRun } from "./run";
+import { finish } from "./finish";
 import { ReplayRuntime } from "./runtime/replay";
 import { anthropicReachable, SdkRuntime } from "./runtime/sdk";
 import { watchGitHub } from "./watch";

@@ -110,6 +110,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - **The clone's `main` goes stale.** New ticket branches start from the clone's local default branch, which nothing pulls after a merge: it was 3 commits behind (PR #1 missing), so NNWEB-4 would have conflicted on CHANGELOG.md. Fast-forwarded by hand for this run. **Fixed:** before each run on a GitHub project, the worker fast-forwards the clone's default branch from GitHub (`pullDefaultBranch` in `ship.ts`; best effort, it warns on failure). Rebasing existing ticket branches is still 5c.
   - **Nancy claimed a security review she didn't do.** 11 seconds, 5 turns: one `git diff`, then she loaded the security-review skill and reported at once, writing "the security review turned up nothing". Her verdict was reasonable for a static front-end change, but the claim isn't. **Fixed in her prompt:** loading the skill isn't running it; her review must carry a Security line naming each entry point she traced (or why there are none), and she may not claim a clean review she didn't do. `pnpm eval:agents` **passed** (2026-11-08, $2.76, every ticket to Done, the review ticket's 1 bounce as in the baseline). Each of Nancy's six reviews now traces the changed entry points (e.g. the PATCH body through `readJson` to `todo.title`; the bold titles' `textContent` and `ariaLabel`). On the UI ticket she put the trace in her summary and stored no review artifact; the worker doesn't require one on success.
   - Testy can't run lint or build (QA has no project commands) and leaned on the build run's result for that criterion. Fine here; worth knowing.
+- **2026-11-08.** Lean-up on branch `lean-up`, no behavior change apart from one fix. The fix: the API key and `KANBOT_RECORD` were read at import, before `.env` loads, so under `pnpm dev` the key wasn't redacted from run logs; both are now read when used, with a test. `run.ts` was split into `queue`, `stall`, `finish`, `results` and `run`; `worktree.ts` into `docker`, `commands`, `qa-app` and `worktree`; the drawer and board into one file per job. Near-copies were merged (`ticketChanged`, `columnEnd`, one avatar, one artifact card, the shared sections and query in `context.ts`), and redaction moved from the replay runtime to `runtime/redact.ts`. Agents' prompts did not change: the old and new `context.ts` gave byte-identical prompts in 420 combinations of column, ticket and repo state, so no paid eval was needed. The M1 to M4.5 reports became `docs/history.md`. Tests, e2e, the replay eval and the browser check pass.
 
 ## What you can do
 
@@ -176,7 +177,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 ### Phase 1: project commands in the project's image
 
 - **The setting.** `projects.image` (migration `0010_project-image`), `image` in `projectConfig`, seeded by `projectConfigOf` from the default branch: the devcontainer's `image` first, else `project.yml`'s `image:` (`devcontainer()` in `packages/shared/src/repo.ts`). It is editable on the Settings page, where an empty value clears it. `IMAGE_REF` (`schemas.ts`) refuses anything that isn't a plain image reference, so an image can never be read as a `docker` option.
-- **The runner** (`apps/worker/src/worktree.ts`).
+- **The runner** (`apps/worker/src/commands.ts`, `docker.ts`).
   - `dockerRun()` builds one `docker run --rm --init`: the worktree mounted at the same path as the working directory, a shared `kanbot-cache` volume as `HOME`, no host environment, the `kanbot` label, and for the QA app `PORT` published on 127.0.0.1 only.
   - `runCommand()` (install, the checks gate) uses it when the project has an image. A 10-minute timeout kills the `docker` CLI, not the container, so the container is removed by name afterwards.
   - `startApp()` pulls the image first, so a first download doesn't use up the app's 60 seconds, and `stop()` removes the container. This removes the old `shortcut:` comment.
@@ -185,7 +186,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 ### Phase 1b: the devcontainer's Dockerfile, built by Kanbot
 
 - **Detection.** `devcontainer()` (`packages/shared/src/repo.ts`) returns the named image, or the Dockerfile and build context that `build.dockerfile`/`build.context` (or the older top-level `dockerFile`/`context`) point at. Their paths are relative to `.devcontainer/`, so they're made repo-relative, and refused if they leave the repo or are absolute. It is seeded into `projects.dockerfile` (migration `0011_project-dockerfile`). A devcontainer that builds also wins over `project.yml`'s `image:`, as the spec orders them.
-- **Build.** `projectImage()` (`apps/worker/src/worktree.ts`) runs once per build-column run, before the worktree.
+- **Build.** `projectImage()` (`apps/worker/src/docker.ts`) runs once per build-column run, before the worktree.
   - With Settings' Image set, it uses that.
   - Otherwise it tags `kanbot-<key>:<tree hash of the build context on the default branch>`. If that tag is missing, it builds it: `git archive <default>:<context>` is piped into `docker build -f <file> -`, two processes with no shell, a 20-minute limit and the `kanbot` label.
   - The resulting tag replaces `config.image` for everything phase 1 runs. A failed build fails the run with the last lines of the build output.
@@ -282,7 +283,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - `finish()` stores `pr_number`, `pr_url` and `head_sha` (migration `0015_ticket-pr`) and logs `pr_opened`. The ticket stays in Ship, flagged `pr_open`.
   - A push or GitHub error fails the run with the message, and Retry works.
   - `startColumnAgent` keeps Ship a gate on a project without GitHub.
-- **Trailers and identity (FR-42).** `commitAs()` (`worktree.ts`) rewrites an agent's `git commit` in the PreToolUse hook, after the fence has checked the original command.
+- **Trailers and identity (FR-42).** `commitAs()` (`commands.ts`) rewrites an agent's `git commit` in the PreToolUse hook, after the fence has checked the original command.
   - It adds the `--trailer` lines right after `commit`.
   - On a GitHub project it also adds `-c user.name/email` for `<slug>[bot]`, with GitHub's noreply address (`botIdentity()`, one `GET /users` per process).
   - It composes with the container rewrite.
@@ -307,7 +308,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - **API.** `patchProjectBody.env` replaces the whole set, with null keeping a stored value. Names are validated, `PORT`/`HOME`/`PATH` are refused, and values may not contain newlines. Project and onboarding reads return `env: [{name, set}]` (`envView()` in `lib/projects.ts`).
 - **Detection.** At clone, `envNames()` reads `.env.example` (or `.sample`, `.template`), and the names are stored with empty values. Values already set (a retry) stay.
 - **Worker.**
-  - `openEnv()` (`worktree.ts`) writes a 0600 env file to a fresh temp folder and gives back a dispose function. `runCommand`, `install`/`ensureWorktree`, `runChecks`, `runBaseline`, `startApp` and `containerBash` take it: `--env-file` in docker, merged into the environment on the host.
+  - `openEnv()` (`commands.ts`) writes a 0600 env file to a fresh temp folder and gives back a dispose function. `runCommand`, `install`/`ensureWorktree`, `runChecks`, `runBaseline`, `startApp` and `containerBash` take it: `--env-file` in docker, merged into the environment on the host.
   - `redactText()` also takes the project's values, raw and JSON-escaped. It covers run events, recordings, run errors, checks reports and baseline output.
 - **CI.** `starterWorkflow()` adds a job `env` from `secrets.NAME`. The CI step and the PR body name the secrets to add on GitHub.
 - **UI.** `components/env-editor.tsx` is used in the setup wizard's commands step and on Settings. Each row has a name, a password input that reads "Set (type to replace)" or "Not set", and a remove button, plus an **Add variable** button.

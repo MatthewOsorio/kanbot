@@ -6,7 +6,7 @@ import { appRequestUrl } from "./fence";
 const MAX_TEXT = 20_000; // page text the agent sees per call
 const TIMEOUT = 5_000; // per click/type/read: a selector that matches nothing fails fast
 
-export type SaveScreenshot = (name: string, png: Buffer) => Promise<void>;
+type SaveScreenshot = (name: string, png: Buffer) => Promise<void>;
 
 /**
  * QA's headless browser into the running app (§4). The fence is here, not in the permission hook: every

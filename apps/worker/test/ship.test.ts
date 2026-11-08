@@ -1,6 +1,5 @@
 // Ship (§4, FR-42, FR-43): Captain Ship-It's run, then the worker's checks, push and PR, against the GitHub stub.
 import { execFileSync } from "node:child_process";
-import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,14 +16,15 @@ import {
   tickets,
 } from "@kanbot/shared/db";
 import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
-import { saveGitHubApp } from "@kanbot/shared/github";
 import { startGitHubStub, type GitHubStub } from "@kanbot/shared/github-stub";
 import { git } from "@kanbot/shared/repo";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { claimNext, executeRun } from "../src/run";
+import { claimNext } from "../src/queue";
+import { executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
-import { commitAs } from "../src/worktree";
+import { commitAs } from "../src/commands";
+import { connectTestApp } from "./github-app";
 
 const db = createDb(TEST_DATABASE_URL);
 const runtime = new ReplayRuntime();
@@ -37,22 +37,7 @@ beforeAll(async () => {
   tmp = await mkdtemp(join(tmpdir(), "kanbot-ship-"));
   origin = await prepareSampleRepo(join(tmp, "origin"));
   stub = await startGitHubStub({ owner: "octo", repo: "sample", cloneUrl: origin });
-  process.env.KANBOT_GITHUB_API = stub.url;
-  process.env.KANBOT_ENCRYPTION_KEY = randomBytes(32).toString("base64");
-  await db.update(settings).set({ githubApp: null });
-  const pem = generateKeyPairSync("rsa", { modulusLength: 2048 })
-    .privateKey.export({ type: "pkcs1", format: "pem" })
-    .toString();
-  await saveGitHubApp(db, {
-    id: 1,
-    slug: "kanbot-test",
-    clientId: "c",
-    clientSecret: "s",
-    webhookSecret: null,
-    pem,
-    ownerId: 1,
-    ownerLogin: "octo",
-  });
+  await connectTestApp(db, stub.url);
 });
 beforeEach(async () => {
   await db

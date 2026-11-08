@@ -6,6 +6,13 @@ import { git } from "@kanbot/shared/repo";
 
 export type ShippedPr = { number: number; url: string; headSha: string };
 
+/** The App's token for the repo; a run that needs GitHub can't go on without one. */
+async function appToken(db: Db, p: { githubOwner: string; githubRepo: string }) {
+  const app = await loadGitHubApp(db);
+  if (!app) throw new Error("No GitHub App is connected");
+  return repoToken(app, p.githubOwner, p.githubRepo);
+}
+
 export async function pushAndOpenPr(
   db: Db,
   p: { githubOwner: string; githubRepo: string; defaultBranch: string },
@@ -14,9 +21,7 @@ export async function pushAndOpenPr(
   description: string,
 ): Promise<ShippedPr> {
   if (!wt.branch.startsWith("kanbot/")) throw new Error(`Refusing to push ${wt.branch}`);
-  const app = await loadGitHubApp(db);
-  if (!app) throw new Error("No GitHub App is connected");
-  const token = await repoToken(app, p.githubOwner, p.githubRepo);
+  const token = await appToken(db, p);
   const headSha = (await git(wt.path, ["rev-parse", "HEAD"])).trim();
   // Never forced: a branch the owner pushed to on GitHub refuses this push rather than losing their commits (FR-48).
   await git(wt.path, ["push", "origin", `HEAD:refs/heads/${wt.branch}`], gitAuth(token));
@@ -64,9 +69,7 @@ export async function pullBranch(
   p: { githubOwner: string; githubRepo: string },
   wt: { path: string; branch: string },
 ) {
-  const app = await loadGitHubApp(db);
-  if (!app) throw new Error("No GitHub App is connected");
-  const token = await repoToken(app, p.githubOwner, p.githubRepo);
+  const token = await appToken(db, p);
   await git(wt.path, ["fetch", "-q", "origin", `refs/heads/${wt.branch}`], gitAuth(token));
   const contains = (a: string, b: string) =>
     git(wt.path, ["merge-base", "--is-ancestor", a, b]).then(

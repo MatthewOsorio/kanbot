@@ -66,13 +66,13 @@ const API_ERRORS: readonly ApiError[] = [
   "billing_error",
 ];
 
-/** Claude Agent SDK adapter (requirements §8 step 4). Checked against @anthropic-ai/claude-agent-sdk 0.3.304. */
 const BUNDLED_PLUGINS = [
   "cc-plugin-agents-md@builtin",
   "cc-plugin-telemetry@builtin",
   "cc-plugin-plugin-authoring@builtin",
 ];
 
+/** Claude Agent SDK adapter (requirements §8 step 4). Checked against @anthropic-ai/claude-agent-sdk 0.3.304. */
 export class SdkRuntime implements AgentRuntime {
   async run(
     {

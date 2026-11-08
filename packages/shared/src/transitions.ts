@@ -13,7 +13,7 @@ export const BOUNCE_LIMIT = 3;
  * so a QA run that *reports* `failed` bounces, while one that crashed or never reported goes to Blocked.
  * `bounce` rows count toward BOUNCE_LIMIT.
  */
-export const RUN_RULES: readonly {
+const RUN_RULES: readonly {
   column: string; // column slug, or "*" for any agent column
   outcome: RunOutcome;
   verdict?: Verdict;
@@ -77,7 +77,7 @@ export const RUN_RULES: readonly {
   { column: "*", outcome: "cancelled", to: null, flag: "none" },
 ];
 
-export type AfterRun = {
+type AfterRun = {
   to: string | null;
   flag: StatusFlag;
   /** Count this move toward the ticket's bounce limit. */

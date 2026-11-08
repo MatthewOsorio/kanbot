@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { chromium } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appBrowser } from "../src/runtime/browser";
-import { startApp } from "../src/worktree";
+import { startApp } from "../src/qa-app";
 
 // Needs Docker (the app runs in its image, as in QA) and Playwright's Chromium (CI installs it for e2e).
 const hasDocker = (() => {

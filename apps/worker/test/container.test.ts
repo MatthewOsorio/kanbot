@@ -1,15 +1,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { redactText } from "../src/runtime/replay";
-import {
-  appPort,
-  containerBash,
-  dockerRun,
-  listeningPorts,
-  openEnv,
-  projectImage,
-  shQuote,
-} from "../src/worktree";
+import { redactText } from "../src/runtime/redact";
+import { appPort, listeningPorts } from "../src/qa-app";
+import { containerBash, dockerRun, projectImage, shQuote } from "../src/docker";
+import { openEnv } from "../src/commands";
 
 const cwd = process.platform === "win32" ? "C:\\r\\wt" : "/r/wt";
 const mounted = process.platform === "win32" ? "/c/r/wt" : "/r/wt";
@@ -74,6 +68,17 @@ describe("project commands in containers (§7)", () => {
       '{"v":"[redacted]"}',
     );
     expect(redactText("short stays", ["short"])).toBe("short stays");
+  });
+
+  it("redacts an API key that was set after the module loaded (.env is read after imports)", () => {
+    const before = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-loaded-late-from-dotenv";
+    try {
+      expect(redactText("got sk-loaded-late-from-dotenv here")).toBe("got [redacted] here");
+    } finally {
+      if (before === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = before;
+    }
   });
 
   it("quotes for a POSIX shell", () => {

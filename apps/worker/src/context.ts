@@ -13,7 +13,7 @@ import {
 } from "@kanbot/shared/db";
 import { IN_FLIGHT_COLUMNS } from "@kanbot/shared";
 import { git, overlap, type ProjectConfig } from "@kanbot/shared/repo";
-import { and, asc, desc, eq, gt, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, ne, type SQL } from "drizzle-orm";
 
 const CAP = 20_000; // chars per section; past it the agent is pointed at the file instead
 /** Nancy's cross-ticket context: other tickets' diffs, this many lines in total (§9). */
@@ -75,6 +75,37 @@ function qaSetup(repo: Repo) {
         : `App: failed to start.\n${repo.app.error}`,
   ].join("\n\n");
 }
+
+type Artifact = typeof artifacts.$inferSelect;
+
+const reportSections = (review?: Artifact, testReport?: Artifact) => [
+  section("latest_review", review ? clip(review.contentMd, `review v${review.version}`) : ""),
+  section(
+    "latest_test_report",
+    testReport ? clip(testReport.contentMd, `test report v${testReport.version}`) : "",
+  ),
+];
+
+const diffStatSection = (stat: string, range: string, base: string) =>
+  section("diff_stat", clip(stat, `git diff --stat ${range}`), ` base="${base}"`);
+
+/** The project's other tickets in the columns `inColumns` selects, by number. */
+const otherTickets = (db: Db, ticket: Ticket, inColumns: SQL) =>
+  db
+    .select({
+      id: tickets.id,
+      number: tickets.number,
+      title: tickets.title,
+      column: columns.name,
+      branchName: tickets.branchName,
+      touchPaths: tickets.touchPaths,
+      keyPrefix: projects.keyPrefix,
+    })
+    .from(tickets)
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .innerJoin(projects, eq(projects.id, tickets.projectId))
+    .where(and(eq(tickets.projectId, ticket.projectId), ne(tickets.id, ticket.id), inColumns))
+    .orderBy(asc(tickets.number));
 
 const latest = (db: Db, ticketId: string, kind: "plan" | "review" | "test_report") =>
   db
@@ -190,11 +221,7 @@ export async function buildContext(
     ),
     ...(onBranch
       ? [
-          section(
-            "diff_stat",
-            clip(diffStat, `git diff --stat ${repo.defaultBranch}...HEAD`),
-            ` base="${repo.defaultBranch}"`,
-          ),
+          diffStatSection(diffStat, `${repo.defaultBranch}...HEAD`, repo.defaultBranch),
           section(
             "review_comments",
             openComments
@@ -203,14 +230,7 @@ export async function buildContext(
               )
               .join("\n"),
           ),
-          section(
-            "latest_review",
-            review ? clip(review.contentMd, `review v${review.version}`) : "",
-          ),
-          section(
-            "latest_test_report",
-            testReport ? clip(testReport.contentMd, `test report v${testReport.version}`) : "",
-          ),
+          ...reportSections(review, testReport),
           section("in_flight_tickets", await inFlight(db, ticket, run.columnSlug, repo)),
           ...(run.columnSlug === "qa" ? [section("qa_setup", qaSetup(repo))] : []),
         ]
@@ -249,8 +269,8 @@ async function retroSections(
   ticket: Ticket,
   prior: (typeof runs.$inferSelect)[],
   repo: Repo,
-  review?: typeof artifacts.$inferSelect,
-  testReport?: typeof artifacts.$inferSelect,
+  review?: Artifact,
+  testReport?: Artifact,
 ) {
   const [{ bounceCount } = { bounceCount: 0 }] = await db
     .select({ bounceCount: tickets.bounceCount })
@@ -278,16 +298,8 @@ async function retroSections(
         ),
       ].join("\n"),
     ),
-    section("latest_review", review ? clip(review.contentMd, `review v${review.version}`) : ""),
-    section(
-      "latest_test_report",
-      testReport ? clip(testReport.contentMd, `test report v${testReport.version}`) : "",
-    ),
-    section(
-      "diff_stat",
-      clip(stat, `git diff --stat ${repo.defaultBranch}...${ticket.branchName}`),
-      ` base="${repo.defaultBranch}"`,
-    ),
+    ...reportSections(review, testReport),
+    diffStatSection(stat, `${repo.defaultBranch}...${ticket.branchName}`, repo.defaultBranch),
   ];
 }
 
@@ -346,27 +358,7 @@ async function blockerSections(db: Db, ticketId: string) {
 
 /** Plan B's view of the board (§9): every other unfinished ticket, so it can name related or dependent ones. */
 async function openTickets(db: Db, ticket: Ticket) {
-  const others = await db
-    .select({
-      id: tickets.id,
-      number: tickets.number,
-      title: tickets.title,
-      column: columns.name,
-      touchPaths: tickets.touchPaths,
-      keyPrefix: projects.keyPrefix,
-    })
-    .from(tickets)
-    .innerJoin(columns, eq(columns.id, tickets.columnId))
-    .innerJoin(projects, eq(projects.id, tickets.projectId))
-    .where(
-      and(
-        eq(tickets.projectId, ticket.projectId),
-        ne(tickets.id, ticket.id),
-        ne(columns.slug, "done"),
-      ),
-    )
-    .orderBy(asc(tickets.number))
-    .limit(100); // shortcut: first 100 by number, when a board outgrows that rank by relevance
+  const others = await otherTickets(db, ticket, ne(columns.slug, "done")).limit(100); // shortcut: first 100 by number, when a board outgrows that rank by relevance
   const parts: string[] = [];
   for (const o of others) {
     const plan = await latest(db, o.id, "plan");
@@ -388,26 +380,7 @@ async function openTickets(db: Db, ticket: Ticket) {
  * the cross-ticket review; the other agents see only those overlapping this ticket, without diffs.
  */
 async function inFlight(db: Db, ticket: Ticket, column: string, repo: Repo) {
-  const others = await db
-    .select({
-      id: tickets.id,
-      number: tickets.number,
-      title: tickets.title,
-      branchName: tickets.branchName,
-      touchPaths: tickets.touchPaths,
-      keyPrefix: projects.keyPrefix,
-    })
-    .from(tickets)
-    .innerJoin(columns, eq(columns.id, tickets.columnId))
-    .innerJoin(projects, eq(projects.id, tickets.projectId))
-    .where(
-      and(
-        eq(tickets.projectId, ticket.projectId),
-        ne(tickets.id, ticket.id),
-        inArray(columns.slug, IN_FLIGHT_COLUMNS),
-      ),
-    )
-    .orderBy(asc(tickets.number));
+  const others = await otherTickets(db, ticket, inArray(columns.slug, IN_FLIGHT_COLUMNS));
   const review = column === "code_review";
   let budget = IN_FLIGHT_DIFF_LINES;
   const parts: string[] = [];

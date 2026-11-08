@@ -1,20 +1,15 @@
 import { loadGitHubApp } from "@kanbot/shared/github";
 import { NextResponse, type NextRequest } from "next/server";
 import { originOf, sessionCookie, STATE_COOKIE } from "@/lib/auth";
+import { oauthReturn } from "@/lib/oauth";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 /** GitHub's OAuth redirect: only the account that created the App gets a session (§12). */
 export async function GET(req: NextRequest) {
-  const fail = (error: string) => {
-    const res = NextResponse.redirect(new URL(`/login?error=${error}`, originOf(req)));
-    res.cookies.delete(STATE_COOKIE);
-    return res;
-  };
-  const code = req.nextUrl.searchParams.get("code");
-  const state = req.nextUrl.searchParams.get("state");
-  if (!code || !state || state !== req.cookies.get(STATE_COOKIE)?.value) return fail("state");
+  const { code, fail } = oauthReturn(req);
+  if (!code) return fail("state");
   const app = await loadGitHubApp(db);
   if (!app) return fail("no_app");
 

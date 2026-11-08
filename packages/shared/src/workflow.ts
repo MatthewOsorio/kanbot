@@ -12,5 +12,8 @@ export const DEFAULT_COLUMNS = [
   { slug: "blocked", name: "Blocked", agentSlug: "rubber-duckworth" },
 ] as const satisfies readonly { slug: string; name: string; agentSlug: string | null }[];
 
+/** How a run's error starts when the Anthropic API failed; automatic resume and the health check look for it. */
+export const ANTHROPIC_API_ERROR = "Anthropic API error";
+
 /** Columns where a ticket is "in flight": the §9 overlap check and Nancy's cross-ticket review. */
 export const IN_FLIGHT_COLUMNS = ["in_progress", "code_review", "qa", "ship", "pr_review"];

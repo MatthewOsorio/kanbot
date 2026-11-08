@@ -15,6 +15,7 @@ export async function publish(tx: Tx, projectId: string, event: BoardEvent) {
 
 export type Actor = { kind: "user" | "agent"; name: string };
 export const OWNER: Actor = { kind: "user", name: "owner" };
+export const agentActor = (slug: string): Actor => ({ kind: "agent", name: slug });
 
 export function logActivity(
   tx: Tx,
@@ -30,4 +31,16 @@ export function logActivity(
     actor: actor.name,
     data: data as Record<string, unknown>,
   });
+}
+
+/** A ticket edit's timeline entry and event, which always go together. `data` joins the entry's fields. */
+export async function ticketChanged(
+  tx: Tx,
+  ticket: { id: string; projectId: string },
+  fields: string[],
+  data: object = {},
+  actor: Actor = OWNER,
+) {
+  await logActivity(tx, ticket.id, "edited", { fields, ...data }, actor);
+  await publish(tx, ticket.projectId, { type: "ticket.updated", ticketId: ticket.id, fields });
 }

@@ -1,17 +1,14 @@
 import { createLinkBody } from "@kanbot/shared";
-import { logActivity, projects, ticketLinks, tickets } from "@kanbot/shared/db";
+import { projects, ticketChanged, ticketLinks, tickets } from "@kanbot/shared/db";
 import { and, eq, or } from "drizzle-orm";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";
 import { db } from "./db";
-import { publish, type Tx } from "./events";
+import type { Tx } from "./events";
 
 /** Both tickets' drawers refetch, and each gets a timeline entry. */
 async function changed(tx: Tx, projectId: string, ids: string[], change: string, kind: string) {
-  for (const id of ids) {
-    await logActivity(tx, id, "edited", { fields: ["links"], change, kind });
-    await publish(tx, projectId, { type: "ticket.updated", ticketId: id, fields: ["links"] });
-  }
+  for (const id of ids) await ticketChanged(tx, { id, projectId }, ["links"], { change, kind });
 }
 
 /** The owner adds a link by key; it is confirmed at once. "blocked_by" is stored as the other ticket blocking this one. */

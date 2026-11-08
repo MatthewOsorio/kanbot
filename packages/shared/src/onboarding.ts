@@ -37,7 +37,7 @@ export const baselineFailures = (b: Baseline | null | undefined) =>
     .map((r) => r.command);
 
 type Commands = { install?: string; build?: string; test?: string; lint?: string; start?: string };
-export type Detected = { commands: Commands; testGlobs: string[]; image?: string };
+type Detected = { commands: Commands; testGlobs: string[]; image?: string };
 
 /** QA runs the app (§4, owner's choice): a project needs a start command before QA can start. */
 export const qaRunnable = (c: { commands: Commands }) => !!c.commands.start?.trim();
