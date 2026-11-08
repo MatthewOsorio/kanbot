@@ -1,5 +1,4 @@
 // Onboarding's worker steps (§10): clone + detect, the baseline, and the gates that depend on them.
-import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,13 +13,14 @@ import {
   tickets,
 } from "@kanbot/shared/db";
 import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
-import { decryptEnv, encryptEnv, saveGitHubApp } from "@kanbot/shared/github";
+import { decryptEnv, encryptEnv } from "@kanbot/shared/github";
 import { git } from "@kanbot/shared/repo";
 import { startGitHubStub, type GitHubStub } from "@kanbot/shared/github-stub";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { onboardNext } from "../src/onboard";
 import { runChecks } from "../src/worktree";
+import { connectTestApp } from "./github-app";
 
 const db = createDb(TEST_DATABASE_URL);
 let tmp: string;
@@ -31,24 +31,8 @@ beforeAll(async () => {
   tmp = await mkdtemp(join(tmpdir(), "kanbot-onboard-"));
   const origin = await prepareSampleRepo(join(tmp, "origin"));
   stub = await startGitHubStub({ owner: "octo", repo: "sample", cloneUrl: origin });
-  process.env.KANBOT_GITHUB_API = stub.url;
   process.env.KANBOT_REPOS_DIR = join(tmp, "repos");
-  process.env.KANBOT_ENCRYPTION_KEY = randomBytes(32).toString("base64");
-  // The test App replaces whatever the shared test database holds (e2e stores its own the same way).
-  await db.update(settings).set({ githubApp: null });
-  const pem = generateKeyPairSync("rsa", { modulusLength: 2048 })
-    .privateKey.export({ type: "pkcs1", format: "pem" })
-    .toString();
-  await saveGitHubApp(db, {
-    id: 1,
-    slug: "kanbot-test",
-    clientId: "c",
-    clientSecret: "s",
-    webhookSecret: null,
-    pem,
-    ownerId: 1,
-    ownerLogin: "octo",
-  });
+  await connectTestApp(db, stub.url);
   // Other files' queued steps must not be picked up here.
   await db
     .update(projects)

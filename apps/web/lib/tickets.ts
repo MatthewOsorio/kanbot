@@ -15,6 +15,7 @@ import {
   activity,
   artifacts,
   cancelActiveRun,
+  columnEnd,
   columns,
   comments,
   logActivity,
@@ -24,6 +25,7 @@ import {
   runs,
   screenshots,
   startColumnAgent,
+  ticketChanged,
   ticketLinks,
   tickets,
 } from "@kanbot/shared/db";
@@ -73,12 +75,7 @@ async function insertTicket(
     .select({ id: columns.id })
     .from(columns)
     .where(and(eq(columns.projectId, projectId), eq(columns.slug, "backlog")));
-  const [last] = await tx
-    .select({ position: tickets.position })
-    .from(tickets)
-    .where(eq(tickets.columnId, backlog!.id))
-    .orderBy(desc(sql`${tickets.position} collate "C"`))
-    .limit(1);
+  const position = await columnEnd(tx, backlog!.id);
   const [ticket] = await tx
     .insert(tickets)
     .values({
@@ -86,7 +83,7 @@ async function insertTicket(
       projectId,
       number: seq.number,
       columnId: backlog!.id,
-      position: generateKeyBetween(last?.position ?? null, null),
+      position,
     })
     .returning();
   await logActivity(tx, ticket!.id, "created", { title: ticket!.title });
@@ -164,12 +161,7 @@ export function acceptProposals(epicId: string, { refs }: In<typeof acceptPropos
       .update(artifacts)
       .set({ data: { ...data, accepted } })
       .where(eq(artifacts.id, plan.id));
-    await logActivity(tx, epicId, "edited", { fields: ["children"], accepted: [...wanted] });
-    await publish(tx, epic.projectId, {
-      type: "ticket.updated",
-      ticketId: epicId,
-      fields: ["children"],
-    });
+    await ticketChanged(tx, epic, ["children"], { accepted: [...wanted] });
     return { created };
   });
 }
@@ -272,9 +264,7 @@ export function patchTicket(id: string, input: In<typeof patchTicketBody>) {
       .where(eq(tickets.id, id))
       .returning({ projectId: tickets.projectId });
     if (!t) throw notFound("Ticket not found");
-    const fields = Object.keys(input);
-    await logActivity(tx, id, "edited", { fields });
-    await publish(tx, t.projectId, { type: "ticket.updated", ticketId: id, fields });
+    await ticketChanged(tx, { id, projectId: t.projectId }, Object.keys(input));
   });
 }
 
@@ -326,25 +316,11 @@ export async function getDiff(id: string) {
       const list = (fileAgents[f] ??= []);
       if (!list.includes(r.agentSlug)) list.push(r.agentSlug);
     }
-  if (!row.branch || !row.repoPath)
-    return {
-      branch: row.branch,
-      base: row.base,
-      diff: "",
-      truncated: false,
-      comments: lineComments,
-      fileAgents,
-    };
+  const common = { branch: row.branch, base: row.base, comments: lineComments, fileAgents };
+  if (!row.branch || !row.repoPath) return { ...common, diff: "", truncated: false };
   const full = await git(row.repoPath, ["diff", `${row.base}...${row.branch}`]);
   const truncated = full.length > DIFF_CAP;
-  return {
-    branch: row.branch,
-    base: row.base,
-    diff: truncated ? full.slice(0, DIFF_CAP) : full,
-    truncated,
-    comments: lineComments,
-    fileAgents,
-  };
+  return { ...common, diff: truncated ? full.slice(0, DIFF_CAP) : full, truncated };
 }
 const DIFF_CAP = 1_000_000;
 
@@ -564,15 +540,9 @@ export function listActivity(ticketId: string) {
     .orderBy(asc(activity.createdAt), asc(activity.id));
 }
 
-async function criteriaChanged(tx: Tx, ticketId: string, change: string, text: string) {
-  const projectId = await projectOf(tx, ticketId);
-  await logActivity(tx, ticketId, "edited", { fields: ["criteria"], change, text });
-  await publish(tx, projectId, { type: "ticket.updated", ticketId, fields: ["criteria"] });
-}
-
 export function addCriterion(ticketId: string, { text }: In<typeof createCriterionBody>) {
   return db.transaction(async (tx) => {
-    await projectOf(tx, ticketId);
+    const projectId = await projectOf(tx, ticketId);
     const [{ last } = { last: null }] = await tx
       .select({ last: max(acceptanceCriteria.position) })
       .from(acceptanceCriteria)
@@ -581,7 +551,7 @@ export function addCriterion(ticketId: string, { text }: In<typeof createCriteri
       .insert(acceptanceCriteria)
       .values({ ticketId, text, position: (last ?? -1) + 1 })
       .returning();
-    await criteriaChanged(tx, ticketId, "added", text);
+    await ticketChanged(tx, { id: ticketId, projectId }, ["criteria"], { change: "added", text });
     return c!;
   });
 }
@@ -594,11 +564,11 @@ export function patchCriterion(id: string, input: In<typeof patchCriterionBody>)
       .where(eq(acceptanceCriteria.id, id))
       .returning();
     if (!c) throw notFound("Criterion not found");
-    await criteriaChanged(
+    await ticketChanged(
       tx,
-      c.ticketId,
-      input.status ? `marked ${input.status}` : "edited",
-      c.text,
+      { id: c.ticketId, projectId: await projectOf(tx, c.ticketId) },
+      ["criteria"],
+      { change: input.status ? `marked ${input.status}` : "edited", text: c.text },
     );
     return c;
   });
@@ -611,6 +581,11 @@ export function deleteCriterion(id: string) {
       .where(eq(acceptanceCriteria.id, id))
       .returning();
     if (!c) throw notFound("Criterion not found");
-    await criteriaChanged(tx, c.ticketId, "removed", c.text);
+    await ticketChanged(
+      tx,
+      { id: c.ticketId, projectId: await projectOf(tx, c.ticketId) },
+      ["criteria"],
+      { change: "removed", text: c.text },
+    );
   });
 }

@@ -1,3 +1,4 @@
+import { ANTHROPIC_API_ERROR } from "@kanbot/shared";
 import { runEvents, runs } from "@kanbot/shared/db";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -41,7 +42,7 @@ export async function GET() {
     .limit(1);
   const anthropic: Status = retrying
     ? "degraded"
-    : last?.error?.startsWith("Anthropic API error")
+    : last?.error?.startsWith(ANTHROPIC_API_ERROR)
       ? "down"
       : last
         ? "ok"

@@ -31,3 +31,15 @@ export function logActivity(
     data: data as Record<string, unknown>,
   });
 }
+
+/** A ticket edit's timeline entry and event, which always go together. `data` joins the entry's fields. */
+export async function ticketChanged(
+  tx: Tx,
+  ticket: { id: string; projectId: string },
+  fields: string[],
+  data: object = {},
+  actor: Actor = OWNER,
+) {
+  await logActivity(tx, ticket.id, "edited", { fields, ...data }, actor);
+  await publish(tx, ticket.projectId, { type: "ticket.updated", ticketId: ticket.id, fields });
+}

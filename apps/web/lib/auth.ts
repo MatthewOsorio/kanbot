@@ -1,6 +1,7 @@
 // Sign in with GitHub (requirements §12): a signed, HTTP-only session cookie. No session table: the cookie
 // carries the owner's GitHub id and an expiry, and its HMAC proves Kanbot issued it.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { NextResponse, type NextRequest } from "next/server";
 
 export const SESSION_COOKIE = "kanbot_session";
 const MAX_AGE = 30 * 24 * 3600;
@@ -66,3 +67,15 @@ export const STATE_COOKIE = "kanbot_oauth_state";
  * cookies set on one host aren't sent to the other. The proxy has already checked Host. */
 export const originOf = (req: Request) =>
   `${new URL(req.url).protocol}//${req.headers.get("host") ?? new URL(req.url).host}`;
+
+/** GitHub's redirect back to us: its `code` (null if the state cookie doesn't match), and `fail` to send the owner to /login. */
+export function oauthReturn(req: NextRequest) {
+  const fail = (error: string) => {
+    const res = NextResponse.redirect(new URL(`/login?error=${error}`, originOf(req)));
+    res.cookies.delete(STATE_COOKIE);
+    return res;
+  };
+  const code = req.nextUrl.searchParams.get("code");
+  const state = req.nextUrl.searchParams.get("state");
+  return { fail, code: state && state === req.cookies.get(STATE_COOKIE)?.value ? code : null };
+}

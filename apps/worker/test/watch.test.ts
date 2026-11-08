@@ -1,6 +1,5 @@
 // The GitHub watcher (§10, FR-46, FR-47, FR-48): a ticket shipped through the stub, then CI, reviews, merges and
 // closes set on the stub, one watchGitHub tick at a time.
-import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,7 +18,6 @@ import {
   tickets,
 } from "@kanbot/shared/db";
 import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
-import { saveGitHubApp } from "@kanbot/shared/github";
 import { startGitHubStub, type GitHubStub } from "@kanbot/shared/github-stub";
 import { git } from "@kanbot/shared/repo";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
@@ -27,6 +25,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { claimNext, executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
 import { watchGitHub } from "../src/watch";
+import { connectTestApp } from "./github-app";
 
 const db = createDb(TEST_DATABASE_URL);
 const runtime = new ReplayRuntime();
@@ -45,22 +44,7 @@ beforeAll(async () => {
     cloneUrl: origin,
     workflows: WORKFLOWS,
   });
-  process.env.KANBOT_GITHUB_API = stub.url;
-  process.env.KANBOT_ENCRYPTION_KEY = randomBytes(32).toString("base64");
-  await db.update(settings).set({ githubApp: null });
-  const pem = generateKeyPairSync("rsa", { modulusLength: 2048 })
-    .privateKey.export({ type: "pkcs1", format: "pem" })
-    .toString();
-  await saveGitHubApp(db, {
-    id: 1,
-    slug: "kanbot-test",
-    clientId: "c",
-    clientSecret: "s",
-    webhookSecret: null,
-    pem,
-    ownerId: 1,
-    ownerLogin: "octo",
-  });
+  await connectTestApp(db, stub.url);
 });
 beforeEach(async () => {
   await db

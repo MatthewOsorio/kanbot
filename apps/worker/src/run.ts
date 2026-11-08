@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, matchesGlob, resolve } from "node:path";
 import {
   afterRun,
+  ANTHROPIC_API_ERROR,
   stateForVerdict,
   verdictPayload,
   type RunOutcome,
@@ -25,6 +26,7 @@ import {
   screenshots,
   spendToday,
   startColumnAgent,
+  ticketChanged,
   ticketLinks,
   tickets,
   projectConfigOf,
@@ -114,7 +116,6 @@ export async function claimNext(db: Db): Promise<Run | null> {
 
 /** Error of a run stopped by Pause all; such runs, like outage ones, restart on their own (§8). */
 export const PAUSED_ERROR = "Stopped by Pause all";
-const API_ERROR = "Anthropic API error";
 
 /**
  * Restarts runs that an outage or Pause all interrupted (requirements §8 failure handling), once agents
@@ -127,7 +128,7 @@ export async function resumeInterrupted(db: Db, reachable: () => Promise<boolean
     join tickets t on t.id = r.ticket_id
     join columns c on c.id = t.column_id and c.slug = r.column_slug
     where r.state = 'interrupted'
-      and (r.error = ${PAUSED_ERROR} or r.error like ${`${API_ERROR}%`})
+      and (r.error = ${PAUSED_ERROR} or r.error like ${`${ANTHROPIC_API_ERROR}%`})
       and not exists (select 1 from runs r2 where r2.ticket_id = r.ticket_id and r2.created_at > r.created_at)`);
   if (!candidates.rows.length) return 0;
   if ((await getSettings(db)).paused || !(await reachable())) return 0;
@@ -580,7 +581,7 @@ function outcomeOf(r: RuntimeResult): Outcome {
     // The SDK already retried; an outage leaves the ticket in place with Retry. Auth/billing fail outright.
     const transient = ["rate_limit", "overloaded", "server_error"].includes(r.apiError ?? "");
     const account = ["authentication_failed", "billing_error"].includes(r.apiError ?? "");
-    const error = `${API_ERROR}: ${r.apiError ?? "unknown"}${r.error ? ` (${r.error})` : ""}`;
+    const error = `${ANTHROPIC_API_ERROR}: ${r.apiError ?? "unknown"}${r.error ? ` (${r.error})` : ""}`;
     return { state: transient ? "interrupted" : "failed", error, ...(account && { pause: error }) };
   }
   if (r.stop === "error") return { state: "failed", error: r.error ?? "The agent run failed" };
@@ -898,18 +899,13 @@ async function storeResults(tx: Tx, ticket: TicketRef, run: Run, v: VerdictPaylo
           position: (last ?? -1) + 1 + i,
         })),
       );
-    await logActivity(
+    await ticketChanged(
       tx,
-      ticket.id,
-      "edited",
-      { fields: ["criteria"], change: "replaced by plan", count: v.acceptanceCriteria.length },
+      ticket,
+      ["criteria"],
+      { change: "replaced by plan", count: v.acceptanceCriteria.length },
       actor,
     );
-    await publish(tx, ticket.projectId, {
-      type: "ticket.updated",
-      ticketId: ticket.id,
-      fields: ["criteria"],
-    });
   }
 
   // Each review supersedes the reviewer's earlier comments, so "unresolved" means the latest review.
@@ -975,10 +971,8 @@ async function storeResults(tx: Tx, ticket: TicketRef, run: Run, v: VerdictPaylo
       .onConflictDoNothing()
       .returning({ id: ticketLinks.id });
     if (!row) continue; // already proposed or confirmed
-    for (const t of [ticket, other]) {
-      await logActivity(tx, t.id, "edited", { fields: ["links"], change: "proposed", kind }, actor);
-      await publish(tx, t.projectId, { type: "ticket.updated", ticketId: t.id, fields: ["links"] });
-    }
+    for (const t of [ticket, other])
+      await ticketChanged(tx, t, ["links"], { change: "proposed", kind }, actor);
   }
 
   const results = v.criteriaResults.filter((c) => UUID.test(c.criterionId));
@@ -990,18 +984,7 @@ async function storeResults(tx: Tx, ticket: TicketRef, run: Run, v: VerdictPaylo
         .where(
           and(eq(acceptanceCriteria.id, c.criterionId), eq(acceptanceCriteria.ticketId, ticket.id)),
         );
-    await logActivity(
-      tx,
-      ticket.id,
-      "edited",
-      { fields: ["criteria"], change: "checked by QA", results },
-      actor,
-    );
-    await publish(tx, ticket.projectId, {
-      type: "ticket.updated",
-      ticketId: ticket.id,
-      fields: ["criteria"],
-    });
+    await ticketChanged(tx, ticket, ["criteria"], { change: "checked by QA", results }, actor);
   }
 }
 
