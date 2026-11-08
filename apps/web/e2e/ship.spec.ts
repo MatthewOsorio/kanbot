@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { eq } from "drizzle-orm";
 import { TEST_DATABASE_URL } from "../playwright.config";
 
-// §3 manual moves around Ship (M5 phase 5a): skipping the gates asks first, PR Review needs a PR, and
+// §3 manual moves around Ship (M5 phase 5a, 5b): skipping the gates asks first, PR Review needs a PR, and
 // Done with an open PR closes it on GitHub (the stub) once confirmed. The card and drawer show the PR.
 test("Ship, PR Review and Done confirmations, and the PR on the card and drawer", async ({
   page,
@@ -46,7 +46,12 @@ test("Ship, PR Review and Done confirmations, and the PR on the card and drawer"
     .where(eq(projects.id, project.id));
   await db
     .update(tickets)
-    .set({ prNumber: 7, prUrl: "https://github.com/octo/sample/pull/7", statusFlag: "pr_open" })
+    .set({
+      prNumber: 7,
+      prUrl: "https://github.com/octo/sample/pull/7",
+      statusFlag: "pr_open",
+      ciState: "pending",
+    })
     .where(eq(tickets.id, t.id));
   await db.$client.end();
 
@@ -54,6 +59,7 @@ test("Ship, PR Review and Done confirmations, and the PR on the card and drawer"
   const card = page.getByRole("button", { name: `${prefix}-1: Ship me` });
   await expect(card.getByText("PR #7")).toBeVisible();
   await expect(card.getByText("PR open · waiting on CI")).toBeVisible();
+  await expect(card.getByText("CI running")).toBeVisible();
   await card.click();
   await expect(page.getByRole("link", { name: "PR #7 on GitHub" })).toHaveAttribute(
     "href",
@@ -62,6 +68,20 @@ test("Ship, PR Review and Done confirmations, and the PR on the card and drawer"
   await page.keyboard.press("Escape");
 
   expect((await move("pr_review")).status()).toBe(204);
+  // What the GitHub watcher records (FR-46, FR-47); a project with no clone isn't watched, so this stays put.
+  const db2 = createDb(TEST_DATABASE_URL);
+  await db2
+    .update(tickets)
+    .set({ ciState: "passing", reviewState: "approved" })
+    .where(eq(tickets.id, t.id));
+  await db2.$client.end();
+  await page.reload();
+  await expect(card.getByText("CI passed")).toBeVisible();
+  await expect(card.getByText("Approved")).toBeVisible();
+  await page.getByRole("button", { name: /Needs me/ }).click();
+  await expect(
+    page.getByRole("list", { name: "Tickets that need you" }).getByText("PR ready for your review"),
+  ).toBeVisible();
   const open = await move("done");
   expect(open.status()).toBe(409);
   expect((await open.json()).error).toEqual({

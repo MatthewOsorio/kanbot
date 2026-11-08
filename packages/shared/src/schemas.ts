@@ -12,6 +12,10 @@ export const activityActions = [
   "run_finished",
   "pr_opened",
   "pr_closed",
+  "pr_merged",
+  "ci_changed",
+  "review_imported",
+  "pushed",
 ] as const;
 export const criterionSources = ["user", "agent"] as const;
 export const linkKinds = ["blocks", "relates"] as const;
@@ -27,6 +31,10 @@ export const statusFlags = [
   "pr_open",
   "failed",
 ] as const;
+/** A PR head's CI (FR-46): none = the repo has no workflows. */
+export const ciStates = ["none", "pending", "passing", "failing"] as const;
+/** The latest GitHub review on the PR (FR-47). */
+export const reviewStates = ["none", "approved", "changes_requested"] as const;
 export const runStates = [
   "queued",
   "running",
@@ -67,6 +75,8 @@ export type Priority = (typeof priorities)[number];
 export type CriterionStatus = (typeof criterionStatuses)[number];
 export type ActivityAction = (typeof activityActions)[number];
 export type StatusFlag = (typeof statusFlags)[number];
+export type CiState = (typeof ciStates)[number];
+export type ReviewState = (typeof reviewStates)[number];
 export type RunState = (typeof runStates)[number];
 export type RunEventType = (typeof runEventTypes)[number];
 export type ArtifactKind = (typeof artifactKinds)[number];

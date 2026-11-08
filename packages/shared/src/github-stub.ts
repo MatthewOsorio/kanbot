@@ -1,7 +1,10 @@
-// Test-only: a stand-in for GitHub's REST API, just the calls onboarding (§10) and Ship (FR-43) make. Worker tests, e2e
-// and browser checks point KANBOT_GITHUB_API at it; clone_url is a local repo, so git needs no network.
+// Test-only: a stand-in for GitHub's REST API, just the calls onboarding (§10), Ship (FR-43) and the PR watcher
+// (FR-46, FR-47) make. Worker tests, e2e and browser checks point KANBOT_GITHUB_API at it; clone_url is a local repo,
+// so git needs no network.
+import { execFileSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { CheckRun, Review, ReviewComment } from "./github";
 
 export type GitHubStub = {
   url: string;
@@ -12,6 +15,13 @@ export type GitHubStub = {
     pullUpdates: { number: number; body: unknown }[];
     contents: { path: string; body: unknown }[];
   };
+  /** The PR watcher's view: a PR's head (default: its branch in cloneUrl) or state, a commit's checks, reviews, job logs. */
+  setPr: (number: number, pr: { headSha?: string; merged?: boolean; closed?: boolean }) => void;
+  setChecks: (sha: string, runs: CheckRun[]) => void;
+  addReview: (number: number, review: Review, comments?: ReviewComment[]) => void;
+  setJobLog: (jobId: number, log: string) => void;
+  /** The repo's workflow files (the `workflows` option), changeable per test. */
+  setWorkflows: (names: string[]) => void;
   close: () => Promise<void>;
 };
 
@@ -24,7 +34,23 @@ export async function startGitHubStub(o: {
 }): Promise<GitHubStub> {
   const calls: GitHubStub["calls"] = { protection: [], pulls: [], pullUpdates: [], contents: [] };
   let protection: unknown = null;
+  let workflows = o.workflows ?? [];
   const closed = new Set<number>();
+  const merged = new Set<number>();
+  const heads = new Map<number, string>();
+  const branches = new Map<number, string>();
+  const checks = new Map<string, CheckRun[]>();
+  const reviews = new Map<number, { review: Review; comments: ReviewComment[] }[]>();
+  const jobLogs = new Map<number, string>();
+  const headOf = (n: number) => {
+    const set = heads.get(n);
+    if (set) return set;
+    const branch = branches.get(n);
+    if (!branch) return "0".repeat(40);
+    return execFileSync("git", ["-C", o.cloneUrl, "rev-parse", `refs/heads/${branch}`], {
+      encoding: "utf8",
+    }).trim();
+  };
   const repo = {
     name: o.repo,
     owner: { login: o.owner },
@@ -51,10 +77,10 @@ export async function startGitHubStub(o: {
       if (route === `GET ${base}/installation`) return send(200, { id: 1 });
       if (route === `GET ${base}`) return send(200, repo);
       if (route === `GET ${base}/contents/.github/workflows`)
-        return o.workflows?.length
+        return workflows.length
           ? send(
               200,
-              o.workflows.map((name) => ({ name })),
+              workflows.map((name) => ({ name })),
             )
           : send(404, { message: "Not Found" });
       if (route === `GET ${base}/branches/main/protection`)
@@ -82,20 +108,22 @@ export async function startGitHubStub(o: {
       if (route === `POST ${base}/pulls`) {
         calls.pulls.push(body);
         const number = calls.pulls.length;
+        branches.set(number, (body as { head: string }).head);
         return send(201, {
           number,
           state: "open",
           html_url: `https://github.com/${o.owner}/${o.repo}/pull/${number}`,
         });
       }
-      const pr =
-        path.startsWith(`${base}/pulls/`) && /^\d+$/.exec(path.slice(`${base}/pulls/`.length));
+      const rest = path.startsWith(`${base}/`) ? path.slice(base.length) : "";
+      const pr = /^\/pulls\/(\d+)$/.exec(rest);
       if (pr) {
-        const number = Number(pr[0]);
+        const number = Number(pr[1]);
         const view = () => ({
           number,
           state: closed.has(number) ? "closed" : "open",
-          merged: false,
+          merged: merged.has(number),
+          head: { sha: headOf(number) },
           html_url: `https://github.com/${o.owner}/${o.repo}/pull/${number}`,
         });
         if (req.method === "GET") return send(200, view());
@@ -107,8 +135,26 @@ export async function startGitHubStub(o: {
           return send(200, view());
         }
       }
+      const rv = /^\/pulls\/(\d+)\/reviews(?:\/(\d+)\/comments)?$/.exec(rest);
+      if (rv && req.method === "GET") {
+        const list = reviews.get(Number(rv[1])) ?? [];
+        if (!rv[2])
+          return send(
+            200,
+            list.map((r) => r.review),
+          );
+        return send(200, list.find((r) => r.review.id === Number(rv[2]))?.comments ?? []);
+      }
+      const cr = /^\/commits\/([^/]+)\/check-runs$/.exec(rest);
+      if (cr && req.method === "GET") return send(200, { check_runs: checks.get(cr[1]!) ?? [] });
+      const job = /^\/actions\/jobs\/(\d+)\/logs$/.exec(rest);
+      if (job && req.method === "GET") {
+        const log = jobLogs.get(Number(job[1]));
+        if (log === undefined) return send(404, { message: "Not Found" });
+        res.writeHead(200, { "content-type": "text/plain" });
+        return res.end(log);
+      }
       if (req.method === "GET" && path.startsWith("/users/")) return send(200, { id: 4242 });
-      if (route === `GET ${base}/commits/main/check-runs`) return send(200, { check_runs: [] });
       send(404, { message: `stub: no route for ${route}` });
     });
   });
@@ -117,6 +163,17 @@ export async function startGitHubStub(o: {
   return {
     url: `http://127.0.0.1:${port}`,
     calls,
+    setPr: (number, pr) => {
+      if (pr.headSha) heads.set(number, pr.headSha);
+      if (pr.merged) merged.add(number);
+      if (pr.merged || pr.closed) closed.add(number);
+      if (pr.closed === false) closed.delete(number);
+    },
+    setChecks: (sha, runs) => checks.set(sha, runs),
+    addReview: (number, review, comments = []) =>
+      reviews.set(number, [...(reviews.get(number) ?? []), { review, comments }]),
+    setJobLog: (jobId, log) => jobLogs.set(jobId, log),
+    setWorkflows: (names) => (workflows = names),
     close: () => new Promise((ok) => server.close(() => ok())),
   };
 }

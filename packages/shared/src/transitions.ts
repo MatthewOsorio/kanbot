@@ -111,3 +111,34 @@ export function afterRun(
     return { to: null, flag: rule.flag, bounce: true, rerun: true };
   return { to: rule.to === column ? null : rule.to, flag: rule.flag, bounce: !!rule.bounce };
 }
+
+/** What the GitHub watcher saw on a shipped ticket's PR (§10 "The human review loop", FR-46, FR-47). */
+export type GitHubEvent = "ci_passed" | "ci_failed" | "changes_requested" | "merged" | "closed";
+
+/** The §3 rows for GitHub's side: only tickets in Ship or PR Review are watched. */
+export const GITHUB_RULES: readonly {
+  from: readonly string[];
+  event: GitHubEvent;
+  to: string;
+  bounce?: true;
+}[] = [
+  { from: ["ship"], event: "ci_passed", to: "pr_review" },
+  { from: ["ship", "pr_review"], event: "ci_failed", to: "in_progress", bounce: true },
+  // The owner's own review isn't counted toward the bounce limit (§3).
+  { from: ["pr_review"], event: "changes_requested", to: "in_progress" },
+  { from: ["ship", "pr_review"], event: "merged", to: "done" },
+  { from: ["ship", "pr_review"], event: "closed", to: "backlog" },
+];
+
+/** The move a GitHub event makes, or null when it changes nothing for a ticket in `column`. */
+export function afterGitHub(
+  column: string,
+  event: GitHubEvent,
+  { bounces = 0, bounceLimit = BOUNCE_LIMIT }: { bounces?: number; bounceLimit?: number } = {},
+): AfterRun | null {
+  const rule = GITHUB_RULES.find((r) => r.event === event && r.from.includes(column));
+  if (!rule) return null;
+  if (rule.bounce && bounces >= bounceLimit)
+    return { to: "blocked", flag: "failed", bounce: false, reason: "bounce_limit" };
+  return { to: rule.to, flag: "none", bounce: !!rule.bounce };
+}

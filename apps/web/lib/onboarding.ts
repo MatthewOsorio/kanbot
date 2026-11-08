@@ -9,6 +9,7 @@ import {
   listAppRepos,
   loadGitHubApp,
   repoToken,
+  workflowFiles as repoWorkflows,
   type GitHubApp,
 } from "@kanbot/shared/github";
 import {
@@ -132,17 +133,8 @@ async function readProtection(
 }
 
 /** The workflow files on the default branch; [] when there are none. */
-async function workflowFiles(token: string, p: Project): Promise<string[]> {
-  return gh<{ name: string }[]>(
-    token,
-    `${repoPath(p)}/contents/.github/workflows?ref=${encodeURIComponent(p.defaultBranch)}`,
-  )
-    .then((files) => files.map((f) => f.name))
-    .catch((e: unknown) => {
-      if (e instanceof GitHubError && e.status === 404) return [];
-      throw e;
-    });
-}
+const workflowFiles = (token: string, p: Project) =>
+  repoWorkflows(token, p.githubOwner!, p.githubRepo!, p.defaultBranch);
 
 /** Moves onboarding on; each action is only valid at its step. */
 export async function onboardingAction(id: string, body: z.output<typeof onboardingActionBody>) {

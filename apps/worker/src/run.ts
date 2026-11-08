@@ -40,7 +40,7 @@ import { buildContext } from "./context";
 import { BROWSER_TOOLS, EDIT_TOOLS } from "./runtime/fence";
 import { record, redactText } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
-import { pushAndOpenPr, type ShippedPr } from "./ship";
+import { pullBranch, pullDefaultBranch, pushAndOpenPr, type ShippedPr } from "./ship";
 import {
   changedSince,
   checkAfterRun,
@@ -334,6 +334,14 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     if (run.columnSlug === "done" && ticket.worktreePath && project.repoPath)
       if (await removeWorktree(project.repoPath, ticket.worktreePath))
         await db.update(tickets).set({ worktreePath: null }).where(eq(tickets.id, ticket.id));
+    // Plan B reads the clone and new branches start from it: both should see what merged on GitHub.
+    if (project.repoPath && project.githubOwner && project.githubRepo)
+      await pullDefaultBranch(db, {
+        githubOwner: project.githubOwner,
+        githubRepo: project.githubRepo,
+        defaultBranch: project.defaultBranch,
+        repoPath: project.repoPath,
+      });
     if (WORKTREE_COLUMNS.has(run.columnSlug)) {
       if (!project.repoPath) throw new Error("Link a local repo to this project before building");
       // Builds the devcontainer's image when the project has no Image of its own (§7).
@@ -359,6 +367,13 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
           .update(tickets)
           .set({ worktreePath: wt.path, branchName: wt.branch })
           .where(eq(tickets.id, ticket.id));
+      // FR-48: the next run starts from the PR branch's head on GitHub, the owner's pushes included.
+      if (project.githubRepo && project.githubOwner && ticket.prNumber)
+        await pullBranch(
+          db,
+          { githubOwner: project.githubOwner, githubRepo: project.githubRepo },
+          wt,
+        );
       before = await snapshot(wt.path, project.defaultBranch);
     }
     canEdit = editScope(agent.editScope, config);
@@ -642,7 +657,8 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
     if (o.pr) {
       await tx
         .update(tickets)
-        .set({ prNumber: o.pr.number, prUrl: o.pr.url, headSha: o.pr.headSha })
+        // A new head: CI starts over (the GitHub watcher, FR-46).
+        .set({ prNumber: o.pr.number, prUrl: o.pr.url, headSha: o.pr.headSha, ciState: "pending" })
         .where(eq(tickets.id, ticket.id));
       await logActivity(
         tx,
@@ -710,29 +726,8 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
     )
       await duckworthFallback(tx, ticket);
     const to = rule.to && cols.find((c) => c.slug === rule.to);
-    let started = null;
     const next = rule.rerun ? from : to && to.id !== from.id ? to : null;
-    if (next) {
-      if (next.id !== from.id) await moveToColumnEnd(tx, ticket, from, next, actor);
-      // A bounce resumes the agent's last session there, so it picks up where it left off (FR-35).
-      const [last] = rule.bounce
-        ? await tx
-            .select({ sessionId: runs.sessionId })
-            .from(runs)
-            .where(
-              and(
-                eq(runs.ticketId, ticket.id),
-                eq(runs.columnSlug, next.slug),
-                isNotNull(runs.sessionId),
-              ),
-            )
-            .orderBy(desc(runs.createdAt))
-            .limit(1)
-        : [];
-      started = await startColumnAgent(tx, ticket.projectId, ticket.id, next, actor, {
-        resumeSessionId: last?.sessionId,
-      });
-    }
+    const started = next ? await moveAndStart(tx, ticket, from, next, actor, rule.bounce) : null;
     // The ticket now waits for the owner, with no agent left to run (FR-60).
     if (!started && ["needs_input", "failed"].includes(rule.flag) && o.state !== "interrupted")
       await publish(tx, ticket.projectId, {
@@ -743,6 +738,38 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
           ? `${ticket.title}: ${QA_SETUP_MESSAGE}, then drag it to QA`
           : `${ticket.title}: blocked, needs your answer`,
       });
+  });
+}
+
+/**
+ * An automatic move (after a run, or a GitHub event): to the bottom of `next` unless it's the same column,
+ * then `next`'s agent. A bounce resumes the agent's last session there, so it picks up where it left off (FR-35).
+ */
+export async function moveAndStart(
+  tx: Tx,
+  ticket: TicketRef,
+  from: typeof columns.$inferSelect,
+  next: typeof columns.$inferSelect,
+  actor: { kind: "user" | "agent"; name: string },
+  bounce: boolean,
+) {
+  if (next.id !== from.id) await moveToColumnEnd(tx, ticket, from, next, actor);
+  const [last] = bounce
+    ? await tx
+        .select({ sessionId: runs.sessionId })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.ticketId, ticket.id),
+            eq(runs.columnSlug, next.slug),
+            isNotNull(runs.sessionId),
+          ),
+        )
+        .orderBy(desc(runs.createdAt))
+        .limit(1)
+    : [];
+  return startColumnAgent(tx, ticket.projectId, ticket.id, next, actor, {
+    resumeSessionId: last?.sessionId,
   });
 }
 
@@ -787,11 +814,11 @@ async function agentComment(
   });
 }
 
-/** A new artifact version (never overwriting) and its event. */
-async function storeArtifact(
+/** A new artifact version (never overwriting) and its event; run is null for the GitHub watcher's. */
+export async function storeArtifact(
   tx: Tx,
   ticket: TicketRef,
-  run: Run,
+  run: Pick<Run, "id"> | null,
   a: VerdictPayload["artifacts"][number],
   data: Record<string, unknown> = {},
 ) {
@@ -803,7 +830,7 @@ async function storeArtifact(
     .insert(artifacts)
     .values({
       ticketId: ticket.id,
-      runId: run.id,
+      runId: run?.id ?? null,
       kind: a.kind,
       title: a.title,
       version: (last ?? 0) + 1,

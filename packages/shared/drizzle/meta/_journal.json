@@ -120,6 +120,13 @@
       "when": 1794099770071,
       "tag": "0016_screenshots",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794111410007,
+      "tag": "0017_github_watch",
+      "breakpoints": true
     }
   ]
 }

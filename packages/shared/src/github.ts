@@ -145,7 +145,98 @@ export async function botIdentity(app: GitHubApp, token: string) {
   return bot;
 }
 
-export type PullRequest = { number: number; html_url: string; state: string; merged?: boolean };
+export type PullRequest = {
+  number: number;
+  html_url: string;
+  state: string;
+  merged?: boolean;
+  head?: { sha: string };
+};
+
+export type CheckRun = {
+  id: number;
+  name: string;
+  status: string; // queued | in_progress | completed
+  conclusion: string | null;
+  html_url?: string;
+};
+/** The check runs on a commit (FR-46). shortcut: the first 100; page if a repo runs more checks per commit. */
+export const checkRuns = async (token: string, owner: string, repo: string, sha: string) =>
+  (
+    await gh<{ check_runs: CheckRun[] }>(
+      token,
+      `/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`,
+    )
+  ).check_runs;
+
+const FAILED = ["failure", "cancelled", "timed_out", "action_required", "startup_failure"];
+/** CI for one head: any failed check fails it; all completed passes it; none yet is pending. */
+export function ciOf(runs: CheckRun[]): {
+  state: "pending" | "passing" | "failing";
+  failed?: CheckRun;
+} {
+  const failed = runs.find((r) => r.status === "completed" && FAILED.includes(r.conclusion ?? ""));
+  if (failed) return { state: "failing", failed };
+  if (runs.length && runs.every((r) => r.status === "completed")) return { state: "passing" };
+  return { state: "pending" };
+}
+
+/** The workflow files on a branch; [] when there are none. */
+export async function workflowFiles(
+  token: string,
+  owner: string,
+  repo: string,
+  ref: string,
+): Promise<string[]> {
+  return gh<{ name: string }[]>(
+    token,
+    `/repos/${owner}/${repo}/contents/.github/workflows?ref=${encodeURIComponent(ref)}`,
+  )
+    .then((files) => files.map((f) => f.name))
+    .catch((e: unknown) => {
+      if (e instanceof GitHubError && e.status === 404) return [];
+      throw e;
+    });
+}
+
+/** The end of a GitHub Actions job's log (for Actions, a check run's id is its job's id); null if unavailable. */
+export async function jobLogTail(
+  token: string,
+  owner: string,
+  repo: string,
+  jobId: number,
+  lines = 150,
+) {
+  // GitHub answers with a redirect to blob storage; fetch drops the Authorization header on that hop.
+  const res = await fetch(`${apiBase()}/repos/${owner}/${repo}/actions/jobs/${jobId}/logs`, {
+    headers: { Authorization: `Bearer ${token}`, "User-Agent": "kanbot" },
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!res?.ok) return null;
+  return (await res.text()).trimEnd().split("\n").slice(-lines).join("\n");
+}
+
+export type Review = {
+  id: number;
+  user: { login: string } | null;
+  state: string; // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING
+  body: string | null;
+};
+export type ReviewComment = { path: string; line: number | null; body: string };
+/** shortcut: the first 100 reviews and comments per review; page if a PR ever gets more. */
+export const listReviews = (token: string, owner: string, repo: string, pr: number) =>
+  gh<Review[]>(token, `/repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100`);
+export const reviewComments = (
+  token: string,
+  owner: string,
+  repo: string,
+  pr: number,
+  id: number,
+) =>
+  gh<ReviewComment[]>(
+    token,
+    `/repos/${owner}/${repo}/pulls/${pr}/reviews/${id}/comments?per_page=100`,
+  );
 
 /** Opens the ticket's PR, or updates its title and body when it already has one (FR-43). */
 export function upsertPr(
