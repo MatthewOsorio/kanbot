@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import { api } from "@/lib/client";
 
 export type Comment = {
   id: string;

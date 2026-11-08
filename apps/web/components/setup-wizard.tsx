@@ -262,6 +262,7 @@ function StepBody({
           </Link>
         </>
       );
+    case "clone": // shown as Working above
     default:
       return null;
   }

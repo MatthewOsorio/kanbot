@@ -6,11 +6,20 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 6 * * *" # nightly, to shake out order-dependent tests
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       db:
         image: postgres:16
@@ -25,23 +34,54 @@ jobs:
       DATABASE_URL: postgres://kanbot:kanbot@localhost:5432/kanbot
       KANBOT_RUNTIME: replay
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4; version from package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26
+          node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @kanbot/web exec playwright install --with-deps chromium
+      - name: Pull the images the tests run
+        run: |
+          for image in node:24-alpine python:3.12-alpine alpine/socat; do
+            for attempt in 1 2 3; do
+              docker pull -q "$image" && break
+              [ "$attempt" = 3 ] && exit 1
+              sleep 10
+            done
+          done
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm exec knip --no-progress
+      - name: Migrations match the schema
+        run: |
+          pnpm --filter @kanbot/shared exec drizzle-kit check
+          pnpm --filter @kanbot/shared exec drizzle-kit generate --name drift-check
+          if [ -n "$(git status --porcelain packages/shared/drizzle)" ]; then
+            echo "::error::schema.ts changed without a migration: run pnpm db:generate"
+            git status --porcelain packages/shared/drizzle
+            exit 1
+          fi
       - run: pnpm test
+      - name: Shuffled tests (nightly)
+        if: github.event_name == 'schedule'
+        run: pnpm --filter @kanbot/shared --filter @kanbot/worker exec vitest run --sequence.shuffle
+      - run: pnpm eval:agents
       - run: pnpm test:e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/web/test-results
+          retention-days: 7
 
   # The deploy images (Dockerfile, docker-compose.yml) still build, so a broken one never reaches the server.
   images:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: docker compose --profile app build

@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "e2e-only encryption key in playwright.config.ts; it protects nothing real"
+regexes = ['''ZTJlLWVuY3J5cHRpb24ta2V5LTAxMjM0NTY3ODlhYmM''', '''^e2e-encryption-key-0123456789abc$''']

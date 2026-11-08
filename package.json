@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@12.16.1",
   "engines": {
-    "node": ">=22"
+    "node": ">=26"
   },
   "scripts": {
     "dev": "pnpm --parallel --filter @kanbot/web --filter @kanbot/worker dev",
@@ -15,6 +15,7 @@
     "db:generate": "pnpm --filter @kanbot/shared db:generate",
     "db:migrate": "pnpm --filter @kanbot/shared db:migrate",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "dev:web": "pnpm --filter @kanbot/web dev",
     "dev:worker": "pnpm --filter @kanbot/worker dev",
     "eval:agents": "pnpm --filter @kanbot/worker eval"
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "eslint": "^9.39.5",
+    "knip": "^6.44.2",
     "prettier": "^3.9.10",
     "typescript": "~6.0.3",
     "typescript-eslint": "8.72.0"

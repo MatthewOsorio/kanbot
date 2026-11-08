@@ -42,7 +42,7 @@ export function appBrowser(appUrl: string, save?: SaveScreenshot) {
         if (new URL(ws.url()).host === host) ws.connectToServer();
         else {
           errors.push(`Blocked WebSocket (not the app): ${ws.url()}`);
-          ws.close({ code: 1008, reason: "Kanbot: only the app under test" });
+          ws.close({ code: 1008, reason: "Kanbot: only the app under test" }).catch(() => {});
         }
       });
       page = await context.newPage();

@@ -2,7 +2,6 @@
 
 import { useContext } from "react";
 import { Markdown } from "@/components/markdown";
-import { api } from "@/lib/client";
 import type { TicketDetail } from "@/lib/tickets";
 import { Agents, AgentTag } from "./agent-tag";
 

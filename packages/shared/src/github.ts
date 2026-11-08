@@ -68,7 +68,9 @@ export async function saveGitHubApp(tx: Tx | Db, app: GitHubApp): Promise<boolea
 }
 
 /** GitHub's REST API; tests point KANBOT_GITHUB_API at a stub. */
-const apiBase = () => process.env.KANBOT_GITHUB_API ?? "https://api.github.com";
+export const apiBase = () => process.env.KANBOT_GITHUB_API ?? "https://api.github.com";
+/** github.com itself (OAuth's token exchange); the same stub stands in for it. */
+export const webBase = () => process.env.KANBOT_GITHUB_API ?? "https://github.com";
 
 export class GitHubError extends Error {
   constructor(

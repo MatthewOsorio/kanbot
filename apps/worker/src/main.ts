@@ -99,7 +99,7 @@ async function listen() {
   // shortcut: notifications sent while reconnecting are missed; the 5 s poll picks up queued runs, but a cancel in that gap only lands when the run ends. Upgrade by re-checking active runs' states on reconnect.
   const reconnect = () => {
     client.end().catch(() => {});
-    setTimeout(() => listen().catch(console.error), 1000);
+    setTimeout(() => void listen().catch(console.error), 1000);
   };
   client.on("error", reconnect);
   client.on("notification", (msg) => {

@@ -19,6 +19,7 @@ const hasDocker = (() => {
   }
 })();
 const hasChromium = existsSync(chromium.executablePath());
+if (process.env.CI && (!hasDocker || !hasChromium)) throw new Error("CI needs Docker and Chromium");
 
 type Result = { content: { type: string; text?: string; data?: string }[]; isError?: boolean };
 
@@ -101,6 +102,7 @@ describe.skipIf(!hasDocker || !hasChromium)("QA's browser (§4), real Chromium",
   });
 
   it("types and clicks", async () => {
+    await call("browser_open", { path: "/", width: 1280, height: 800 });
     await call("browser_type", { selector: "#name", text: "Testy", submit: false });
     await call("browser_click", { selector: 'role=button[name="Greet"]' });
     expect((await call("browser_read", { selector: "#out" })).text).toContain("Hello Testy");
