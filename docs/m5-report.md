@@ -1,6 +1,6 @@
 # M5 report: ship and deploy
 
-Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is merged too (PR #11, 2026-11-07, merge `a3242da`). It includes QA needing a start command, project env vars and the `http_request` fence fix, and `pnpm eval:agents` passes. The owner tests everything at the end of the milestone. Phase 5a (Captain Ship-It opens the PR) is built on branch `m5-ship`, committed locally (`e467bd1`), and waiting for review. Its paid eval and the real run on a test repo are still to do. Phase 4b (QA's browser, pulled forward) is built on top of it, uncommitted, and its eval is due too.
+Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is merged too (PR #11, 2026-11-07, merge `a3242da`). It includes QA needing a start command, project env vars and the `http_request` fence fix, and `pnpm eval:agents` passes. The owner tests everything at the end of the milestone. Phase 5a (Captain Ship-It opens the PR) and phase 4b (QA's browser, pulled forward) are merged too (PR #12, 2026-11-08, merge `409f094`), with `pnpm eval:agents` passing. 5a's own paid eval (with 5b) and its real run on a test repo are still to do. Next: phase 5b.
 
 **Done when:** a ticket goes from Backlog to a human-approved, merged PR.
 
@@ -21,8 +21,8 @@ Status: **in progress (living document, updated as each phase lands).** Branch `
 | 2b | Run Kanbot in WSL; a default image so project code never runs in the worker's container | **done** (2026-11-06); the owner's own `kanbot` distro is set up from `docs/deploy.md` |
 | 3 | GitHub App two-click setup, Sign in with GitHub, auth on every route | **done** (2026-11-07) |
 | 4 | Onboarding (§10 steps 1–7 and 10) | **done and merged** (PR #11, 2026-11-07), checked for real on NetGPT. Also in it: QA needs a start command, project env vars, the fence fix; eval passes |
-| 5a | Ship: Captain Ship-It's agent file; push the ticket branch; open the PR; store pr\_number, pr\_url and head\_sha on the ticket; commit trailers and the bot identity (FR-42, FR-43); Ship/Done move confirmations | **built** (2026-11-07) on `m5-ship`; tests, e2e and the browser check pass. Still to do: `pnpm eval:agents` (paid, owner's OK) and the real run on a test repo the owner names |
-| 4b | QA's browser, pulled forward from M6: Testy opens the QA app in headless Chromium (viewport, read, click, type, console errors, screenshots), fenced to the app's origin; screenshots on the ticket; Testy's prompt asks for rendered evidence | **built** (2026-11-07) on `m5-ship`, after 5a; tests, e2e and the browser check pass. Eval passes (2026-11-08) |
+| 5a | Ship: Captain Ship-It's agent file; push the ticket branch; open the PR; store pr\_number, pr\_url and head\_sha on the ticket; commit trailers and the bot identity (FR-42, FR-43); Ship/Done move confirmations | **merged** (PR #12, 2026-11-08); tests, e2e and the browser check pass. Still to do: Ship-It's eval (with 5b, paid, owner's OK) and the real run on a test repo the owner names |
+| 4b | QA's browser, pulled forward from M6: Testy opens the QA app in headless Chromium (viewport, read, click, type, console errors, screenshots), fenced to the app's origin; screenshots on the ticket; Testy's prompt asks for rendered evidence | **done and merged** (PR #12, 2026-11-08); tests, e2e and the browser check pass, and the eval passes |
 | 5b | Watch GitHub: a 60 s poll for CI status, reviews and merges. CI failing bounces to In Progress with the log; changes requested imports the comments and bounces; a merge goes to Done (Archie), a closed PR to Backlog; the owner's own pushes are detected and never rewritten (FR-44 polling, FR-46, FR-47, FR-48); CI on cards and in the drawer | **proposed**, not started. Ends with M5's "done when", for real on the test repo |
 | 5c | Keep branches current: rebase onto the default branch before each run; rebase overlapping branches when main moves (FR-51); GitHub status in `/api/health` | **proposed**, not started. Ends with two tickets in flight while main moves |
 | 6 | Leftovers: `blockWritesOutsideWorkingDirectories`, SDK `sandbox`, SSE `Last-Event-ID`, the disk-over-90% guard | not started |
@@ -103,6 +103,8 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - The worker image installs Chromium's headless shell with its libraries (`--only-shell --with-deps`).
   - Replay scripts can carry `screenshots` (PNG files), so tests, e2e and browser checks get real screenshots without a browser.
 
+- **2026-11-08.** PR #12 (5a and 4b) opened, CI passed (`check`, `images`), merged into `main` (merge `409f094`). The local checkout is on `main`. After pulling: `pnpm db:migrate` (0015, 0016) and restart `pnpm dev`. Next: phase 5b.
+
 ## What you can do
 
 - **Add a GitHub repo as a project** (phase 4). On Home, pick the repo under **New project**, give it a key prefix and click **Set up project**. The setup page then walks through:
@@ -121,6 +123,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - Use development credentials: code an agent writes can read them.
 - **QA needs a start command.** QA runs your app and checks each criterion against it. Without a Start command (Settings), a ticket can't move into QA, and Code Review holds it as "Needs you".
 - **Approve and ship.** A ticket that passed QA has an **Approve and ship** button in its drawer. It moves the ticket to Ship, and Captain Ship-It starts (phase 5a).
+- **See QA check your pages in a browser** (phase 4b). Nothing to set up: when the worker starts the QA app, Testy can open it in a headless browser at phone and desktop sizes, click, type and read console errors. Screenshots it takes appear as thumbnails under its test report in the drawer's **Artifacts** tab; click one for full size. If Testy is blocked on a visual criterion, answering "I checked it myself, it's fine" counts as evidence.
 - **Ship a ticket** (phase 5a, GitHub projects).
   - In Ship, Captain Ship-It adds a changelog entry, fixes docs the change made wrong and writes the PR description.
   - Then Kanbot runs the checks, pushes the ticket branch and opens the PR, or updates it on a re-ship.
@@ -152,7 +155,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 
 ## How to run it
 
-`pnpm db:migrate` (six new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`, `0013_onboarding`, `0014_project_env`, `0015_ticket-pr`), then `pnpm dev`. Clones go to `KANBOT_REPOS_DIR`, or `.kanbot-repos/` at the repo root when it is unset (`pnpm dev`). Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
+`pnpm db:migrate` (seven new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`, `0013_onboarding`, `0014_project_env`, `0015_ticket-pr`, `0016_screenshots`), then `pnpm dev`. Clones go to `KANBOT_REPOS_DIR`, or `.kanbot-repos/` at the repo root when it is unset (`pnpm dev`). Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
 
 ## What was built
 
