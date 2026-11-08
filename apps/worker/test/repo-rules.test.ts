@@ -26,7 +26,9 @@ describe("CLAUDE.md matches the repo", () => {
       /\b(apps|packages|fixtures|agents|plugins|docs|evals)\/[\w./-]+\.[a-z]+/g,
     );
     expect(named?.length).toBeGreaterThan(5);
-    expect(named!.filter((p) => !existsSync(join(root, p)))).toEqual([]);
+    // Next's build folder is gitignored, so a clean checkout doesn't have it.
+    const tracked = named!.filter((p) => !p.includes("/.next"));
+    expect(tracked.filter((p) => !existsSync(join(root, p)))).toEqual([]);
   });
 
   it("names every worker module", () => {
