@@ -23,6 +23,7 @@ apps/worker/         Node process (tsx): claims queued runs, runs agents, applie
   src/cleanup.ts       nightlyCleanup: old run_events, worktrees left in Done, unused Kanbot-built images
   src/onboard.ts       onboarding's worker steps: clone + detect, the baseline (§10)
   src/ship.ts          pushAndOpenPr: after Captain Ship-It, push the ticket branch and open or update its PR (FR-43)
+  src/watch.ts         the 60 s GitHub poll: CI, reviews, merges and closes move tickets (FR-44 to FR-48)
   src/queue.ts         claimNext (SKIP LOCKED queue), crash recovery, automatic resume
   src/run.ts           executeRun: one run end to end;  src/stall.ts  stuck-agent rules
   src/finish.ts        outcomeOf, finish (verdict → transition, one tx), moveAndStart;  src/results.ts  stores a verdict's artifacts, comments, criteria, links
