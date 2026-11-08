@@ -1,6 +1,7 @@
 import { loadGitHubApp } from "@kanbot/shared/github";
 import { NextResponse, type NextRequest } from "next/server";
-import { oauthReturn, originOf, sessionCookie, STATE_COOKIE } from "@/lib/auth";
+import { originOf, sessionCookie, STATE_COOKIE } from "@/lib/auth";
+import { oauthReturn } from "@/lib/oauth";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
