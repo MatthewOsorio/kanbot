@@ -29,9 +29,12 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
 import { nightlyCleanup } from "../src/cleanup";
-import { claimNext, executeRun } from "../src/run";
+import { claimNext } from "../src/queue";
+import { executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
-import { checkAfterRun, ensureWorktree, projectImage, snapshot, startApp } from "../src/worktree";
+import { checkAfterRun, ensureWorktree, snapshot } from "../src/worktree";
+import { projectImage } from "../src/docker";
+import { startApp } from "../src/qa-app";
 
 const db = createDb(TEST_DATABASE_URL);
 const runtime = new ReplayRuntime();

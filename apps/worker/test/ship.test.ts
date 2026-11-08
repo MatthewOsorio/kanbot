@@ -20,9 +20,10 @@ import { startGitHubStub, type GitHubStub } from "@kanbot/shared/github-stub";
 import { git } from "@kanbot/shared/repo";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { claimNext, executeRun } from "../src/run";
+import { claimNext } from "../src/queue";
+import { executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
-import { commitAs } from "../src/worktree";
+import { commitAs } from "../src/commands";
 import { connectTestApp } from "./github-app";
 
 const db = createDb(TEST_DATABASE_URL);

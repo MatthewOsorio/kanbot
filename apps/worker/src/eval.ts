@@ -28,7 +28,8 @@ import {
 } from "@kanbot/shared/db/testing";
 import { git } from "@kanbot/shared/repo";
 import { and, eq, inArray } from "drizzle-orm";
-import { claimNext, executeRun } from "./run";
+import { claimNext } from "./queue";
+import { executeRun } from "./run";
 import { ReplayRuntime } from "./runtime/replay";
 import { SdkRuntime } from "./runtime/sdk";
 

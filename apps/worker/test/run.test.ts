@@ -25,11 +25,11 @@ import { buildContext } from "../src/context";
 import {
   afterPrevious,
   claimNext,
-  executeRun,
   PAUSED_ERROR,
   recoverInterrupted,
   resumeInterrupted,
-} from "../src/run";
+} from "../src/queue";
+import { executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
 import type { AgentRuntime } from "../src/runtime/types";
 

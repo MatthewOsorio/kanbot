@@ -19,7 +19,7 @@ import { startGitHubStub, type GitHubStub } from "@kanbot/shared/github-stub";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { onboardNext } from "../src/onboard";
-import { runChecks } from "../src/worktree";
+import { runChecks } from "../src/commands";
 import { connectTestApp } from "./github-app";
 
 const db = createDb(TEST_DATABASE_URL);

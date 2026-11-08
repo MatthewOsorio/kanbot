@@ -15,6 +15,7 @@ export async function publish(tx: Tx, projectId: string, event: BoardEvent) {
 
 export type Actor = { kind: "user" | "agent"; name: string };
 export const OWNER: Actor = { kind: "user", name: "owner" };
+export const agentActor = (slug: string): Actor => ({ kind: "agent", name: slug });
 
 export function logActivity(
   tx: Tx,

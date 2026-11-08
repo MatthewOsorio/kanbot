@@ -1,15 +1,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { redactText } from "../src/runtime/replay";
-import {
-  appPort,
-  containerBash,
-  dockerRun,
-  listeningPorts,
-  openEnv,
-  projectImage,
-  shQuote,
-} from "../src/worktree";
+import { appPort, listeningPorts } from "../src/qa-app";
+import { containerBash, dockerRun, projectImage, shQuote } from "../src/docker";
+import { openEnv } from "../src/commands";
 
 const cwd = process.platform === "win32" ? "C:\\r\\wt" : "/r/wt";
 const mounted = process.platform === "win32" ? "/c/r/wt" : "/r/wt";

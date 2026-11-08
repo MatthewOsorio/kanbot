@@ -29,7 +29,8 @@ import {
 } from "@kanbot/shared/github";
 import { removeWorktree } from "@kanbot/shared/repo";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
-import { moveAndStart, storeArtifact } from "./run";
+import { moveAndStart } from "./finish";
+import { storeArtifact } from "./results";
 import { redactText } from "./runtime/replay";
 
 const GITHUB = { kind: "agent" as const, name: "GitHub" }; // the timeline shows it as the actor
