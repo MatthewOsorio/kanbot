@@ -8,6 +8,7 @@ import {
   qaRunnable,
   starterWorkflow,
 } from "./onboarding";
+import { patchProjectBody } from "./schemas";
 
 const read = (files: Record<string, string>) => (f: string) => files[f] ?? "";
 
@@ -20,9 +21,22 @@ describe("detect", () => {
       build: "pnpm run build",
       lint: undefined,
       test: "pnpm run test",
-      start: undefined,
+      start: "pnpm run dev",
     });
     expect(d.image).toBe("node:24-bookworm");
+  });
+
+  it("starts the app with its start script, else its dev script; Start may name $PORT", () => {
+    const start = (scripts: object) =>
+      detect(["package.json"], read({ "package.json": JSON.stringify({ scripts }) })).commands
+        .start;
+    expect(start({ dev: "vite" })).toBe("npm run dev");
+    expect(start({ dev: "vite", start: "node server.js" })).toBe("npm run start");
+    expect(patchProjectBody.safeParse({ commands: { start: "vite --port $PORT" } }).success).toBe(
+      true,
+    );
+    expect(patchProjectBody.safeParse({ commands: { start: "vite $HOME" } }).success).toBe(false);
+    expect(patchProjectBody.safeParse({ commands: { test: "vitest $PORT" } }).success).toBe(false);
   });
 
   it("uses npm ci only with a package-lock", () => {

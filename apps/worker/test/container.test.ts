@@ -1,25 +1,47 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { redactText } from "../src/runtime/replay";
-import { containerBash, dockerRun, openEnv, projectImage, shQuote } from "../src/worktree";
+import {
+  appPort,
+  containerBash,
+  dockerRun,
+  listeningPorts,
+  openEnv,
+  projectImage,
+  shQuote,
+} from "../src/worktree";
 
 const cwd = process.platform === "win32" ? "C:\\r\\wt" : "/r/wt";
 const mounted = process.platform === "win32" ? "/c/r/wt" : "/r/wt";
 
 describe("project commands in containers (§7)", () => {
-  it("mounts only the worktree and the cache, passes no host env, publishes on 127.0.0.1", () => {
-    const args = dockerRun("node:24", cwd, "node --test", { name: "n", port: 4100 });
+  it("mounts only the worktree and the cache, passes no host env, joins the forwarder's network", () => {
+    const args = dockerRun("node:24", cwd, "node --test", { name: "n", port: 4100, network: "f" });
     expect(args.join(" ")).toBe(
       `run --rm --init --label kanbot --name n -v ${cwd}:${mounted} -w ${mounted} ` +
-        "-v kanbot-cache:/cache -e HOME=/cache -e PORT=4100 -p 127.0.0.1:4100:4100 " +
+        "-v kanbot-cache:/cache -e HOME=/cache --network container:f -e PORT=4100 " +
         "node:24 sh -c node --test",
     );
+  });
+
+  it("finds the ports listening in a namespace, preferring the one QA gave", () => {
+    const proc = [
+      "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+      "   0: 0100007F:1435 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 1",
+      "   1: 00000000:9C3F 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 2",
+      "   2: 0100007F:1435 0100007F:D0F2 01 00000000:00000000 00:00000000 00000000  1000        0 3",
+      "   0: 00000000000000000000000000000000:1F40 00000000000000000000000000000000:0000 0A 0 0 0 0 0 4",
+    ].join("\n");
+    expect(listeningPorts(proc)).toEqual([5173, 8000, 39999]); // 5173 localhost-only, 8000 on IPv6
+    expect(appPort([5173, 8000, 39999], 8000)).toBe(8000);
+    expect(appPort([5173, 39999], 4100)).toBe(5173);
+    expect(appPort([39999], 4100)).toBeUndefined(); // only the forwarder itself
   });
 
   it("moves the project's own commands into the image and leaves the rest on the host", () => {
     const bash = containerBash("node:24", cwd, { test: "node --test", lint: "eslint ." }, "run-1");
     const cmd = bash("node --test  test/a.test.ts")!;
-    expect(cmd).toMatch(/^(MSYS_NO_PATHCONV=1 )?'docker' 'run' /);
+    expect(cmd).toMatch(/^'docker' 'run' /);
     expect(cmd).toContain("'kanbot=run-1'");
     expect(cmd.endsWith("'node:24' 'sh' '-c' 'node --test test/a.test.ts'")).toBe(true);
     expect(bash("eslint .")).not.toBeNull();

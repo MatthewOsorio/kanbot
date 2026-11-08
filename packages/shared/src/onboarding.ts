@@ -72,7 +72,8 @@ export function detect(files: string[], read: (file: string) => string): Detecte
         build: script("build"),
         lint: script("lint"),
         test: script("test"),
-        start: script("start"),
+        // QA runs the app as a person would; the worker finds whatever port it listens on (§4).
+        start: script("start") ?? script("dev"),
       },
       testGlobs: ["**/*.test.*", "**/*.spec.*", "**/__tests__/**"],
       image: "node:24-bookworm",

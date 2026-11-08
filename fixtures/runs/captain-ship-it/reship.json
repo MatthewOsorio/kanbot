@@ -1,0 +1,24 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "The changelog entry is already there."
+      }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Changelog entry committed; PR description written.",
+    "artifacts": [
+      {
+        "kind": "pr_description",
+        "title": "PR: replay ticket",
+        "markdown": "## What and why\nReplay PR description.\n\n## Changes\n- CHANGELOG.md\n\n## How it was checked\n- Code review: approved.\n- QA: all criteria pass.\n\n## Notes for the reviewer\nNone."
+      }
+    ]
+  },
+  "costUsd": 0.04,
+  "inputTokens": 6000,
+  "outputTokens": 900
+}

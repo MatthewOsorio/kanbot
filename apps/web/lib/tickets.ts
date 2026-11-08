@@ -22,16 +22,19 @@ import {
   projectConfigOf,
   projects,
   runs,
+  screenshots,
   startColumnAgent,
   ticketLinks,
   tickets,
 } from "@kanbot/shared/db";
+import { gh, repoToken, type PullRequest } from "@kanbot/shared/github";
 import { git, overlap, removeWorktree } from "@kanbot/shared/repo";
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";
 import { linksOf } from "./links";
+import { github, requireApp } from "./onboarding";
 import { planExists } from "./runs";
 import { db } from "./db";
 import { publish, type Tx } from "./events";
@@ -171,6 +174,16 @@ export function acceptProposals(epicId: string, { refs }: In<typeof acceptPropos
   });
 }
 
+/** A QA screenshot's PNG (§4). */
+export async function getScreenshot(id: string) {
+  const [row] = await db
+    .select({ png: screenshots.png })
+    .from(screenshots)
+    .where(eq(screenshots.id, id));
+  if (!row) throw notFound("Screenshot not found");
+  return row.png;
+}
+
 export async function getTicket(id: string) {
   const [row] = await db
     .select({
@@ -184,47 +197,54 @@ export async function getTicket(id: string) {
     .innerJoin(columns, eq(columns.id, tickets.columnId))
     .where(eq(tickets.id, id));
   if (!row) throw notFound("Ticket not found");
-  const [criteria, runList, artifactList, links, [cost], children, [parent]] = await Promise.all([
-    db
-      .select()
-      .from(acceptanceCriteria)
-      .where(eq(acceptanceCriteria.ticketId, id))
-      .orderBy(asc(acceptanceCriteria.position)),
-    db.select().from(runs).where(eq(runs.ticketId, id)).orderBy(desc(runs.createdAt)).limit(20),
-    // Every version, newest first; the drawer shows the latest and lists the rest (versions are kept).
-    // With the agent whose run produced each one (null for an artifact no run made).
-    db
-      .select({ ...getTableColumns(artifacts), agentSlug: runs.agentSlug })
-      .from(artifacts)
-      .leftJoin(runs, eq(runs.id, artifacts.runId))
-      .where(eq(artifacts.ticketId, id))
-      .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
-    linksOf(id),
-    // A SQL sum, not the run list above: that one is capped at 20.
-    db
-      .select({ costUsd: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8` })
-      .from(runs)
-      .where(eq(runs.ticketId, id)),
-    // An epic's children (UC-11), in creation order.
-    db
-      .select({
-        id: tickets.id,
-        number: tickets.number,
-        title: tickets.title,
-        columnName: columns.name,
-        columnSlug: columns.slug,
-      })
-      .from(tickets)
-      .innerJoin(columns, eq(columns.id, tickets.columnId))
-      .where(eq(tickets.parentId, id))
-      .orderBy(asc(tickets.number)),
-    row.ticket.parentId
-      ? db
-          .select({ id: tickets.id, number: tickets.number, title: tickets.title })
-          .from(tickets)
-          .where(eq(tickets.id, row.ticket.parentId))
-      : [],
-  ]);
+  const [criteria, runList, artifactList, links, [cost], children, [parent], shots] =
+    await Promise.all([
+      db
+        .select()
+        .from(acceptanceCriteria)
+        .where(eq(acceptanceCriteria.ticketId, id))
+        .orderBy(asc(acceptanceCriteria.position)),
+      db.select().from(runs).where(eq(runs.ticketId, id)).orderBy(desc(runs.createdAt)).limit(20),
+      // Every version, newest first; the drawer shows the latest and lists the rest (versions are kept).
+      // With the agent whose run produced each one (null for an artifact no run made).
+      db
+        .select({ ...getTableColumns(artifacts), agentSlug: runs.agentSlug })
+        .from(artifacts)
+        .leftJoin(runs, eq(runs.id, artifacts.runId))
+        .where(eq(artifacts.ticketId, id))
+        .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
+      linksOf(id),
+      // A SQL sum, not the run list above: that one is capped at 20.
+      db
+        .select({ costUsd: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8` })
+        .from(runs)
+        .where(eq(runs.ticketId, id)),
+      // An epic's children (UC-11), in creation order.
+      db
+        .select({
+          id: tickets.id,
+          number: tickets.number,
+          title: tickets.title,
+          columnName: columns.name,
+          columnSlug: columns.slug,
+        })
+        .from(tickets)
+        .innerJoin(columns, eq(columns.id, tickets.columnId))
+        .where(eq(tickets.parentId, id))
+        .orderBy(asc(tickets.number)),
+      row.ticket.parentId
+        ? db
+            .select({ id: tickets.id, number: tickets.number, title: tickets.title })
+            .from(tickets)
+            .where(eq(tickets.id, row.ticket.parentId))
+        : [],
+      // QA's browser screenshots (§4), shown with their run's test report; the PNG is /api/screenshots/:id.
+      db
+        .select({ id: screenshots.id, runId: screenshots.runId, name: screenshots.name })
+        .from(screenshots)
+        .where(eq(screenshots.ticketId, id))
+        .orderBy(asc(screenshots.createdAt)),
+    ]);
   const key = (n: number) => `${row.keyPrefix}-${n}`;
   return {
     ...row.ticket,
@@ -235,6 +255,7 @@ export async function getTicket(id: string) {
     runs: runList,
     costUsd: cost?.costUsd ?? 0,
     artifacts: artifactList,
+    screenshots: shots,
     links,
     children: children.map((c) => ({ ...c, key: key(c.number) })),
     parent: parent ? { ...parent, key: key(parent.number) } : null,
@@ -386,9 +407,10 @@ async function overlapping(
  * Entering In Progress runs the overlap check (409 `overlap` unless startAnyway); entering Planning
  * resets the bounce count. Entering Planning with a plan already there asks first (409 `has_plan`):
  * keepPlan keeps it (Plan ready, no run), requestMd has Plan B revise it.
- * Ship/Done confirmations arrive with Ship-It (M5).
+ * Into Ship before QA passed asks first (409 `skip_gates`); into PR Review needs a PR (409 `no_pr`);
+ * into Done with an open PR asks first (409 `pr_open`), then closes the PR on GitHub (the branch stays).
  */
-export function moveTicket(
+export async function moveTicket(
   id: string,
   {
     toColumnId,
@@ -397,6 +419,8 @@ export function moveTicket(
     startAnyway,
     keepPlan,
     requestMd,
+    confirmSkip,
+    confirmClose,
   }: In<typeof moveTicketBody>,
 ) {
   try {
@@ -404,6 +428,8 @@ export function moveTicket(
   } catch {
     throw new HttpError(400, "invalid_position", "position is not a valid order key");
   }
+  // Before the transaction: GitHub is slow, and a PR that can't be closed stops the move.
+  const closed = await closePrForDone(id, toColumnId, !!confirmClose);
   return db.transaction(async (tx) => {
     const [t] = await tx
       .select({
@@ -412,6 +438,8 @@ export function moveTicket(
         columnId: tickets.columnId,
         touchPaths: tickets.touchPaths,
         type: tickets.type,
+        statusFlag: tickets.statusFlag,
+        prNumber: tickets.prNumber,
       })
       .from(tickets)
       .where(eq(tickets.id, id))
@@ -441,6 +469,14 @@ export function moveTicket(
             .join(". "),
         );
     }
+    // §3: Ship normally follows QA's pass (or a re-ship from PR Review); anything else skips a gate.
+    const passed =
+      (from.slug === "qa" && t.statusFlag === "awaiting_approval") || from.slug === "pr_review";
+    if (changesColumn && to.slug === "ship" && !passed && !confirmSkip)
+      throw new HttpError(409, "skip_gates", "Code Review and QA haven't passed");
+    if (changesColumn && to.slug === "pr_review" && !t.prNumber)
+      throw new HttpError(409, "no_pr", "This ticket has no pull request yet");
+    if (closed) await logActivity(tx, id, "pr_closed", { number: closed });
     const hasPlan = changesColumn && to.slug === "planning" && (await planExists(tx, id));
     if (hasPlan && !keepPlan && !requestMd)
       throw new HttpError(409, "has_plan", "This ticket already has a plan");
@@ -477,6 +513,29 @@ export function moveTicket(
         requestMd: hasPlan ? requestMd : undefined,
       });
   });
+}
+
+/** A move into Done with an open PR (§3): 409 `pr_open` until confirmed, then the PR is closed. Returns its number. */
+async function closePrForDone(id: string, toColumnId: string, confirmed: boolean) {
+  const [row] = await db
+    .select({
+      prNumber: tickets.prNumber,
+      owner: projects.githubOwner,
+      repo: projects.githubRepo,
+      to: columns.slug,
+    })
+    .from(tickets)
+    .innerJoin(projects, eq(projects.id, tickets.projectId))
+    .innerJoin(columns, eq(columns.id, toColumnId))
+    .where(eq(tickets.id, id));
+  if (!row || row.to !== "done" || !row.prNumber || !row.owner || !row.repo) return null;
+  const pull = `/repos/${row.owner}/${row.repo}/pulls/${row.prNumber}`;
+  const token = await github(async () => repoToken(await requireApp(), row.owner!, row.repo!));
+  const pr = await github(() => gh<PullRequest>(token, pull));
+  if (pr.state !== "open" || pr.merged) return null;
+  if (!confirmed) throw new HttpError(409, "pr_open", `Its PR #${row.prNumber} is still open`);
+  await github(() => gh(token, pull, { method: "PATCH", body: { state: "closed" } }));
+  return row.prNumber;
 }
 
 export function listComments(ticketId: string) {

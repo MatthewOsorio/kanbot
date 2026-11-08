@@ -158,6 +158,27 @@
   padding: 0;
   background: none;
 }
+/* GFM tables (Testy's reports): scroll sideways in the drawer rather than squeeze. */
+.md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+.md th {
+  background: var(--muted);
+  font-weight: 600;
+}
+.md del {
+  opacity: 0.7;
+}
 .md a {
   color: var(--primary);
   text-decoration: underline;

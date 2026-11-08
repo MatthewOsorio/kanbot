@@ -23,6 +23,12 @@ CMD ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]
 
 FROM base AS worker
 COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
+# QA's browser (§4): Chromium's headless shell (not full Chromium) and its system libraries and fonts, at the
+# build playwright-core (pinned in apps/worker) expects. The headless shell needs no X server: dropping
+# Xvfb also drops Mesa and LLVM (about 200 MB).
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN pnpm --filter @kanbot/worker exec playwright-core install --with-deps --only-shell chromium \
+  && apt-get purge -y --auto-remove xvfb && rm -rf /var/lib/apt/lists/*
 # Runs as container root: under rootless Docker that is the host's unprivileged `kanbot` user, which owns
 # /srv/kanbot and the daemon's socket (docs/deploy.md). Container uid 1000 would map to a subuid instead.
 WORKDIR /app/apps/worker

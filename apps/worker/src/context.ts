@@ -30,6 +30,7 @@ const TASK: Record<string, string> = {
   in_progress: "Implement this ticket in the working directory, following the plan.",
   code_review: "Review this ticket's branch against its plan and acceptance criteria.",
   qa: "Check that this ticket's branch meets its acceptance criteria.",
+  ship: "Prepare this ticket's branch for its pull request: the PR description, the changelog entry and any docs the change makes wrong.",
   blocked: "Explain why this ticket is blocked and what the owner must answer to unblock it.",
   done: "Write the retro for this finished ticket.",
 };
@@ -70,7 +71,7 @@ function qaSetup(repo: Repo) {
     !repo.app
       ? "App: not configured (no start command)."
       : "url" in repo.app
-        ? `App: running at ${repo.app.url}. Use the http_request tool to exercise it.`
+        ? `App: running at ${repo.app.url}. Exercise it with http_request (API) and the browser_* tools (pages: open at a viewport size, read, click, type, screenshot).`
         : `App: failed to start.\n${repo.app.error}`,
   ].join("\n\n");
 }

@@ -44,6 +44,8 @@ const script = z.object({
   /** A git patch the replay applies and commits in the run's cwd, so diffs and checks are real. */
   patch: z.string().optional(),
   commitMessage: z.string().default("Replay commit"),
+  /** QA browser screenshots to store on the ticket; `file` is a PNG relative to the fixtures folder. */
+  screenshots: z.array(z.object({ name: z.string(), file: z.string() })).default([]),
 });
 
 export const fixturesDir = () => resolve(process.env.KANBOT_FIXTURES_DIR ?? "../../fixtures/runs");
@@ -61,6 +63,7 @@ export class ReplayRuntime implements AgentRuntime {
       signal,
       prompt,
       resumeSessionId,
+      saveScreenshot,
     }: Parameters<AgentRuntime["run"]>[0],
     emit: Parameters<AgentRuntime["run"]>[1],
   ): Promise<RuntimeResult> {
@@ -97,6 +100,8 @@ export class ReplayRuntime implements AgentRuntime {
       signal.throwIfAborted();
       await emit({ type: e.type, payload: e.payload });
     }
+    for (const sh of s.screenshots)
+      await saveScreenshot?.(sh.name, await readFile(resolve(fixturesDir(), sh.file)));
     signal.throwIfAborted();
     if (s.patch) {
       const tmp = join(tmpdir(), `kanbot-replay-${uuidv7()}.patch`);

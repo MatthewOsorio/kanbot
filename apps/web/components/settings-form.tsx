@@ -125,8 +125,8 @@ export function SettingsForm({ projectId }: { projectId: string }) {
             <legend className="float-left mb-1 w-full font-semibold">Commands</legend>
             <p className="text-sm text-muted-foreground">
               One plain command each: no pipes, chaining or redirects. Agents run them through the
-              permission fence. Start launches the app for QA runs and must listen on the PORT
-              environment variable.
+              permission fence. Start runs your app for QA the way you would (e.g.{" "}
+              <code>npm run dev</code>); Kanbot finds the port it listens on.
             </p>
             {COMMANDS.map((c) => (
               <label key={c} className="block space-y-1 text-sm">

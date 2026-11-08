@@ -1,0 +1,26 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Changelog entry added; README needs nothing."
+      }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Changelog entry committed; PR description written.",
+    "artifacts": [
+      {
+        "kind": "pr_description",
+        "title": "PR: replay ticket",
+        "markdown": "## What and why\nReplay PR description.\n\n## Changes\n- CHANGELOG.md\n\n## How it was checked\n- Code review: approved.\n- QA: all criteria pass.\n\n## Notes for the reviewer\nNone."
+      }
+    ]
+  },
+  "costUsd": 0.04,
+  "inputTokens": 6000,
+  "outputTokens": 900,
+  "patch": "diff --git a/CHANGELOG.md b/CHANGELOG.md\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/CHANGELOG.md\n@@ -0,0 +1,5 @@\n+# Changelog\n+\n+## Unreleased\n+\n+- Removing a todo that doesn't exist now reports it instead of failing silently.\n",
+  "commitMessage": "Changelog and docs"
+}

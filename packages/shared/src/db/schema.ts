@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -112,6 +113,10 @@ export const tickets = pgTable(
     // Set when the worker first creates the ticket's worktree (FR-40); the branch outlives the worktree.
     branchName: text("branch_name"),
     worktreePath: text("worktree_path"),
+    // The PR the worker opened after Captain Ship-It's run (FR-43); headSha is the head it pushed.
+    prNumber: integer("pr_number"),
+    prUrl: text("pr_url"),
+    headSha: text("head_sha"),
     // Code Review and QA bounce-backs (FR-23); reset by a manual move to Planning.
     bounceCount: integer("bounce_count").notNull().default(0),
     // Plan B's predicted paths/globs plus the files the branch actually changed (§9).
@@ -266,6 +271,24 @@ export const artifacts = pgTable(
     createdAt: createdAt(),
   },
   (t) => [unique().on(t.ticketId, t.kind, t.version)],
+);
+
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
+
+/** QA's browser screenshots (§4), shown with the run's test report in the drawer. */
+export const screenshots = pgTable(
+  "screenshots",
+  {
+    id: id(),
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => runs.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    png: bytea("png").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.ticketId)],
 );
 
 /** Global settings (requirements §11): one row, id 1; a missing row means the defaults. */

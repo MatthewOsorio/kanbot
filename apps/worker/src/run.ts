@@ -22,6 +22,7 @@ import {
   publish,
   runEvents,
   runs,
+  screenshots,
   spendToday,
   startColumnAgent,
   ticketLinks,
@@ -31,17 +32,19 @@ import {
   type Db,
   type Tx,
 } from "@kanbot/shared/db";
-import { decryptEnv } from "@kanbot/shared/github";
+import { botIdentity, decryptEnv, loadGitHubApp, repoToken } from "@kanbot/shared/github";
 import { baselineFailures, QA_SETUP_MESSAGE, qaRunnable } from "@kanbot/shared/onboarding";
 import { git, removeWorktree, type ProjectConfig } from "@kanbot/shared/repo";
 import { and, count, desc, eq, isNotNull, max, ne, sql } from "drizzle-orm";
 import { buildContext } from "./context";
-import { EDIT_TOOLS } from "./runtime/fence";
+import { BROWSER_TOOLS, EDIT_TOOLS } from "./runtime/fence";
 import { record, redactText } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
+import { pushAndOpenPr, type ShippedPr } from "./ship";
 import {
   changedSince,
   checkAfterRun,
+  commitAs,
   runChecks,
   startApp,
   containerBash,
@@ -288,8 +291,13 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     const command = String(input?.command ?? "");
     // A request that changes the app's state is progress too: GET, POST, GET again is not a loop.
     const http = name === "mcp__kanbot__http_request";
+    // So does clicking or typing in QA's browser: reading the page again after each is checking, not looping
+    // (found in the M5 eval: Testy read the heading after adding and after ticking a todo).
+    const browser = BROWSER_TOOLS.includes(name);
     const changesApp =
-      http && !["GET", "HEAD", "OPTIONS", undefined].includes(input?.method as string);
+      (http && !["GET", "HEAD", "OPTIONS", undefined].includes(input?.method as string)) ||
+      name === "mcp__kanbot__browser_click" ||
+      name === "mcp__kanbot__browser_type";
     if (EDIT_TOOLS.has(name) || changesApp) calls.clear();
     else {
       const k = JSON.stringify([name, e.payload.input]);
@@ -300,7 +308,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     }
     // No progress: agents that may edit, this many calls with no edit and no test run.
     const progress =
-      EDIT_TOOLS.has(name) || http || (!!testCommand && command.includes(testCommand));
+      EDIT_TOOLS.has(name) || http || browser || (!!testCommand && command.includes(testCommand));
     idle = progress ? 0 : idle + 1;
     if (agent.editScope !== "none" && idle >= NO_PROGRESS_CALLS)
       stall.abort(`Stopped: ${idle} tool calls with no file change and no test run`);
@@ -371,6 +379,24 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       baselineFailures: baselineFailures(project.baseline),
       app: app ? { url: app.url } : appError ? { error: appError } : undefined,
     });
+    // FR-42: agents' commits carry trailers and, on a GitHub project, the App's bot as author.
+    const ghApp =
+      project.githubRepo && agent.tools.some((t) => t.startsWith("Bash(git commit"))
+        ? await loadGitHubApp(db)
+        : null;
+    const commit = commitAs(
+      agent.slug,
+      key,
+      ghApp
+        ? await botIdentity(
+            ghApp,
+            await repoToken(ghApp, project.githubOwner!, project.githubRepo!),
+          )
+        : undefined,
+    );
+    const container = config.image
+      ? containerBash(config.image, cwd, config.commands, run.id, env.file)
+      : undefined;
     const scenario = ticket.labels.find((l) => l.startsWith("replay:"))?.slice(7) ?? "default";
     const [{ attempt } = { attempt: 1 }] = await db
       .select({ attempt: count() })
@@ -394,10 +420,12 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         attempt,
         resumeSessionId: run.resumeSessionId ?? undefined,
         appUrl: app?.url,
+        // No activity row or event: the drawer shows them with the test report, which the run's end publishes.
+        saveScreenshot: async (name, png) => {
+          await db.insert(screenshots).values({ ticketId: ticket.id, runId: run.id, name, png });
+        },
         // Project commands the agent runs go to the project's image (§7).
-        bash: config.image
-          ? containerBash(config.image, cwd, config.commands, run.id, env.file)
-          : undefined,
+        bash: (c) => commit(c) ?? container?.(c) ?? null,
       },
       emit,
     );
@@ -459,7 +487,10 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     if (run.columnSlug === "in_progress") {
       const base = await git(wt.path, ["merge-base", project.defaultBranch, "HEAD"]);
       outcome.touched = await changedSince(wt.path, base.trim());
-      // The checks gate (§8): a branch that doesn't build, lint and test goes back before review.
+    }
+    if (run.columnSlug === "in_progress" || run.columnSlug === "ship") {
+      // The checks gate (§8): a branch that doesn't build, lint and test goes back before review,
+      // and before Ship pushes it (Ship-It's docs edits run them again).
       if (outcome.state === "succeeded" && config) {
         const checksEnv = await openEnv(decryptEnv(project.env));
         const failed = await runChecks(
@@ -474,6 +505,33 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
           outcome.error = `Kanbot checks: \`${failed.command}\` failed`;
           outcome.checks = { ...failed, output: redactText(failed.output, secrets) };
         }
+      }
+    }
+    if (run.columnSlug === "ship" && outcome.state === "succeeded" && project.githubRepo) {
+      const description =
+        outcome.verdict?.artifacts.find((a) => a.kind === "pr_description")?.markdown ??
+        outcome.verdict?.summary ??
+        "";
+      try {
+        outcome.pr = await pushAndOpenPr(
+          db,
+          { ...project, githubOwner: project.githubOwner!, githubRepo: project.githubRepo },
+          { key, title: ticket.title, prNumber: ticket.prNumber },
+          wt,
+          description,
+        );
+      } catch (e) {
+        return finish(
+          db,
+          run.id,
+          {
+            state: "failed",
+            verdict: outcome.verdict,
+            error: `Couldn't push or open the PR: ${redactText((e as Error).message, secrets)}`,
+            filesChanged: outcome.filesChanged,
+          },
+          result,
+        );
       }
     }
   }
@@ -494,6 +552,8 @@ type Outcome = {
   sessionId?: string;
   /** The checks gate's failure, stored as a test report for the builder's next run. */
   checks?: { command: string; output: string };
+  /** The PR the worker pushed and opened after a Ship run (FR-43). */
+  pr?: ShippedPr;
 };
 
 /** Maps the runtime's result to a run state (requirements §8 report step and failure handling). */
@@ -579,6 +639,19 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         markdown: `Kanbot ran \`${o.checks.command}\` in the worktree after this run, and it failed. Fix it before review.\n\n\`\`\`\n${o.checks.output.replaceAll("```", "'''")}\n\`\`\``,
       });
 
+    if (o.pr) {
+      await tx
+        .update(tickets)
+        .set({ prNumber: o.pr.number, prUrl: o.pr.url, headSha: o.pr.headSha })
+        .where(eq(tickets.id, ticket.id));
+      await logActivity(
+        tx,
+        ticket.id,
+        "pr_opened",
+        { number: o.pr.number, url: o.pr.url, updated: ticket.prNumber === o.pr.number },
+        actor,
+      );
+    }
     const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
     const from = cols.find((c) => c.id === ticket.columnId)!;
     const [project] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
@@ -922,5 +995,6 @@ export function expandTools(tools: readonly string[], commands: ProjectConfig["c
 function editScope(scope: AgentConfig["editScope"], config: ProjectConfig) {
   if (scope === "worktree") return undefined;
   if (scope === "none") return () => false;
+  if (scope === "docs") return (rel: string) => rel.endsWith(".md") || rel.startsWith("docs/");
   return (rel: string) => config.testGlobs.some((g) => matchesGlob(rel, g));
 }

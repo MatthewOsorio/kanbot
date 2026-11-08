@@ -18,6 +18,7 @@ import {
   QaSetupError,
   runEvents,
   runs,
+  screenshots,
   startColumnAgent,
   ticketLinks,
   tickets,
@@ -30,7 +31,7 @@ import { buildContext } from "../src/context";
 import { nightlyCleanup } from "../src/cleanup";
 import { claimNext, executeRun } from "../src/run";
 import { ReplayRuntime } from "../src/runtime/replay";
-import { checkAfterRun, ensureWorktree, projectImage, snapshot } from "../src/worktree";
+import { checkAfterRun, ensureWorktree, projectImage, snapshot, startApp } from "../src/worktree";
 
 const db = createDb(TEST_DATABASE_URL);
 const runtime = new ReplayRuntime();
@@ -267,6 +268,35 @@ describe("build loop (M3 done criterion)", () => {
     expect((await ticketNow(ticket.id)).statusFlag).not.toBe("failed");
   });
 
+  it("stores QA's browser screenshots with the run, and keeps their bytes out of the Live log (§4)", async () => {
+    const { ticket, move } = await setup("qa-browser");
+    await db.insert(acceptanceCriteria).values({
+      ticketId: ticket.id,
+      text: "Add is visible without scrolling on phones",
+      position: 0,
+    });
+    await move("qa");
+    const [run] = await drain();
+    expect(run!.state).toBe("succeeded");
+    const shots = await db
+      .select()
+      .from(screenshots)
+      .where(eq(screenshots.ticketId, ticket.id))
+      .orderBy(asc(screenshots.createdAt));
+    expect(shots.map((s) => [s.name, s.runId])).toEqual([
+      ["Add at 375px, after adding Buy milk", run!.id],
+      ["Home at 1280px", run!.id],
+    ]);
+    expect(shots[0]!.png.subarray(1, 4).toString()).toBe("PNG");
+    const events = await db.select().from(runEvents).where(eq(runEvents.runId, run!.id));
+    expect(JSON.stringify(events.map((e) => e.payload))).not.toMatch(/iVBOR/); // PNG base64
+    const [criterion] = await db
+      .select()
+      .from(acceptanceCriteria)
+      .where(eq(acceptanceCriteria.ticketId, ticket.id));
+    expect(criterion!.status).toBe("pass");
+  });
+
   it("holds a reviewed ticket in Code Review when there's no start command for QA (§4)", async () => {
     const { ticket, project, col, move } = await setup("default");
     await projectConfigOf(db, project); // seed from project.yml, then drop the start command
@@ -461,6 +491,17 @@ describe("build loop (M3 done criterion)", () => {
     expect(run!.state).toBe("succeeded"); // stopped as a stall in the M3 golden run
   });
 
+  it("doesn't call it a stall when QA reads the page again after clicking or typing", async () => {
+    const { ticket, move } = await setup("qa-browser-reads");
+    await db
+      .insert(acceptanceCriteria)
+      .values({ ticketId: ticket.id, text: "The heading counts todos left", position: 0 });
+    await move("qa");
+    const [run] = await drain();
+    expect(run!.error).toBeNull(); // stopped as a stall in the M5 eval (the same browser_read 3 times)
+    expect(run!.state).toBe("succeeded");
+  });
+
   it("removes the worktree when install fails, so the next run installs again", async () => {
     const { project, repo, move } = await setup("bounce");
     // project.yml only seeds; the owner's copy lives in the database (Settings).
@@ -573,7 +614,10 @@ describe.skipIf(!hasDocker)("project commands in the project's image (M5, §7)",
     let image = "";
     const probe: typeof runtime = {
       run: async (req, emit) => {
-        image = docker(["ps", "--filter", "label=kanbot", "--format", "{{.Image}}"]).trim();
+        image = docker(["ps", "--filter", "label=kanbot", "--format", "{{.Image}}"])
+          .split("\n")
+          .filter((i) => i && !i.startsWith("alpine/socat"))
+          .join("\n"); // the app's, not its forwarder's
         expect((await fetch(req.appUrl!)).status).toBe(200);
         return runtime.run(req, emit);
       },
@@ -596,6 +640,31 @@ describe.skipIf(!hasDocker)("project commands in the project's image (M5, §7)",
       /Building the devcontainer image kanbot-.* failed:[\s\S]*exit 7/,
     );
   }, 300_000);
+
+  // QA's app runs as the owner would run it (§4): any port, any host, PORT read or not.
+  const server = (listen: string) =>
+    `node -e "require('http').createServer((q,s)=>s.end('ok')).listen(${listen})"`;
+  it.each([
+    ["ignores PORT and listens on localhost only (Vite)", IMAGE, server("5173,'127.0.0.1'")],
+    ["listens on IPv6 localhost only (Vite on newer Node)", IMAGE, server("5173,'::1'")],
+    ["reads PORT", IMAGE, server("process.env.PORT")],
+    ["has a fixed port on all interfaces (python)", "python:3.12-alpine", "python -m http.server"],
+  ])(
+    "reaches an app that %s",
+    async (_, image, command) => {
+      const dir = mkdtempSync(join(tmpdir(), "kanbot-app-"));
+      try {
+        const app = await startApp(command, dir, image);
+        if ("error" in app) throw new Error(app.error);
+        expect((await fetch(app.url)).status).toBe(200);
+        await app.stop();
+        expect(leftovers()).toBe("");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    300_000,
+  );
 });
 
 describe("nightly cleanup (M5)", () => {

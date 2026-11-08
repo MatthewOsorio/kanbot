@@ -50,6 +50,10 @@ export const RUN_RULES: readonly {
     flag: "none",
     bounce: true,
   },
+  // Ship (M5): the worker pushed and opened the PR; the ticket waits for CI (§10). A branch that no longer
+  // builds, lints or tests after Captain Ship-It's edits goes back like the checks gate's failure.
+  { column: "ship", outcome: "succeeded", to: null, flag: "pr_open" },
+  { column: "ship", outcome: "changes_requested", to: "in_progress", flag: "none", bounce: true },
   // Rubber Duckworth only diagnoses: however its run ends, the ticket waits in Blocked for the owner (§8).
   ...(["succeeded", "failed", "timed_out", "budget_exceeded", "awaiting_input"] as const).map(
     (outcome) => ({ column: "blocked", outcome, to: null, flag: "needs_input" as const }),

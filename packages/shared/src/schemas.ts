@@ -10,6 +10,8 @@ export const activityActions = [
   "commented",
   "run_started",
   "run_finished",
+  "pr_opened",
+  "pr_closed",
 ] as const;
 export const criterionSources = ["user", "agent"] as const;
 export const linkKinds = ["blocks", "relates"] as const;
@@ -57,6 +59,7 @@ export const artifactKinds = [
   "blocker",
   "retro",
   "diff_snapshot",
+  "pr_description",
 ] as const;
 
 export type TicketType = (typeof ticketTypes)[number];
@@ -137,6 +140,9 @@ export const moveTicketBody = z.object({
   // keep the plan as is, or have Plan B revise it with this request.
   keepPlan: z.boolean().optional(),
   requestMd: z.string().trim().min(1).max(10_000).optional(),
+  // §3: into Ship before QA passed (409 `skip_gates`), and into Done with an open PR, which closes it (409 `pr_open`).
+  confirmSkip: z.boolean().optional(),
+  confirmClose: z.boolean().optional(),
 });
 
 export const createCommentBody = z.object({ bodyMd: z.string().trim().min(1).max(20_000) });
@@ -165,6 +171,15 @@ const plainCommand = z
     (c) => !/[&;|<>$`\\\n\r]/.test(c),
     "Must be one plain command: no && ; | < > $ backticks, backslashes or newlines",
   );
+// Start is run by the worker, never by an agent (§4), so it may also name the app's port: `--port $PORT`.
+const startCommand = z
+  .string()
+  .trim()
+  .max(500)
+  .refine(
+    (c) => !/[&;|<>$`\\\n\r]/.test(c.replace(/\$PORT\b/g, "")),
+    "Must be one plain command: no && ; | < > $ (except $PORT), backticks, backslashes or newlines",
+  );
 
 /** Env vars Kanbot sets on project commands itself (§7), so a project can't override them. */
 export const RESERVED_ENV = ["PORT", "HOME", "PATH"];
@@ -178,7 +193,7 @@ export const patchProjectBody = z
         build: plainCommand,
         test: plainCommand,
         lint: plainCommand,
-        start: plainCommand,
+        start: startCommand,
       })
       .partial(),
     // "" clears it.
