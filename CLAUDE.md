@@ -2,7 +2,7 @@
 
 Self-hosted Kanban board where AI agents work the columns. The spec is `docs/requirements.md`: build to it, and update it in the same change whenever a decision or behavior changes. Work milestone by milestone (§16) and stop at the end of each for review.
 
-**Status: M1 (board), M2 (orchestrator, Plan B), M3 (build loop), M4 (unblock) and M4.5 (quality gates and epics, local; PR #8) are done and merged. Since then the `ui-revamp` branch adds the QA rework (Testy checks criteria against a worker-started app) and the UI revamp (themes, agent colors, the drawer as a dialog, per-agent Diff headers); both are at the end of `docs/m4.5-report.md`. Testy's new prompt passed a real `pnpm eval:agents` on 2026-11-06. M5 (ship and deploy) is in progress: phases 1–3 merged as PR #10, phase 4 (onboarding, QA needs a start command, project env vars) as PR #11, phase 5a (Captain Ship-It opens the PR) and phase 4b (QA's browser: Testy drives the app in headless Chromium, screenshots on the ticket) as PR #12; phase 5b (the GitHub watcher: a 60 s poll for CI, reviews, merges and closes, `apps/worker/src/watch.ts`, rules in `GITHUB_RULES`) is built on branch `m5-watch` and ran for real on Neural-Noir-Website (NNWEB-3 and NNWEB-4 went Backlog to merged); the worker also fast-forwards a GitHub clone's default branch before each run; then 5c (rebases) (Kanbot runs in its own WSL distro; a public server is optional, M6); its living report is `docs/m5-report.md` (phase table, progress log): update it as work lands.** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What each milestone built, and why, is in `docs/m1-report.md` to `docs/m4-report.md` and `docs/m4.5-report.md`.
+**Status: M1 to M4.5 are done and merged. M5 (ship and deploy) is in progress: phases 1 to 5b are merged, and NNWEB-3 and NNWEB-4 went Backlog to merged on Neural-Noir-Website. Next is 5c (rebases). Kanbot runs in its own WSL distro; a public server is optional (M6). The living report is `docs/m5-report.md` (phase table, progress log): update it as work lands.** What each milestone deliberately left out, and which milestone picks each item up, is in the "Still to build" table in `docs/requirements.md` §16 (the spec's "Where things stand" section summarizes what works today). Read that table before starting a milestone. Anything you defer goes on it too, finished rows come off it, and anything that departs from the spec is edited into the spec and listed under "Changes to the spec" in that milestone's report. What the finished milestones decided is in `docs/history.md`.
 
 ## Layout
 
@@ -12,10 +12,10 @@ apps/web/            Next.js 16 App Router: board UI + REST API + SSE
   lib/projects.ts      project + board queries;  lib/tickets.ts  ticket/criteria/comment/activity mutations, overlap check, diff, acceptProposals (epics)
   lib/runs.ts          run history, run log paging, cancel, retry, revise plan
   lib/onboarding.ts    onboarding's GitHub calls: repo list, CI PR, branch protection; the setup page is app/p/[projectId]/setup
-  lib/auth.ts          the signed session cookie, OAuth state, originOf();  proxy.ts  localhost + same-origin + session on every route
+  lib/auth.ts          the signed session cookie, OAuth state, originOf(); lib/oauth.ts  GitHub's redirect back;  proxy.ts  localhost + same-origin + session on every route
   app/api/github/**, app/api/auth/**   the GitHub App's two-click setup and Sign in with GitHub;  app/login/  Connect or Sign in
   lib/events.ts        one LISTEN client per process fans out to SSE (publish() itself is in shared)
-  components/          board.tsx (dnd-kit), ticket-drawer.tsx (dialog: tabs, Live log, Diff), home.tsx, brand.tsx (Wordmark, SELECT), theme-toggle.tsx, markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
+  components/          board.tsx (dnd-kit) + board-header, board-card; ticket-drawer.tsx (dialog) + drawer-panels, drawer-activity (Live log), drawer-artifacts, drawer-diff; agent-tag.tsx; home.tsx, brand.tsx (Wordmark, SELECT), theme-toggle.tsx, markdown.tsx, ui/ (shadcn, generated: don't hand-edit)
   app/globals.css      design tokens (slate + indigo, status colors bg-running/needs/failed/ok), light and .dark; agent colors come from agent frontmatter
   e2e/                 Playwright; starts its own dev server on :3100 and a replay worker, against database kanbot_test
 apps/worker/         Node process (tsx): claims queued runs, runs agents, applies verdicts
@@ -23,9 +23,13 @@ apps/worker/         Node process (tsx): claims queued runs, runs agents, applie
   src/cleanup.ts       nightlyCleanup: old run_events, worktrees left in Done, unused Kanbot-built images
   src/onboard.ts       onboarding's worker steps: clone + detect, the baseline (§10)
   src/ship.ts          pushAndOpenPr: after Captain Ship-It, push the ticket branch and open or update its PR (FR-43)
-  src/run.ts           claimNext (SKIP LOCKED queue), executeRun, outcomeOf, finish (verdict → transition, one tx)
+  src/queue.ts         claimNext (SKIP LOCKED queue), crash recovery, automatic resume
+  src/run.ts           executeRun: one run end to end;  src/stall.ts  stuck-agent rules
+  src/finish.ts        outcomeOf, finish (verdict → transition, one tx), moveAndStart;  src/results.ts  stores a verdict's artifacts, comments, criteria, links
   src/context.ts       the context bundle (prompt) for a run (branch context, in-flight tickets)
-  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks), runChecks (the checks gate), startApp (QA's app on a free PORT), projectImage (builds the devcontainer's Dockerfile), dockerRun/containerBash (project commands in the project's image)
+  src/worktree.ts      ensureWorktree (kanbot/<KEY-n>-slug beside the checkout), snapshot, checkAfterRun (post-run checks)
+  src/commands.ts      project commands: runChecks (the checks gate), runBaseline, openEnv, commitAs;  src/qa-app.ts  startApp (QA's app on a free PORT)
+  src/docker.ts        projectImage (builds the devcontainer's Dockerfile), dockerRun/containerBash (project commands in the project's image)
   src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
   src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK; Kanbot's MCP server with report_result and QA's http_request), browser.ts (QA's headless Chromium tools, fenced to the app's origin), replay.ts (fixtures + record()), fence.ts (permission hook logic, appRequestUrl)
   test/                Vitest against kanbot_test with the replay runtime
@@ -36,7 +40,7 @@ packages/shared/     shared by web and worker
   src/repo.ts          git(), .kanbot/project.yml loader, overlap(), branchName() (server-only "@kanbot/shared/repo")
   src/github.ts        the GitHub App's credentials, AES-256-GCM in settings.github_app; gh(), appJwt(), repoToken() (server-only "@kanbot/shared/github"); github-stub.ts for tests
   src/onboarding.ts    onboarding steps, detect(), starterWorkflow(), protection rules ("@kanbot/shared/onboarding")
-  src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd, projectConfigOf (settings, seeded once from project.yml)
+  src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity(), ticketChanged();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd, projectConfigOf (settings, seeded once from project.yml)
   src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
   drizzle/             generated SQL migrations (commit them)
 agents/              one <slug>.md per agent (YAML frontmatter + system prompt) and avatars/: plan-b, sir-codes-a-lot, nitpick-nancy, testy-mctestface, captain-ship-it, rubber-duckworth, archie-the-archivist
