@@ -18,6 +18,7 @@ import {
   QaSetupError,
   runEvents,
   runs,
+  screenshots,
   startColumnAgent,
   ticketLinks,
   tickets,
@@ -267,6 +268,35 @@ describe("build loop (M3 done criterion)", () => {
     expect((await ticketNow(ticket.id)).statusFlag).not.toBe("failed");
   });
 
+  it("stores QA's browser screenshots with the run, and keeps their bytes out of the Live log (§4)", async () => {
+    const { ticket, move } = await setup("qa-browser");
+    await db.insert(acceptanceCriteria).values({
+      ticketId: ticket.id,
+      text: "Add is visible without scrolling on phones",
+      position: 0,
+    });
+    await move("qa");
+    const [run] = await drain();
+    expect(run!.state).toBe("succeeded");
+    const shots = await db
+      .select()
+      .from(screenshots)
+      .where(eq(screenshots.ticketId, ticket.id))
+      .orderBy(asc(screenshots.createdAt));
+    expect(shots.map((s) => [s.name, s.runId])).toEqual([
+      ["Add at 375px, after adding Buy milk", run!.id],
+      ["Home at 1280px", run!.id],
+    ]);
+    expect(shots[0]!.png.subarray(1, 4).toString()).toBe("PNG");
+    const events = await db.select().from(runEvents).where(eq(runEvents.runId, run!.id));
+    expect(JSON.stringify(events.map((e) => e.payload))).not.toMatch(/iVBOR/); // PNG base64
+    const [criterion] = await db
+      .select()
+      .from(acceptanceCriteria)
+      .where(eq(acceptanceCriteria.ticketId, ticket.id));
+    expect(criterion!.status).toBe("pass");
+  });
+
   it("holds a reviewed ticket in Code Review when there's no start command for QA (§4)", async () => {
     const { ticket, project, col, move } = await setup("default");
     await projectConfigOf(db, project); // seed from project.yml, then drop the start command
@@ -459,6 +489,17 @@ describe("build loop (M3 done criterion)", () => {
     await move("qa");
     const [run] = await drain();
     expect(run!.state).toBe("succeeded"); // stopped as a stall in the M3 golden run
+  });
+
+  it("doesn't call it a stall when QA reads the page again after clicking or typing", async () => {
+    const { ticket, move } = await setup("qa-browser-reads");
+    await db
+      .insert(acceptanceCriteria)
+      .values({ ticketId: ticket.id, text: "The heading counts todos left", position: 0 });
+    await move("qa");
+    const [run] = await drain();
+    expect(run!.error).toBeNull(); // stopped as a stall in the M5 eval (the same browser_read 3 times)
+    expect(run!.state).toBe("succeeded");
   });
 
   it("removes the worktree when install fails, so the next run installs again", async () => {

@@ -71,7 +71,7 @@ function qaSetup(repo: Repo) {
     !repo.app
       ? "App: not configured (no start command)."
       : "url" in repo.app
-        ? `App: running at ${repo.app.url}. Use the http_request tool to exercise it.`
+        ? `App: running at ${repo.app.url}. Exercise it with http_request (API) and the browser_* tools (pages: open at a viewport size, read, click, type, screenshot).`
         : `App: failed to start.\n${repo.app.error}`,
   ].join("\n\n");
 }

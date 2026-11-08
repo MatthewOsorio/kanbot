@@ -19,8 +19,10 @@ export type RunRequest = {
   signal: AbortSignal; // aborted on cancel or timeout
   scenario: string; // replay only: which fixture to play (ticket label `replay:<name>`, else "default")
   attempt: number; // this agent's nth run on the ticket (1-based); replay picks <scenario>.<n>.json
-  /** QA runs: the app the worker started; the agent gets an `http_request` tool limited to it (§4). */
+  /** QA runs: the app the worker started; the agent gets `http_request` and the browser tools, limited to it (§4). */
   appUrl?: string;
+  /** Stores a browser screenshot on the ticket (§4). */
+  saveScreenshot?: (name: string, png: Buffer) => Promise<void>;
   /** Rewrites a Bash command before it runs (project commands into the project's image, §7); null = unchanged. */
   bash?: (command: string) => string | null;
   /** Continue this agent session instead of starting cold (Resume, bounce-backs; FR-35). */

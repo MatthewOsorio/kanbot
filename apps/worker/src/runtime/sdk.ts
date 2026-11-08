@@ -11,7 +11,8 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import { verdictShape } from "@kanbot/shared";
-import { appRequestUrl, checkToolCall, HTTP_TOOL } from "./fence";
+import { appBrowser } from "./browser";
+import { appRequestUrl, BROWSER_TOOLS, checkToolCall, HTTP_TOOL } from "./fence";
 import type { AgentRuntime, ApiError, RuntimeEvent, RuntimeResult } from "./types";
 
 const REPORT_TOOL = "mcp__kanbot__report_result";
@@ -20,7 +21,7 @@ const MAX_BODY = 20_000; // response chars the agent sees
 
 /**
  * QA's way into the running app (§4): HTTP to the worker-started app only, so no curl in the allowlist.
- * shortcut: HTTP only, no browser; add the Playwright MCP plugin when its eval spend is approved (§16).
+ * Pages are checked in a real browser (browser.ts).
  */
 const httpTool = (appUrl: string) =>
   tool(
@@ -85,11 +86,13 @@ export class SdkRuntime implements AgentRuntime {
       env: extraEnv,
       resumeSessionId,
       appUrl,
+      saveScreenshot,
       bash,
     }: Parameters<AgentRuntime["run"]>[0],
     emit: (e: RuntimeEvent) => Promise<void>,
   ): Promise<RuntimeResult> {
     let report: unknown = null;
+    const browser = appUrl ? appBrowser(appUrl, saveScreenshot) : undefined;
     const kanbot = createSdkMcpServer({
       name: "kanbot",
       alwaysLoad: true, // never deferred behind tool search: the agent must see report_result's schema from turn 1
@@ -104,13 +107,18 @@ export class SdkRuntime implements AgentRuntime {
           },
         ),
         ...(appUrl ? [httpTool(appUrl)] : []),
+        ...(browser?.tools ?? []),
       ],
     });
 
     // Every tool call goes through this hook first (§14): tool allowlist, cwd fence, Bash allowlist,
     // edit scope. The SDK auto-runs read-only shell commands (cat, ls, find…) in every permission
     // mode, so the hook, not the SDK's rules, is the fence.
-    const fence = { cwd, tools: [...tools, REPORT_TOOL, ...(appUrl ? [HTTP_TOOL] : [])], canEdit };
+    const fence = {
+      cwd,
+      tools: [...tools, REPORT_TOOL, ...(appUrl ? [HTTP_TOOL, ...BROWSER_TOOLS] : [])],
+      canEdit,
+    };
     const gate: HookCallback = async (input) => {
       const name = "tool_name" in input ? input.tool_name : "";
       const args = ("tool_input" in input ? input.tool_input : {}) as Record<string, unknown>;
@@ -227,6 +235,7 @@ export class SdkRuntime implements AgentRuntime {
       if (!result.sessionId || signal.aborted) throw e;
     } finally {
       signal.removeEventListener("abort", onAbort);
+      await browser?.close();
     }
     signal.throwIfAborted();
     return { ...result, report, apiError };
@@ -290,7 +299,12 @@ function toEvents(m: SDKMessage): RuntimeEvent[] {
                 toolUseId: b.tool_use_id,
                 isError: !!b.is_error,
                 content: clip(
-                  typeof b.content === "string" ? b.content : JSON.stringify(b.content ?? ""),
+                  typeof b.content === "string"
+                    ? b.content
+                    : // A screenshot's base64 stays out of the log; the image itself is on the ticket.
+                      JSON.stringify(
+                        (b.content ?? []).map((c) => (c.type === "image" ? "[image]" : c)),
+                      ),
                 ),
               },
             },

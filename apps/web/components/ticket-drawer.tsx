@@ -536,6 +536,9 @@ export function TicketDrawer(props: {
                           {byline}
                         </header>
                         <Markdown>{a.contentMd}</Markdown>
+                        <Screenshots
+                          shots={ticket.screenshots.filter((x) => x.runId && x.runId === a.runId)}
+                        />
                       </article>
                     ) : (
                       // Older versions are kept (UC-3); collapsed under the latest.
@@ -548,6 +551,9 @@ export function TicketDrawer(props: {
                           {a.title} v{a.version} {byline}
                         </summary>
                         <Markdown>{a.contentMd}</Markdown>
+                        <Screenshots
+                          shots={ticket.screenshots.filter((x) => x.runId && x.runId === a.runId)}
+                        />
                       </details>
                     );
                   })}
@@ -1054,4 +1060,34 @@ function diffRows(diff: string, comments: Comment[]) {
     const fileStart = text.startsWith("diff --git ") ? (/ b\/(.+)$/.exec(text)?.[1] ?? null) : null;
     return { text, cls, notes, fileStart };
   });
+}
+
+/** QA's browser screenshots (§4) under the test report of the run that took them; each opens full size. */
+function Screenshots({ shots }: { shots: TicketDetail["screenshots"] }) {
+  if (!shots.length) return null;
+  return (
+    <ul aria-label="Screenshots" className="mt-3 flex flex-wrap gap-3">
+      {shots.map((s) => (
+        <li key={s.id} className="w-40">
+          <a
+            href={`/api/screenshots/${s.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="block rounded-md border bg-surface p-1 hover:border-primary focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- a session-guarded API image, not a static asset */}
+            <img
+              src={`/api/screenshots/${s.id}`}
+              alt={s.name}
+              loading="lazy"
+              className="h-28 w-full rounded-sm object-cover object-top"
+            />
+            <span className="mt-1 block truncate text-xs text-muted-foreground" title={s.name}>
+              {s.name}
+            </span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
 }

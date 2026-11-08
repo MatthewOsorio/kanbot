@@ -71,7 +71,8 @@ test("Ship, PR Review and Done confirmations, and the PR on the card and drawer"
   expect((await move("done", { confirmClose: true })).status()).toBe(204);
   const activity = await (await request.get(`/api/tickets/${t.id}/activity`)).json();
   expect(activity.map((a: { action: string }) => a.action)).toContain("pr_closed");
-  // Closed now: moving it out of Done and back asks nothing more.
-  expect((await move("pr_review")).status()).toBe(204);
+  // Closed now: moving it out of Done and back asks nothing more about the PR. Archie may still be at work
+  // on Done when the replay worker is busy (the full suite), hence confirmCancel.
+  expect((await move("pr_review", { confirmCancel: true })).status()).toBe(204);
   expect((await move("done", { confirmCancel: true })).status()).toBe(204);
 });

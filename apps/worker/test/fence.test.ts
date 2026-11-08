@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { expandTools } from "../src/run";
-import { appRequestUrl, checkToolCall } from "../src/runtime/fence";
+import { appRequestUrl, BROWSER_TOOLS, checkToolCall } from "../src/runtime/fence";
 
 const root = mkdtempSync(join(tmpdir(), "kanbot-fence-"));
 const cwd = join(root, "repo");
@@ -194,4 +194,17 @@ describe("http_request reaches only the QA app", () => {
     "refuses %s",
     (path) => expect(typeof appRequestUrl(base, path)).toBe("string"),
   );
+});
+
+describe("the browser tools (§4)", () => {
+  const qa = { cwd, tools: ["Read", "mcp__kanbot__http_request", ...BROWSER_TOOLS] };
+  it("pass the permission hook on a QA run: their path is a URL path, not a file", () => {
+    expect(deny("mcp__kanbot__browser_open", { path: "/../../etc/passwd" }, qa)).toBeNull();
+    expect(deny("mcp__kanbot__browser_screenshot", { name: "Home" }, qa)).toBeNull();
+  });
+  it("are refused on runs without a QA app (not in the fence's tools)", () => {
+    for (const t of BROWSER_TOOLS)
+      expect(deny(t, { path: "/" })).toMatch(/not in this agent's tools/);
+  });
+  // The origin fence itself (browser_open's paths, page requests) is tested with real Chromium in browser.test.ts.
 });

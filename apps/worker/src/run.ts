@@ -22,6 +22,7 @@ import {
   publish,
   runEvents,
   runs,
+  screenshots,
   spendToday,
   startColumnAgent,
   ticketLinks,
@@ -36,7 +37,7 @@ import { baselineFailures, QA_SETUP_MESSAGE, qaRunnable } from "@kanbot/shared/o
 import { git, removeWorktree, type ProjectConfig } from "@kanbot/shared/repo";
 import { and, count, desc, eq, isNotNull, max, ne, sql } from "drizzle-orm";
 import { buildContext } from "./context";
-import { EDIT_TOOLS } from "./runtime/fence";
+import { BROWSER_TOOLS, EDIT_TOOLS } from "./runtime/fence";
 import { record, redactText } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
 import { pushAndOpenPr, type ShippedPr } from "./ship";
@@ -290,8 +291,13 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     const command = String(input?.command ?? "");
     // A request that changes the app's state is progress too: GET, POST, GET again is not a loop.
     const http = name === "mcp__kanbot__http_request";
+    // So does clicking or typing in QA's browser: reading the page again after each is checking, not looping
+    // (found in the M5 eval: Testy read the heading after adding and after ticking a todo).
+    const browser = BROWSER_TOOLS.includes(name);
     const changesApp =
-      http && !["GET", "HEAD", "OPTIONS", undefined].includes(input?.method as string);
+      (http && !["GET", "HEAD", "OPTIONS", undefined].includes(input?.method as string)) ||
+      name === "mcp__kanbot__browser_click" ||
+      name === "mcp__kanbot__browser_type";
     if (EDIT_TOOLS.has(name) || changesApp) calls.clear();
     else {
       const k = JSON.stringify([name, e.payload.input]);
@@ -302,7 +308,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     }
     // No progress: agents that may edit, this many calls with no edit and no test run.
     const progress =
-      EDIT_TOOLS.has(name) || http || (!!testCommand && command.includes(testCommand));
+      EDIT_TOOLS.has(name) || http || browser || (!!testCommand && command.includes(testCommand));
     idle = progress ? 0 : idle + 1;
     if (agent.editScope !== "none" && idle >= NO_PROGRESS_CALLS)
       stall.abort(`Stopped: ${idle} tool calls with no file change and no test run`);
@@ -414,6 +420,10 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         attempt,
         resumeSessionId: run.resumeSessionId ?? undefined,
         appUrl: app?.url,
+        // No activity row or event: the drawer shows them with the test report, which the run's end publishes.
+        saveScreenshot: async (name, png) => {
+          await db.insert(screenshots).values({ ticketId: ticket.id, runId: run.id, name, png });
+        },
         // Project commands the agent runs go to the project's image (§7).
         bash: (c) => commit(c) ?? container?.(c) ?? null,
       },

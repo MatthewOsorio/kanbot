@@ -16,6 +16,12 @@ export type Fence = {
 const PATH_FIELDS = ["file_path", "path", "notebook_path"] as const;
 /** QA's HTTP tool into the running app (§4, sdk.ts). */
 export const HTTP_TOOL = "mcp__kanbot__http_request";
+/** QA's browser tools (§4, browser.ts); they fence their own requests to the app's origin. */
+export const BROWSER_TOOLS = ["open", "read", "click", "type", "screenshot"].map(
+  (t) => `mcp__kanbot__browser_${t}`,
+);
+/** Tools whose `path` is a URL path on the QA app, not a file. */
+const APP_TOOLS = new Set([HTTP_TOOL, ...BROWSER_TOOLS]);
 const PATTERN_FIELDS = ["pattern", "glob"] as const; // path globs: Glob's pattern, Grep's glob filter
 export const EDIT_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 const META_REFUSAL =
@@ -111,8 +117,8 @@ export function checkToolCall(
 ): string | null {
   const names = new Set(f.tools.map((t) => t.replace(/\(.*$/, "")));
   if (!names.has(name)) return `${name} is not in this agent's tools`;
-  // Its `path` is a URL path on the QA app, not a file: appRequestUrl fences it (found in the M5 eval).
-  if (name === HTTP_TOOL) return null;
+  // Their `path` is a URL path on the QA app, not a file: appRequestUrl fences it (found in the M5 eval).
+  if (APP_TOOLS.has(name)) return null;
 
   for (const k of PATH_FIELDS) {
     const v = input[k];

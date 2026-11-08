@@ -1,6 +1,6 @@
 # M5 report: ship and deploy
 
-Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is merged too (PR #11, 2026-11-07, merge `a3242da`). It includes QA needing a start command, project env vars and the `http_request` fence fix, and `pnpm eval:agents` passes. The owner tests everything at the end of the milestone. Phase 5a (Captain Ship-It opens the PR) is built on branch `m5-ship`, uncommitted, and waiting for review. Its paid eval and the real run on a test repo are still to do.
+Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is merged too (PR #11, 2026-11-07, merge `a3242da`). It includes QA needing a start command, project env vars and the `http_request` fence fix, and `pnpm eval:agents` passes. The owner tests everything at the end of the milestone. Phase 5a (Captain Ship-It opens the PR) is built on branch `m5-ship`, committed locally (`e467bd1`), and waiting for review. Its paid eval and the real run on a test repo are still to do. Phase 4b (QA's browser, pulled forward) is built on top of it, uncommitted, and its eval is due too.
 
 **Done when:** a ticket goes from Backlog to a human-approved, merged PR.
 
@@ -22,6 +22,7 @@ Status: **in progress (living document, updated as each phase lands).** Branch `
 | 3 | GitHub App two-click setup, Sign in with GitHub, auth on every route | **done** (2026-11-07) |
 | 4 | Onboarding (§10 steps 1–7 and 10) | **done and merged** (PR #11, 2026-11-07), checked for real on NetGPT. Also in it: QA needs a start command, project env vars, the fence fix; eval passes |
 | 5a | Ship: Captain Ship-It's agent file; push the ticket branch; open the PR; store pr\_number, pr\_url and head\_sha on the ticket; commit trailers and the bot identity (FR-42, FR-43); Ship/Done move confirmations | **built** (2026-11-07) on `m5-ship`; tests, e2e and the browser check pass. Still to do: `pnpm eval:agents` (paid, owner's OK) and the real run on a test repo the owner names |
+| 4b | QA's browser, pulled forward from M6: Testy opens the QA app in headless Chromium (viewport, read, click, type, console errors, screenshots), fenced to the app's origin; screenshots on the ticket; Testy's prompt asks for rendered evidence | **built** (2026-11-07) on `m5-ship`, after 5a; tests, e2e and the browser check pass. Eval passes (2026-11-08) |
 | 5b | Watch GitHub: a 60 s poll for CI status, reviews and merges. CI failing bounces to In Progress with the log; changes requested imports the comments and bounces; a merge goes to Done (Archie), a closed PR to Backlog; the owner's own pushes are detected and never rewritten (FR-44 polling, FR-46, FR-47, FR-48); CI on cards and in the drawer | **proposed**, not started. Ends with M5's "done when", for real on the test repo |
 | 5c | Keep branches current: rebase onto the default branch before each run; rebase overlapping branches when main moves (FR-51); GitHub status in `/api/health` | **proposed**, not started. Ends with two tickets in flight while main moves |
 | 6 | Leftovers: `blockWritesOutsideWorkingDirectories`, SDK `sandbox`, SSE `Last-Event-ID`, the disk-over-90% guard | not started |
@@ -93,6 +94,14 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - **2026-11-07.** The owner's first test on a Vite site (Neural-Noir-Website) stuck at QA. Two Kanbot bugs:
   1. On Windows, every project command an agent ran in the project's image was refused. The `MSYS_NO_PATHCONV=1` prefix on the rewritten `docker run` trips Claude Code's own permission check. Fixed: the SDK runtime sets that variable in the agent's environment instead.
   2. QA's app never answered: Vite ignores `PORT` and listens on localhost only, which a container's published port can't reach. The owner asked for the worker to handle any technology, not a per-tool list. Fixed: a forwarder container (`alpine/socat`) owns the app's network; the app joins it, and the worker finds whatever port the app listens on (`/proc/net/tcp`) and forwards to it from inside, so a plain `npm run dev` works whatever port or host it picks. Checked with real Vite (`npm run dev`, untouched), and in tests with a localhost-only server, an IPv6-only one, one that reads `PORT` and `python -m http.server`. Onboarding proposes a `dev` script when there's no `start`. A Start command may also say `$PORT`.
+
+- **2026-11-07.** On NNWEB, Testy blocked on "visible without scrolling at <768px and desktop": with only `http_request` it can't render a page, and it rightly won't pass a visual criterion on a code read. The owner pulled QA's browser forward into M5 (phase 4b). 5a was committed first (`e467bd1`, local). **Built:**
+  - Kanbot's own browser tools on its in-process MCP server (`apps/worker/src/runtime/browser.ts`), on `playwright-core` 1.64.1, the version e2e already locked: `browser_open`, `browser_read`, `browser_click`, `browser_type`, `browser_screenshot`. Each result lists the console errors since the last call. The plugin was the alternative; see "Key decisions".
+  - The fence is in the browser context: every request off the app's origin is aborted, WebSockets to other hosts are closed, and service workers are blocked. The permission hook lists the tools on QA runs only and skips the file-path check for them, as for `http_request`.
+  - Screenshots go to a new `screenshots` table (migration `0016_screenshots`). They show as thumbnails under the run's test report in the drawer and open full size from `GET /api/screenshots/:id`. The Live log shows `[image]` instead of the base64.
+  - Testy's prompt: rendered evidence for what a user sees or does, phone 375×812 and desktop 1280×800, one screenshot per visual criterion, and the owner's observation in `<owner_answer>` counts as evidence. `<qa_setup>` names the browser tools.
+  - The worker image installs Chromium's headless shell with its libraries (`--only-shell --with-deps`).
+  - Replay scripts can carry `screenshots` (PNG files), so tests, e2e and browser checks get real screenshots without a browser.
 
 ## What you can do
 
@@ -318,6 +327,8 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - **Protection binds admins (owner's choice), and Kanbot doesn't overwrite rules already there.** An owner who protected `main` their own way keeps it.
 - **Protection is checked at setup only.** Rechecking before every run would cost a GitHub call per run; removing protection later on GitHub is the owner's own choice. Phase 5 reads PR state from GitHub anyway.
 - **Git Bash on Windows** turns the `/c/…` mount path back into `C:/…`, so on Windows the rewritten agent command is prefixed with `MSYS_NO_PATHCONV=1`. Windows is dev only; on Linux the path is unchanged.
+- **QA's browser is Kanbot's own tools, not the Playwright plugin** (phase 4b, 2026-11-07). The owner asked for whichever keeps the fence simplest. The plugin is a separate MCP server with about 25 tools, `browser_evaluate` among them: fencing it would take a URL check per tool in the hook, plus trusting its origin flag for whatever a click triggers. Five tools on `playwright-core` fence every request in one place (the browser context's routing), add five schemas to Testy's turns instead of 25, and need no new package version (e2e already locks 1.64.1).
+- **Screenshots in Postgres** (bytea), not on disk: the web and worker containers share no screenshot folder, they go with the ticket, and the nightly cleanup of `run_events` doesn't touch them.
 
 ## Changes to the spec (`requirements.md`)
 
@@ -330,6 +341,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - §12: the move's new flags and 409s.
   - §16: the Ship-It, confirmations and trailers rows came off. The `tickets` row keeps `ci_state` and `review_state`, and a new 5b row covers CI, PR Review and merge detection.
   - "Where things stand".
+- Phase 4b, QA's browser (2026-11-07): §4 "How QA runs" (the browser, its fence, screenshots; rendered evidence and the owner's observation), Testy's row; §8 the Playwright plugin is not used (Kanbot's own tools, and why); §11 the `screenshots` table; §16 the Playwright-QA row came off (its leftovers, a Playwright test setup through onboarding and the ready URL/services, stay as one row) and Playwright left the plugins row; §17 "QA" and "Plugins"; "Where things stand".
 - §4 "How QA runs" (2026-11-07): the app may listen on any port and host; a forwarder container finds the port and relays to it. The start command may say `$PORT`. New pinned image: `alpine/socat:1.8.0.3`.
 
 - §7 "Project toolchains": how commands run (one `docker run` each, mount, cache, label, cleanup), the agent Bash rewrite, rootless Docker with the plain CLI instead of a socket proxy, git not available inside the container, how the image is found (devcontainer image or Dockerfile build, then `project.yml`), the build from the default branch, and the root `Dockerfile` ignored.
@@ -454,6 +466,15 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - All 15 e2e specs pass. `onboarding.spec.ts` now fills `KB_API_KEY` at the commands step, checks the onboarding GET never returns the value, checks the CI step names the secret, and checks Settings shows it as set with an empty input.
   - Browser check: a throwaway spec, screenshots at `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\81921b25-d58c-45c1-aa4a-abf3eba08e10\scratchpad\env-shots\{1-commands-step,2-commands-filled,3-ci-step,4-settings,5-settings-removed}.png`. It covered the detected name with a value, an added `DATABASE_URL`, the CI step's note with the GitHub link, Settings showing set and not-set rows, and remove then save. Light theme only, desktop width.
   - Not checked: a real container run with an env file under Docker (the Docker-backed path is covered by the argument test, not a real `docker run`), and Settings at phone width.
+- Phase 4b (QA's browser, 2026-11-07):
+  - Typecheck and lint clean. All 141 worker tests pass, including:
+    - `browser.test.ts`, real Chromium against a tiny app run by `startApp` in `node:24-alpine`. It opens at 375×812 and 1280×800, checks above and below the fold, types and clicks, catches `console.error`, and saves a screenshot. The refused hosts are an `<img>`, a `fetch`, a WebSocket and a link to another origin on the same machine (the decoy server got zero requests), plus `browser_open` with a URL, `//host` or a bare word.
+    - Fence tests: the browser tools pass the hook on QA runs and are refused on runs without an app.
+    - A replay run (`qa-browser`) storing two screenshots, with no base64 in the Live log.
+  - All 17 e2e specs pass, with the new `qa-browser.spec.ts`: the drawer shows both thumbnails, the PNG loads, and the route serves `image/png`.
+  - The worker image built and Chromium launched in it (layer size in "Open items").
+  - Browser check (throwaway spec, own port 3300 and database `kanbot_check`, replay worker), all passed, in light and dark: the board, the drawer's Artifacts tab with both thumbnails, the keyboard focus ring, the full-size image in a new tab, the Live tab, and the drawer at 390px. Screenshots: `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\0ceebbf4-2eb7-42fc-b07a-4c106fb9374d\scratchpad\check\shots\`.
+  - Not checked: a real Testy run (paid, the eval).
 
 ## Open items
 
@@ -480,5 +501,13 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - Settings are seeded once. A repo that adds a devcontainer later needs its Image set in Settings, or a future "re-detect" button.
 - Devcontainer `features`, `postCreateCommand` and docker-compose devcontainers aren't applied (`shortcut:` comment on `devcontainer()`).
 
+- **Phase 4b (QA's browser):**
+  - `pnpm eval:agents` (owner's OK, 2026-11-08, about $2.66): `bug`, `feature`, `review` and `security` reached QA and ended in Done, within the baseline's bounces. `ui` was blocked by a Kanbot bug, not by Testy: Testy read the heading in the browser after loading, after adding a todo and after ticking one, which is how you check "updates when added or ticked". The stall detector saw the same `browser_read` call 3 times and stopped the run, although every criterion was already marked pass. **Fixed:** a browser click or typing resets the repetition count, like a non-GET `http_request`, and browser calls count as progress (§8; replay test `qa-browser-reads`). Results: `evals/results/2026-11-08T02-23-43-172Z.json`.
+  - **Second eval run (owner's OK, 2026-11-08): passes.** All 5 golden tickets reached QA and ended in Done, within the baseline's bounces and cost (about $2.63; `evals/results/2026-11-08T02-51-10-518Z.json`). On `ui`, Testy used the browser: 1 open, 2 types, 3 clicks and 4 reads, with no stall. It took no screenshot, because the criteria were about behavior, not looks. A run in between was invalid and was deleted: I ran e2e at the same time, and e2e's global setup reset the shared `kanbot_test` database mid-eval (about $0.51 wasted). The eval must never run alongside tests.
+  - The worker image grows by 390 MB (the headless shell is 273 MB, the rest is its libraries and fonts), from about 2.5 to 2.9 GB. `--with-deps` also installs Xvfb, which pulls in Mesa and LLVM; purging it saves about 200 MB, and the headless shell renders without it (checked in the built image).
+  - **Found in the browser check, pre-existing, fixed (owner's OK):** artifact Markdown had no GFM, so the tables Testy's prompt asks for showed as raw `|` text in every test report. Now `remark-gfm` 4.0.1 is on, with table styles in `globals.css` (bordered, a muted header, horizontal scroll when narrow). Checked in the browser in light, dark and at 390px (`3-test-report-{light,dark}.png`, `7-drawer-phone-dark.png` in the check's screenshot folder).
+  - Screenshots stay as long as their ticket. A cleanup rule waits until they take real space.
+  - Testy can check pages live, but on a project without a Playwright setup it can't commit browser tests (a "Still to build" row).
+  - `ship.spec.ts` (5a) raced in the full e2e suite: the move to Done starts Archie, and while the shared replay worker was busy his run was still active, so the next move got 409 `run_active`. The test now passes `confirmCancel` there, as the line after it already did.
 - Project env vars can't hold multi-line values (PEM keys), because docker's env file is one line per variable (`shortcut:` comment on the schema). Base64 such a value and decode it in the project for now.
 - Kanbot doesn't push env values to GitHub's Actions secrets (owner's choice). The owner adds them by hand, and a value changed in Kanbot must be changed there too.

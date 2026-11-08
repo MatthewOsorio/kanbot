@@ -22,6 +22,7 @@ import {
   projectConfigOf,
   projects,
   runs,
+  screenshots,
   startColumnAgent,
   ticketLinks,
   tickets,
@@ -173,6 +174,16 @@ export function acceptProposals(epicId: string, { refs }: In<typeof acceptPropos
   });
 }
 
+/** A QA screenshot's PNG (§4). */
+export async function getScreenshot(id: string) {
+  const [row] = await db
+    .select({ png: screenshots.png })
+    .from(screenshots)
+    .where(eq(screenshots.id, id));
+  if (!row) throw notFound("Screenshot not found");
+  return row.png;
+}
+
 export async function getTicket(id: string) {
   const [row] = await db
     .select({
@@ -186,47 +197,54 @@ export async function getTicket(id: string) {
     .innerJoin(columns, eq(columns.id, tickets.columnId))
     .where(eq(tickets.id, id));
   if (!row) throw notFound("Ticket not found");
-  const [criteria, runList, artifactList, links, [cost], children, [parent]] = await Promise.all([
-    db
-      .select()
-      .from(acceptanceCriteria)
-      .where(eq(acceptanceCriteria.ticketId, id))
-      .orderBy(asc(acceptanceCriteria.position)),
-    db.select().from(runs).where(eq(runs.ticketId, id)).orderBy(desc(runs.createdAt)).limit(20),
-    // Every version, newest first; the drawer shows the latest and lists the rest (versions are kept).
-    // With the agent whose run produced each one (null for an artifact no run made).
-    db
-      .select({ ...getTableColumns(artifacts), agentSlug: runs.agentSlug })
-      .from(artifacts)
-      .leftJoin(runs, eq(runs.id, artifacts.runId))
-      .where(eq(artifacts.ticketId, id))
-      .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
-    linksOf(id),
-    // A SQL sum, not the run list above: that one is capped at 20.
-    db
-      .select({ costUsd: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8` })
-      .from(runs)
-      .where(eq(runs.ticketId, id)),
-    // An epic's children (UC-11), in creation order.
-    db
-      .select({
-        id: tickets.id,
-        number: tickets.number,
-        title: tickets.title,
-        columnName: columns.name,
-        columnSlug: columns.slug,
-      })
-      .from(tickets)
-      .innerJoin(columns, eq(columns.id, tickets.columnId))
-      .where(eq(tickets.parentId, id))
-      .orderBy(asc(tickets.number)),
-    row.ticket.parentId
-      ? db
-          .select({ id: tickets.id, number: tickets.number, title: tickets.title })
-          .from(tickets)
-          .where(eq(tickets.id, row.ticket.parentId))
-      : [],
-  ]);
+  const [criteria, runList, artifactList, links, [cost], children, [parent], shots] =
+    await Promise.all([
+      db
+        .select()
+        .from(acceptanceCriteria)
+        .where(eq(acceptanceCriteria.ticketId, id))
+        .orderBy(asc(acceptanceCriteria.position)),
+      db.select().from(runs).where(eq(runs.ticketId, id)).orderBy(desc(runs.createdAt)).limit(20),
+      // Every version, newest first; the drawer shows the latest and lists the rest (versions are kept).
+      // With the agent whose run produced each one (null for an artifact no run made).
+      db
+        .select({ ...getTableColumns(artifacts), agentSlug: runs.agentSlug })
+        .from(artifacts)
+        .leftJoin(runs, eq(runs.id, artifacts.runId))
+        .where(eq(artifacts.ticketId, id))
+        .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
+      linksOf(id),
+      // A SQL sum, not the run list above: that one is capped at 20.
+      db
+        .select({ costUsd: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8` })
+        .from(runs)
+        .where(eq(runs.ticketId, id)),
+      // An epic's children (UC-11), in creation order.
+      db
+        .select({
+          id: tickets.id,
+          number: tickets.number,
+          title: tickets.title,
+          columnName: columns.name,
+          columnSlug: columns.slug,
+        })
+        .from(tickets)
+        .innerJoin(columns, eq(columns.id, tickets.columnId))
+        .where(eq(tickets.parentId, id))
+        .orderBy(asc(tickets.number)),
+      row.ticket.parentId
+        ? db
+            .select({ id: tickets.id, number: tickets.number, title: tickets.title })
+            .from(tickets)
+            .where(eq(tickets.id, row.ticket.parentId))
+        : [],
+      // QA's browser screenshots (§4), shown with their run's test report; the PNG is /api/screenshots/:id.
+      db
+        .select({ id: screenshots.id, runId: screenshots.runId, name: screenshots.name })
+        .from(screenshots)
+        .where(eq(screenshots.ticketId, id))
+        .orderBy(asc(screenshots.createdAt)),
+    ]);
   const key = (n: number) => `${row.keyPrefix}-${n}`;
   return {
     ...row.ticket,
@@ -237,6 +255,7 @@ export async function getTicket(id: string) {
     runs: runList,
     costUsd: cost?.costUsd ?? 0,
     artifacts: artifactList,
+    screenshots: shots,
     links,
     children: children.map((c) => ({ ...c, key: key(c.number) })),
     parent: parent ? { ...parent, key: key(parent.number) } : null,

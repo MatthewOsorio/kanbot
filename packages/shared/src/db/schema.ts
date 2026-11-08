@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -270,6 +271,24 @@ export const artifacts = pgTable(
     createdAt: createdAt(),
   },
   (t) => [unique().on(t.ticketId, t.kind, t.version)],
+);
+
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
+
+/** QA's browser screenshots (§4), shown with the run's test report in the drawer. */
+export const screenshots = pgTable(
+  "screenshots",
+  {
+    id: id(),
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => runs.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    png: bytea("png").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.ticketId)],
 );
 
 /** Global settings (requirements §11): one row, id 1; a missing row means the defaults. */

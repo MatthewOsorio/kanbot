@@ -1,0 +1,46 @@
+{
+  "events": [
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "r1",
+        "name": "mcp__kanbot__browser_open",
+        "input": { "path": "/", "width": 1280, "height": 800 }
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": { "id": "r2", "name": "mcp__kanbot__browser_read", "input": { "selector": "h1" } }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "r3",
+        "name": "mcp__kanbot__browser_type",
+        "input": { "selector": "#title", "text": "Buy milk", "submit": true }
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": { "id": "r4", "name": "mcp__kanbot__browser_read", "input": { "selector": "h1" } }
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "r5",
+        "name": "mcp__kanbot__browser_click",
+        "input": { "selector": "role=checkbox" }
+      }
+    },
+    {
+      "type": "tool_call",
+      "payload": { "id": "r6", "name": "mcp__kanbot__browser_read", "input": { "selector": "h1" } }
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "The heading counts down after adding and after ticking.",
+    "criteriaResults": [{ "criterionId": "$criterion1", "status": "pass" }]
+  },
+  "costUsd": 0.1
+}
