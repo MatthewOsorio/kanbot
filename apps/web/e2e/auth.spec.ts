@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { SESSION_COOKIE } from "../lib/auth";
 
 // Signed out: no session cookie (the other specs run with the owner's, from global-setup).
@@ -28,6 +28,20 @@ test("every route needs the owner's session (§12)", async ({ page, request }) =
   const setup = await request.get("/api/github/setup", { maxRedirects: 0 });
   expect(setup.status()).toBe(307);
   expect(setup.headers().location).toMatch(/\/login$/);
+});
+
+/** The state cookie and value GitHub would send back, from starting a real sign-in. */
+async function oauthState(page: Page, start: string) {
+  const res = await page.request.get(start, { maxRedirects: 0 });
+  return new URL(res.headers().location!).searchParams.get("state");
+}
+
+test("the App's owner signs in through GitHub", async ({ page }) => {
+  const state = await oauthState(page, "/api/auth/login");
+  await page.goto(`/api/auth/callback?code=ok&state=${state}`);
+  await expect(page).toHaveURL(/127\.0\.0\.1:\d+\/$/);
+  const cookies = await page.context().cookies();
+  expect(cookies.some((c) => c.name === SESSION_COOKIE)).toBe(true);
 });
 
 test("a GitHub callback with the wrong state is refused", async ({ page }) => {

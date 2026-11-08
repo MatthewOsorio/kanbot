@@ -106,7 +106,7 @@ export function Board({ projectId }: { projectId: string }) {
   useEffect(() => {
     const check = () => api<Health>("/api/health").then(setHealth, () => setHealth(null));
     void check();
-    const t = setInterval(check, 30_000);
+    const t = setInterval(() => void check(), 30_000);
     return () => clearInterval(t);
   }, []);
 

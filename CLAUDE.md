@@ -31,6 +31,7 @@ apps/worker/         Node process (tsx): claims queued runs, runs agents, applie
   src/commands.ts      project commands: runChecks (the checks gate), runBaseline, openEnv, commitAs;  src/qa-app.ts  startApp (QA's app on a free PORT)
   src/docker.ts        projectImage (builds the devcontainer's Dockerfile), dockerRun/containerBash (project commands in the project's image)
   src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
+  src/ci-guards.ts     CI's guards job: fails a PR that weakens the checks (.github/workflows/guards.yml)
   src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK; Kanbot's MCP server with report_result and QA's http_request), browser.ts (QA's headless Chromium tools, fenced to the app's origin), replay.ts (fixtures + record()), redact.ts (secrets out of stored text), fence.ts (permission hook logic, appRequestUrl)
   test/                Vitest against kanbot_test with the replay runtime
 packages/shared/     shared by web and worker
@@ -61,7 +62,7 @@ docker compose up -d db     Postgres 16 on 127.0.0.1:5432 (cp .env.example .env 
 docker compose up -d --build   with COMPOSE_PROFILES=app in .env: the whole stack (docs/deploy.md); never the public profile locally (caddy publishes 80/443)
 pnpm db:migrate             apply migrations;  pnpm db:generate --name <x>  after editing db/schema.ts
 pnpm dev                    web on http://127.0.0.1:3000 + worker (dev:web / dev:worker run one)
-pnpm typecheck | lint | test | test:e2e | build | format
+pnpm typecheck | lint | test | test:e2e | build | format | format:check
 pnpm eval:agents            golden tickets with REAL agents (costs money; ask first). --baseline saves evals/baseline.json if every ticket reached QA
 ```
 
@@ -83,6 +84,7 @@ If `pnpm dev` returns 500 with a Turbopack panic about `globals.css` / exit code
 - Validate every API body and `[id]` param at the boundary (`parseBody`, `idParam`). Errors are `{error: {code, message}}`.
 - New agent behavior goes in `transitions.ts` (data) and gets a unit test; worker paths get a replay scenario in `fixtures/runs` and a test in `apps/worker/test`. Replay patches apply to `fixtures/sample-repo`, which is kept LF (`.gitattributes`).
 - Each agent prompt change is checked with `pnpm eval:agents` before merging (§8), with the owner's OK for the spend.
+- CI's `guards` job fails a PR that weakens the checks (new skips or `ts-ignore`s, fewer tests or assertions, edits to CI or lint config, new dependencies, an agent change without a new baseline). Only the owner adds its override labels (`allow-weakening`, `allow-test-removal`, `ci-change`, `eval-skip`, `new-dep`): stop and ask, don't add one yourself. Migrations are append-only. Tests can't reach a real service; use the replay runtime or `github-stub.ts`.
 - Any change the owner can see in the UI is checked in a real browser before it's called done. Write a throwaway Playwright script (scratchpad, not `e2e/`) against `pnpm dev:web` on its own port and database plus a `KANBOT_RUNTIME=replay` worker. Screenshot each step and look at the screenshots. Report pass/fail with the screenshot paths. This is free, so no spend OK is needed. Promote a check to `e2e/` only when it's worth keeping.
 - A known-limited shortcut gets a `shortcut: <limit>, <when to upgrade>` comment.
 - One `.env` at the repo root; `.env.example` lists every variable. Never commit secrets.

@@ -71,7 +71,7 @@ export async function storeArtifact(
 }
 
 /** Plan B's proposals, cleaned: duplicate refs dropped, `blockedBy` kept only for earlier refs (no cycles). */
-export function proposedTickets(list: VerdictPayload["proposedTickets"]) {
+function proposedTickets(list: VerdictPayload["proposedTickets"]) {
   const seen = new Set<string>();
   return list.flatMap((p) => {
     if (seen.has(p.ref)) return [];

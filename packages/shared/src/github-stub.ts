@@ -31,6 +31,8 @@ export async function startGitHubStub(o: {
   cloneUrl: string;
   workflows?: string[];
   port?: number;
+  /** Who `GET /user` and the App manifest say is signed in. */
+  userId?: number;
 }): Promise<GitHubStub> {
   const calls: GitHubStub["calls"] = { protection: [], pulls: [], pullUpdates: [], contents: [] };
   let protection: unknown = null;
@@ -70,6 +72,19 @@ export async function startGitHubStub(o: {
       const path = new URL(req.url!, "http://x").pathname;
       const body = raw ? JSON.parse(raw) : undefined;
       const route = `${req.method} ${path}`;
+      if (route === "POST /login/oauth/access_token")
+        return send(200, { access_token: "stub-user-token" });
+      if (route === "GET /user") return send(200, { id: o.userId ?? 4242 });
+      if (req.method === "POST" && /^\/app-manifests\/[^/]+\/conversions$/.test(path))
+        return send(201, {
+          id: 2,
+          slug: "kanbot-stub",
+          client_id: "Iv1.stub",
+          client_secret: "stub",
+          webhook_secret: null,
+          pem: "stub-pem",
+          owner: { id: o.userId ?? 4242, login: "e2e-owner" },
+        });
       if (route === "GET /app/installations") return send(200, [{ id: 1 }]);
       if (route === "POST /app/installations/1/access_tokens")
         return send(201, { token: "stub-token" });

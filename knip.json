@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["fixtures/**", "plugins/**", "apps/web/components/ui/**"],
+  "workspaces": {
+    ".": {},
+    "apps/web": {},
+    "apps/worker": { "entry": ["src/ci-guards.ts", "test/**/*.ts"] }
+  }
+}

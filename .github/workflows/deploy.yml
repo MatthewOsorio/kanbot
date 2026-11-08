@@ -10,13 +10,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions: {}
+
 concurrency: deploy
 
 jobs:
   deploy:
     if: >-
       vars.KANBOT_DEPLOY == 'on' &&
-      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

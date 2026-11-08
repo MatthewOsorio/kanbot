@@ -1,7 +1,7 @@
-import { saveGitHubApp } from "@kanbot/shared/github";
+import { apiBase, saveGitHubApp } from "@kanbot/shared/github";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { originOf, STATE_COOKIE } from "@/lib/auth";
+import { STATE_COOKIE } from "@/lib/auth";
 import { oauthReturn } from "@/lib/oauth";
 import { db } from "@/lib/db";
 
@@ -25,10 +25,10 @@ export async function GET(req: NextRequest) {
   const { code, fail } = oauthReturn(req);
   if (!code) return fail("state");
 
-  const r = await fetch(
-    `https://api.github.com/app-manifests/${encodeURIComponent(code)}/conversions`,
-    { method: "POST", headers: { accept: "application/vnd.github+json" } },
-  );
+  const r = await fetch(`${apiBase()}/app-manifests/${encodeURIComponent(code)}/conversions`, {
+    method: "POST",
+    headers: { accept: "application/vnd.github+json" },
+  });
   if (!r.ok) return fail("github");
   const c = conversion.parse(await r.json());
   const saved = await saveGitHubApp(db, {

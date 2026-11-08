@@ -24,14 +24,22 @@ const GITHUB = {
 export default defineConfig({
   testDir: "e2e",
   globalSetup: "./e2e/global-setup.ts",
-  use: { baseURL: `http://127.0.0.1:${PORT}`, storageState: AUTH_STATE },
+  forbidOnly: !!process.env.CI,
+  use: {
+    baseURL: `http://127.0.0.1:${PORT}`,
+    storageState: AUTH_STATE,
+    trace: "retain-on-failure",
+  },
   webServer: [
     {
-      command: `next dev -H 127.0.0.1 -p ${PORT}`,
+      // CI tests what ships: a production build, not the dev server.
+      command: process.env.CI
+        ? `next build && next start -H 127.0.0.1 -p ${PORT}`
+        : `next dev -H 127.0.0.1 -p ${PORT}`,
       url: `http://127.0.0.1:${PORT}`,
       env: { DATABASE_URL: TEST_DATABASE_URL, NEXT_DIST_DIR: ".next-e2e", ...SECRETS, ...GITHUB },
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 300_000,
     },
     {
       // The worker on the replay runtime: agents play fixtures/runs, never the real API (requirements §8).

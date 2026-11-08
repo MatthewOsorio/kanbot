@@ -14,7 +14,7 @@ import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./types";
  * fixtures/runs/<agent>/<scenario>.<n>.json for the agent's nth run on the ticket, else <scenario>.json.
  * Recorded runs (KANBOT_RECORD=1) are written in this same format.
  */
-const script = z.object({
+export const replayScript = z.object({
   events: z
     .array(
       z.object({
@@ -73,7 +73,7 @@ export class ReplayRuntime implements AgentRuntime {
       .map((name) => resolve(fixturesDir(), agent.slug, `${name}.json`))
       .find((f) => existsSync(f));
     if (!file) throw new Error(`No replay script for ${agent.slug}/${scenario} and no default`);
-    const s = script.parse(JSON.parse(await readFile(file, "utf8")));
+    const s = replayScript.parse(JSON.parse(await readFile(file, "utf8")));
     await emit({
       type: "system",
       payload: {

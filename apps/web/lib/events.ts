@@ -16,7 +16,7 @@ function ensureListening(): Promise<void> {
     const reconnect = () => {
       g.kanbotListen = undefined;
       client.end().catch(() => {});
-      setTimeout(() => ensureListening().catch(console.error), 1000);
+      setTimeout(() => void ensureListening().catch(console.error), 1000);
     };
     client.on("error", reconnect);
     client.on("notification", (msg) => {

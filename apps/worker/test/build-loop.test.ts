@@ -551,6 +551,7 @@ const hasDocker = (() => {
     return false;
   }
 })();
+if (process.env.CI && !hasDocker) throw new Error("CI needs Docker");
 
 describe.skipIf(!hasDocker)("project commands in the project's image (M5, §7)", () => {
   const useImage = (id: string) =>
