@@ -28,6 +28,7 @@ import {
 } from "@kanbot/shared/db/testing";
 import { git } from "@kanbot/shared/repo";
 import { and, eq, inArray } from "drizzle-orm";
+import { AGENT_FILE, agentsHash } from "./ci-guards";
 import { claimNext } from "./queue";
 import { executeRun } from "./run";
 import { ReplayRuntime } from "./runtime/replay";
@@ -237,6 +238,21 @@ if (baseline) {
 const report = {
   at: new Date().toISOString(),
   runtime: replay ? "replay" : "sdk",
+  // Guards compare this with the PR's agents, so a baseline can't be carried over from older prompts.
+  agentsHash: agentsHash(
+    ["agents", "plugins"]
+      .flatMap((d) =>
+        readdirSync(join(root, d), { recursive: true, withFileTypes: true })
+          .filter((e) => e.isFile())
+          .map((e) =>
+            join(e.parentPath, e.name)
+              .slice(root.length + 1)
+              .replaceAll("\\", "/"),
+          ),
+      )
+      .filter((p) => AGENT_FILE.test(p))
+      .map((p): [string, string] => [p, readFileSync(join(root, p), "utf8")]),
+  ),
   minutes: Math.round((Date.now() - started) / 6_000) / 10,
   results,
   problems,
