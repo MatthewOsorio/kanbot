@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { afterRun, BOUNCE_LIMIT } from "./transitions";
+import { afterGitHub, afterRun, BOUNCE_LIMIT } from "./transitions";
 
 const stay = (flag: string) => ({ to: null, flag, bounce: false });
 
@@ -121,5 +121,39 @@ describe("build loop", () => {
     expect(afterRun("done", "succeeded")).toEqual({ to: null, flag: "none", bounce: false });
     for (const o of ["failed", "timed_out", "budget_exceeded", "awaiting_input"] as const)
       expect(afterRun("done", o)).toEqual({ to: null, flag: "failed", bounce: false });
+  });
+});
+
+describe("afterGitHub", () => {
+  it("moves a shipped ticket on green CI, and only from Ship", () => {
+    expect(afterGitHub("ship", "ci_passed")).toEqual({
+      to: "pr_review",
+      flag: "none",
+      bounce: false,
+    });
+    expect(afterGitHub("pr_review", "ci_passed")).toBeNull();
+  });
+  it("bounces on red CI, and blocks at the limit", () => {
+    expect(afterGitHub("pr_review", "ci_failed")).toEqual({
+      to: "in_progress",
+      flag: "none",
+      bounce: true,
+    });
+    expect(afterGitHub("ship", "ci_failed", { bounces: 2, bounceLimit: 2 })?.reason).toBe(
+      "bounce_limit",
+    );
+  });
+  it("sends requested changes back without counting a bounce", () => {
+    expect(afterGitHub("pr_review", "changes_requested", { bounces: 9 })).toEqual({
+      to: "in_progress",
+      flag: "none",
+      bounce: false,
+    });
+    expect(afterGitHub("ship", "changes_requested")).toBeNull();
+  });
+  it("finishes on merge and returns to Backlog on close", () => {
+    expect(afterGitHub("pr_review", "merged")?.to).toBe("done");
+    expect(afterGitHub("ship", "closed")?.to).toBe("backlog");
+    expect(afterGitHub("in_progress", "merged")).toBeNull();
   });
 });

@@ -49,6 +49,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/client";
 import type { Board as BoardData, Card } from "@/lib/projects";
+import { PrStatus } from "./pr-status";
 import type { settingsView } from "@/lib/settings";
 
 type Project = { id: string; name: string };
@@ -135,6 +136,7 @@ export function Board({ projectId }: { projectId: string }) {
   if (!board) return <p className="p-8 text-muted-foreground">{error || "Loading…"}</p>;
 
   const key = (c: Card) => `${board.project.keyPrefix}-${c.number}`;
+  const prReviewId = board.columns.find((c) => c.slug === "pr_review")?.id;
   const cardsIn = (columnId: string) =>
     board.tickets.filter((t) => t.columnId === columnId).sort(byPosition);
   const dragging = board.tickets.find((t) => t.id === draggingId);
@@ -309,7 +311,10 @@ export function Board({ projectId }: { projectId: string }) {
         )}
         <div className="flex flex-wrap items-center gap-2">
           <NeedsMe
-            tickets={board.tickets.filter((t) => NEEDS_ME.includes(t.statusFlag))}
+            reviewColumnId={prReviewId}
+            tickets={board.tickets.filter(
+              (t) => NEEDS_ME.includes(t.statusFlag) || t.columnId === prReviewId,
+            )}
             cardKey={key}
             onOpen={setOpenId}
           />
@@ -412,8 +417,10 @@ function NeedsMe(props: {
   tickets: Card[];
   cardKey: (c: Card) => string;
   onOpen: (id: string) => void;
+  /** PR Review: its tickets wait for the owner's review on GitHub (FR-60). */
+  reviewColumnId?: string;
 }) {
-  const { tickets, cardKey, onOpen } = props;
+  const { tickets, cardKey, onOpen, reviewColumnId } = props;
   const [open, setOpen] = useState(false);
   const [permission, setPermission] = useState(() =>
     typeof Notification === "undefined" ? "denied" : Notification.permission,
@@ -449,7 +456,8 @@ function NeedsMe(props: {
                   <span
                     className={`block text-xs ${t.statusFlag === "failed" ? "text-failed-fg" : "text-muted-foreground"}`}
                   >
-                    {FLAG_TEXT[t.statusFlag]}
+                    {FLAG_TEXT[t.statusFlag] ??
+                      (t.columnId === reviewColumnId ? "PR ready for your review" : null)}
                   </span>
                 </button>
               </li>
@@ -733,6 +741,7 @@ function CardBody({
             PR #{card.prNumber}
           </span>
         )}
+        {card.prNumber && <PrStatus ci={card.ciState} review={card.reviewState} />}
         {card.bounceCount > 0 && (
           <span
             className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"

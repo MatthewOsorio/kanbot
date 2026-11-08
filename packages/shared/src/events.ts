@@ -36,7 +36,7 @@ export type BoardEvent =
   // A ticket now waits for the owner (FR-60); global with no ticketId when Kanbot paused itself.
   | {
       type: "notification";
-      kind: "needs_input" | "failed" | "paused";
+      kind: "needs_input" | "failed" | "paused" | "pr_review";
       ticketId?: string;
       message: string;
     };

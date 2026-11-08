@@ -15,6 +15,7 @@ import {
 } from "./run";
 import { ReplayRuntime } from "./runtime/replay";
 import { anthropicReachable, SdkRuntime } from "./runtime/sdk";
+import { watchGitHub } from "./watch";
 import type { AgentRuntime } from "./runtime/types";
 
 try {
@@ -148,6 +149,18 @@ setInterval(() => void pump(), 5_000);
 setInterval(() => void onboard(), 5_000);
 void onboard();
 setInterval(() => void resume(), 60_000);
+let watching = false;
+/** CI, reviews and merges on shipped tickets' PRs (FR-44: polling, since Kanbot has no public URL for webhooks). */
+const watch = async () => {
+  if (watching) return;
+  watching = true;
+  await watchGitHub(db)
+    .then((n) => n && console.log(`github: ${n} ticket(s) updated`))
+    .catch((e) => console.error("watching GitHub failed", e))
+    .finally(() => (watching = false));
+};
+setInterval(() => void watch(), 60_000);
+void watch();
 // The nightly cleanup: a minute after start (deploys restart the worker often), then every 24 h.
 const cleanup = () =>
   nightlyCleanup(db).then(

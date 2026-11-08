@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/client";
 import type { TicketDetail } from "@/lib/tickets";
+import { PrStatus } from "./pr-status";
 
 /** Section heading and header chip styles shared across the drawer. */
 const H = "block text-xs font-semibold tracking-wide text-muted-foreground uppercase";
@@ -154,6 +155,7 @@ export function TicketDrawer(props: {
                       PR #{ticket.prNumber} on GitHub
                     </a>
                   )}
+                  {ticket.prNumber && <PrStatus ci={ticket.ciState} review={ticket.reviewState} />}
                   {ticket.bounceCount > 0 && (
                     <span className={CHIP}>
                       ↩ {ticket.bounceCount} bounce{ticket.bounceCount > 1 && "s"}
@@ -927,6 +929,18 @@ function describe(a: Activity): string {
         : `started ${String(d.agent)}`;
     case "run_finished":
       return `finished ${String(d.agent)}: ${String(d.state).replace("_", " ")}${d.error ? ` (${String(d.error)})` : ""}${d.bounce ? `, bounce ${String(d.bounce)}` : ""}${d.reason ? `. ${String(d.reason)}` : ""}`;
+    case "pr_opened":
+      return `${d.updated ? "updated" : "opened"} PR #${String(d.number)}`;
+    case "pr_closed":
+      return `closed PR #${String(d.number)} without merging`;
+    case "pr_merged":
+      return `merged PR #${String(d.number)}`;
+    case "ci_changed":
+      return `CI ${String(d.to) === "none" ? "isn't set up (no workflows)" : String(d.to)}${d.check ? `: ${String(d.check)}` : ""}`;
+    case "review_imported":
+      return `@${String(d.by)} requested changes (${String(d.comments)} comment${d.comments === 1 ? "" : "s"} imported)`;
+    case "pushed":
+      return `has a new head ${String(d.sha).slice(0, 7)} pushed outside Kanbot`;
     default:
       return a.action;
   }

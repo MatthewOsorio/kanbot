@@ -1,6 +1,6 @@
 # M5 report: ship and deploy
 
-Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is merged too (PR #11, 2026-11-07, merge `a3242da`). It includes QA needing a start command, project env vars and the `http_request` fence fix, and `pnpm eval:agents` passes. The owner tests everything at the end of the milestone. Phase 5a (Captain Ship-It opens the PR) and phase 4b (QA's browser, pulled forward) are merged too (PR #12, 2026-11-08, merge `409f094`), with `pnpm eval:agents` passing. 5a's own paid eval (with 5b) and its real run on a test repo are still to do. Next: phase 5b.
+Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is merged too (PR #11, 2026-11-07, merge `a3242da`). It includes QA needing a start command, project env vars and the `http_request` fence fix, and `pnpm eval:agents` passes. The owner tests everything at the end of the milestone. Phase 5a (Captain Ship-It opens the PR) and phase 4b (QA's browser, pulled forward) are merged too (PR #12, 2026-11-08, merge `409f094`), with `pnpm eval:agents` passing. 5a's own paid eval (with 5b) and its real run on a test repo are still to do. Phase 5b (watching GitHub) is built on branch `m5-watch` and stopped for review; its real run on Neural-Noir-Website is next.
 
 **Done when:** a ticket goes from Backlog to a human-approved, merged PR.
 
@@ -23,7 +23,7 @@ Status: **in progress (living document, updated as each phase lands).** Branch `
 | 4 | Onboarding (§10 steps 1–7 and 10) | **done and merged** (PR #11, 2026-11-07), checked for real on NetGPT. Also in it: QA needs a start command, project env vars, the fence fix; eval passes |
 | 5a | Ship: Captain Ship-It's agent file; push the ticket branch; open the PR; store pr\_number, pr\_url and head\_sha on the ticket; commit trailers and the bot identity (FR-42, FR-43); Ship/Done move confirmations | **merged** (PR #12, 2026-11-08); tests, e2e and the browser check pass. Still to do: Ship-It's eval (with 5b, paid, owner's OK) and the real run on a test repo the owner names |
 | 4b | QA's browser, pulled forward from M6: Testy opens the QA app in headless Chromium (viewport, read, click, type, console errors, screenshots), fenced to the app's origin; screenshots on the ticket; Testy's prompt asks for rendered evidence | **done and merged** (PR #12, 2026-11-08); tests, e2e and the browser check pass, and the eval passes |
-| 5b | Watch GitHub: a 60 s poll for CI status, reviews and merges. CI failing bounces to In Progress with the log; changes requested imports the comments and bounces; a merge goes to Done (Archie), a closed PR to Backlog; the owner's own pushes are detected and never rewritten (FR-44 polling, FR-46, FR-47, FR-48); CI on cards and in the drawer | **proposed**, not started. Ends with M5's "done when", for real on the test repo |
+| 5b | Watch GitHub: a 60 s poll for CI status, reviews and merges. CI failing bounces to In Progress with the log; changes requested imports the comments and bounces; a merge goes to Done (Archie), a closed PR to Backlog; the owner's own pushes are detected and never rewritten (FR-44 polling, FR-46, FR-47, FR-48); CI on cards and in the drawer | **built** (2026-11-07, branch `m5-watch`); tests, e2e and the browser check pass. Real run on Neural-Noir-Website done (M5's "done when", 2026-11-07). Still to do: Ship-It's eval (paid, owner's OK) |
 | 5c | Keep branches current: rebase onto the default branch before each run; rebase overlapping branches when main moves (FR-51); GitHub status in `/api/health` | **proposed**, not started. Ends with two tickets in flight while main moves |
 | 6 | Leftovers: `blockWritesOutsideWorkingDirectories`, SDK `sandbox`, SSE `Last-Event-ID`, the disk-over-90% guard | not started |
 
@@ -104,8 +104,22 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - Replay scripts can carry `screenshots` (PNG files), so tests, e2e and browser checks get real screenshots without a browser.
 
 - **2026-11-08.** PR #12 (5a and 4b) opened, CI passed (`check`, `images`), merged into `main` (merge `409f094`). The local checkout is on `main`. After pulling: `pnpm db:migrate` (0015, 0016) and restart `pnpm dev`. Next: phase 5b.
+- **2026-11-07.** Phase 5b planned and built on branch `m5-watch`. **Owner's decisions:** a repo with no CI workflows is detected and its ticket goes straight to PR Review; the real run uses Neural-Noir-Website. Built: the GitHub watcher (60 s poll), `GITHUB_RULES`, the fast-forward of the owner's pushes, CI and review badges, PR Review in Needs me. Tests, e2e and the browser check pass (see "Checks run"). Stopped for review. Still to do: the real run (the owner merges on GitHub) and Ship-It's eval (paid; owner's OK). After pulling: `pnpm db:migrate` (0017).
+- **2026-11-07. M5's "done when" reached for real.** On Neural-Noir-Website (private repo, no Actions workflows; Vercel's preview check is its only check), with real agents: Plan B, Sir Codes-a-Lot, Nancy and Testy passed it to QA; the owner approved the ship; Captain Ship-It ($0.05) opened PR #1. The watcher read Vercel's completed check as CI passing and moved the ticket to PR Review; the owner merged on GitHub, and on the next tick the ticket moved to Done, its worktree was removed and Archie started. Not exercised for real: a GitHub approval (the owner merged without one; the repo is private on a free plan, so GitHub doesn't enforce branch protection there), red CI and requested changes (covered by tests against the stub).
+- **2026-11-08. A harder real run on Neural-Noir-Website** (the owner asked for one in place of a golden-ticket eval). NNWEB-4, "Data-driven team page with a profile page per member": team data moved into `src/data/team.js`, a `/meet-the-team/:slug` route with a not-found state, per-page tab titles, lint and build passing. All real agents, no bounces, **$0.85** in total: Plan B $0.21, Sir Codes-a-Lot $0.37 (9 files, +178 −66, lint and build run), Nancy $0.10, Testy $0.10 (browser at 375 and 1280 px, 4 pages, 3 screenshots), Ship-It $0.07 (PR #2), Archie $0.004. Vercel's check moved it to PR Review; the owner merged and the watcher moved it to Done. Found:
+  - **The clone's `main` goes stale.** New ticket branches start from the clone's local default branch, which nothing pulls after a merge: it was 3 commits behind (PR #1 missing), so NNWEB-4 would have conflicted on CHANGELOG.md. Fast-forwarded by hand for this run. **Fixed:** before each run on a GitHub project, the worker fast-forwards the clone's default branch from GitHub (`pullDefaultBranch` in `ship.ts`; best effort, it warns on failure). Rebasing existing ticket branches is still 5c.
+  - **Nancy claimed a security review she didn't do.** 11 seconds, 5 turns: one `git diff`, then she loaded the security-review skill and reported at once, writing "the security review turned up nothing". Her verdict was reasonable for a static front-end change, but the claim isn't. **Fixed in her prompt:** loading the skill isn't running it; her review must carry a Security line naming each entry point she traced (or why there are none), and she may not claim a clean review she didn't do. Needs `pnpm eval:agents` (paid; owner's OK).
+  - Testy can't run lint or build (QA has no project commands) and leaned on the build run's result for that criterion. Fine here; worth knowing.
 
 ## What you can do
+
+- **Review and merge on GitHub; Kanbot follows** (phase 5b). After Captain Ship-It opens the PR, the ticket waits in Ship with "CI running" on its card. Every minute Kanbot reads the PR:
+  - CI green (or no CI workflows in the repo): the ticket moves to **PR Review**, and **Needs me** lists it as "PR ready for your review".
+  - CI red: back to In Progress, with the failing job's log under Artifacts ("CI failed: …"). Sir Codes-a-Lot fixes it, and the ticket goes through Code Review and QA again. It counts as a bounce.
+  - You request changes in a GitHub review: your review and its line comments land in the ticket's Comments, and it goes back to In Progress (not counted as a bounce).
+  - You approve: the card shows **Approved**. Merge on GitHub, and the ticket moves to Done and Archie writes the retro.
+  - You close the PR without merging: the ticket goes back to Backlog; its worktree is removed and the branch kept.
+  - You push your own commits to the branch: Kanbot records the new head, and the next agent run starts from it. If Kanbot also has commits you don't, the run stops and asks you to merge them by hand.
 
 - **Add a GitHub repo as a project** (phase 4). On Home, pick the repo under **New project**, give it a key prefix and click **Set up project**. The setup page then walks through:
   1. **Clone.** Kanbot clones the repo; nothing to do.
@@ -155,7 +169,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 
 ## How to run it
 
-`pnpm db:migrate` (seven new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`, `0013_onboarding`, `0014_project_env`, `0015_ticket-pr`, `0016_screenshots`), then `pnpm dev`. Clones go to `KANBOT_REPOS_DIR`, or `.kanbot-repos/` at the repo root when it is unset (`pnpm dev`). Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
+`pnpm db:migrate` (eight new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`, `0013_onboarding`, `0014_project_env`, `0015_ticket-pr`, `0016_screenshots`, and 5b's `0017_github_watch`), then `pnpm dev`. Clones go to `KANBOT_REPOS_DIR`, or `.kanbot-repos/` at the repo root when it is unset (`pnpm dev`). Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
 
 ## What was built
 
@@ -234,6 +248,25 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - `e2e/global-setup.ts` stores a fake App and saves a signed session as the specs' `storageState`.
   - `e2e/auth.spec.ts` covers the rest: 401 without a cookie, 401 with a forged one, a page redirecting to `/login` with Sign in, setup refusing a second App, and a callback with the wrong state refused.
 
+### Phase 5b: watching GitHub
+
+- **Rules.** `GITHUB_RULES` and `afterGitHub()` in `transitions.ts`: `ci_passed` Ship → PR Review; `ci_failed` Ship or PR Review → In Progress (bounce); `changes_requested` PR Review → In Progress (no bounce); `merged` → Done; `closed` → Backlog. The bounce limit sends a CI bounce to Blocked.
+- **GitHub calls** in `@kanbot/shared/github`: `checkRuns()`, `ciOf()` (any failed check fails, all completed passes, else pending), `workflowFiles()` (moved from the web app's onboarding), `jobLogTail()` (the last 150 lines of an Actions job's log; fetch drops the token on GitHub's redirect to storage), `listReviews()`, `reviewComments()`.
+- **The watcher**, `apps/worker/src/watch.ts`, every 60 s from `main.ts` (and once at start):
+  - It reads each ticket in PR Review, or in Ship flagged `pr_open`, on a cloned GitHub project; one installation token per project per tick.
+  - `look()` reads the PR, its head's check runs (and the branch's workflow files when there are none), and its reviews, outside any transaction.
+  - `apply()` re-reads the ticket `FOR UPDATE`, skips it if it changed, then writes `head_sha`, `ci_state`, `review_state` and `last_review_id`, the activity rows (actor `GitHub`), the imported comments, the "CI failed" test report (redacted with the project's env values), and the move through `moveAndStart()`, which `finish()` now shares. Entering PR Review sends a `pr_review` notification. A closed PR's worktree is removed after the transaction.
+- **FR-48.** `pullBranch()` in `ship.ts`: before a run on a ticket with a PR, fetch the branch with the App's token and fast-forward the worktree; a diverged branch fails the run with a message. Ship's push now resets `ci_state` to `pending`.
+- **UI.**
+  - `components/pr-status.tsx`: "CI running/passed/failed" and "Approved"/"Changes requested" badges, on the card next to "PR #n" and in the drawer's header.
+  - PR Review tickets are in **Needs me** as "PR ready for your review".
+  - The timeline words the new actions: opened/updated, merged and closed PRs, CI changes, imported reviews and outside pushes.
+- **Data.** Migration `0017_github_watch`: enums `ci_state` and `review_state`, the three ticket columns, four activity actions.
+- **Tests.**
+  - Unit: `afterGitHub` (4 tests).
+  - Worker: `watch.test.ts` (10 tests) ships a real branch through the stub, then covers CI pending → green, no workflows, red with the log, the bounce limit, requested changes imported once, approval, merge (Archie queued), close (worktree gone, branch kept), a ticket the owner moved mid-tick, and the owner's push fast-forwarded into the next Ship. The stub now serves PR heads (read from the origin repo), check runs, reviews, review comments and job logs, with setters.
+  - e2e: `ship.spec.ts` checks the CI and review badges and the Needs me entry.
+
 ### Phase 5a: Captain Ship-It opens the PR
 
 - **The agent.** `agents/captain-ship-it.md` (Sonnet 5.5, $0.50, 10 minutes).
@@ -306,6 +339,14 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 
 ## Key decisions
 
+- **Polling reads each watched PR, its head's check runs and its reviews: three calls per ticket per minute** (phase 5b). With a handful of tickets in Ship and PR Review that's far below the App's 5,000 calls an hour; webhooks replace it with a public server (M6).
+- **GitHub's moves are data like the run rules** (`GITHUB_RULES`, `afterGitHub()`), and the watcher reuses `finish()`'s move-and-start (`moveAndStart()`), so a CI bounce resumes Sir Codes-a-Lot's session and the bounce limit sends it to Blocked, like any other bounce.
+- **GitHub first, then one transaction that re-checks the ticket.** GitHub is slow, so nothing is locked while it answers; if the owner moved the ticket, Ship ran again or an agent picked it up meanwhile, the tick skips it and the next one sees it fresh.
+- **Only Ship (after the push) and PR Review are watched.** That is where §3 has GitHub rows; anywhere else, the ticket is already Kanbot's.
+- **Requested changes are imported only from PR Review**, and `last_review_id` marks what's been handled, so a review is never imported twice, and one written while the ticket is still in Ship isn't lost: it is imported once the ticket reaches PR Review.
+- **The owner's pushes: fast-forward only** (FR-48). Before each run on a ticket with a PR, the worker fetches the branch and fast-forwards the worktree. A branch that diverged stops the run with a clear message instead of a merge commit or a rebase; rebasing is 5c.
+- **Imported review comments are the owner's** (`author_kind` user), so Sir Codes-a-Lot's context already carries them as "owner comments since the last run", with no new prompt section.
+
 - **One `docker run` per command, not a long-lived container per run.** It needs no lifecycle code, and the shared cache volume keeps repeated installs fast. Starting a container adds about a second per command.
 - **No image means the host toolchain only in development.** Local development, the sample repo, the tests and the eval keep working without Docker. A containerized worker always uses an image (`KANBOT_DEFAULT_IMAGE` as the last resort), because its own container holds the Docker socket.
 - **A dedicated WSL distro, not the owner's existing Ubuntu or Docker Desktop.** Turning off automount and interop means a project container that escapes still can't reach Windows files or run Windows programs. Rootless Docker inside it is the same setup as on a server, so `docs/deploy.md` serves both.
@@ -334,6 +375,12 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - **Screenshots in Postgres** (bytea), not on disk: the web and worker containers share no screenshot folder, they go with the ticket, and the nightly cleanup of `run_events` doesn't touch them.
 
 ## Changes to the spec (`requirements.md`)
+
+- Phase 5b (2026-11-07):
+  - §10 "CI pipeline": what counts as CI (the head's check runs), and a repo with no workflows goes straight to PR Review (owner's decision). A repo whose workflows never report leaves the ticket in Ship.
+  - §3: "PR opened and CI green" also covers no workflows; merged and closed apply from Ship too; a closed PR's worktree is removed. GitHub's rows are `GITHUB_RULES`, and only Ship (after the push) and PR Review are watched.
+  - §11: `tickets.ci_state` and `review_state` got their values, plus `last_review_id`; `activity` gained `pr_merged`, `ci_changed`, `review_imported` and `pushed`.
+  - §16: the 5b rows are off the M5 table. New rows: the real run on Neural-Noir-Website, and a diverged branch (stops the run until 5c). GitHub health stays for 5c. The stale lines about M5 moving to DigitalOcean now say WSL.
 
 - Phase 5a (owner's choices, 2026-11-07):
   - §4: Ship-It writes, and the worker pushes and opens the PR. Ship-It's tools are docs-only, with no token.
@@ -380,6 +427,18 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - §14: the env-var bullet and its limit.
 
 ## Checks run
+
+- Phase 5b (2026-11-07):
+  - `pnpm typecheck` and `pnpm lint` are clean. 64 shared and 152 worker tests pass, including `afterGitHub` (4) and `watch.test.ts` (10).
+  - All 17 e2e specs pass; `ship.spec.ts` now checks the CI and review badges and the Needs me entry.
+  - Browser check (throwaway script, own port 3201 and database `kanbot_check5b`, replay worker, the GitHub stub in-process, watcher ticks called directly), passed. Screenshots in `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\6f709741-eef5-41a3-9335-ad25a11d858a\scratchpad\shots5b\`:
+    - `02-ship-card`: "PR open · waiting on CI", "CI running";
+    - `04-pr-review-card`, `05-needs-me-pr-ready`: CI passed in PR Review, and "PR ready for your review" in Needs me;
+    - `06-drawer-approved`, `07-done-timeline`: Approved, then merged → Done with Archie's retro, every step in the timeline as `GitHub`;
+    - `08-drawer-ci-failed`: the "CI failed: test" report with the job log, In Progress, 1 bounce;
+    - `11-drawer-changes-requested`, `12-drawer-changes-timeline`: the review and its line comment imported, back to In Progress, the ticket's whole loop (CI fail → build loop → reship → CI pass → changes requested) in the timeline;
+    - `13-board-dark`: the badges in dark mode.
+  - Not checked: real GitHub (the real run on Neural-Noir-Website), a phone-width board, and a CI app other than Actions.
 
 - Phase 5a:
   - `pnpm typecheck` and `pnpm lint` are clean. 59 shared and 129 worker tests pass, including the 7 in `ship.test.ts`.
@@ -493,7 +552,8 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 
 - The GitHub App knows the address it was created from: one created on `localhost:3000` can't sign in on `127.0.0.1:3000` or another port. A second address needs a callback URL added in the App's settings on GitHub.
 - Health still reports GitHub as `unknown`; it comes with phase 5c.
-- Phase 5a: a shipped ticket waits in Ship, flagged `pr_open`, until 5b reads CI. Until then the owner drags it on.
+- Phase 5b: a repo whose workflows never report a check on the ticket's branch (e.g. `on: push` limited to `main`) leaves the ticket in Ship; drag it on.
+- Phase 5b: the CI log tail comes from GitHub Actions' job log (a check run's id is its job's id). Other CI apps' failures show the check's name and link only.
 - A move to Done closes the PR before the move's transaction. If the move then fails (rare: a concurrent change), the PR is closed and the ticket stays where it was.
 - The bot identity is looked up once per worker process (`GET /users/<slug>[bot]`), so a renamed App needs a worker restart.
 - **The eval doesn't run Ship-It yet.** Its golden tickets use local projects, where Ship stays a gate. Reaching PR Review (§8) needs a stub-backed GitHub project in the eval. Proposed: build it in 5b, together with CI, so one paid run covers both.

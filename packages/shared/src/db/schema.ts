@@ -6,6 +6,7 @@ import {
   check,
   customType,
   index,
+  bigint,
   integer,
   jsonb,
   numeric,
@@ -25,11 +26,13 @@ import {
   activityActions,
   artifactKinds,
   authorKinds,
+  ciStates,
   criterionSources,
   criterionStatuses,
   linkKinds,
   linkSources,
   priorities,
+  reviewStates,
   runEventTypes,
   runStates,
   statusFlags,
@@ -45,6 +48,8 @@ export const criterionStatus = pgEnum("criterion_status", criterionStatuses);
 export const activityAction = pgEnum("activity_action", activityActions);
 export const criterionSource = pgEnum("criterion_source", criterionSources);
 export const statusFlag = pgEnum("ticket_status_flag", statusFlags);
+export const ciState = pgEnum("ci_state", ciStates);
+export const reviewState = pgEnum("review_state", reviewStates);
 export const runState = pgEnum("run_state", runStates);
 export const runEventType = pgEnum("run_event_type", runEventTypes);
 export const artifactKind = pgEnum("artifact_kind", artifactKinds);
@@ -117,6 +122,10 @@ export const tickets = pgTable(
     prNumber: integer("pr_number"),
     prUrl: text("pr_url"),
     headSha: text("head_sha"),
+    // What the GitHub watcher saw last (FR-46, FR-47); lastReviewId is the newest review already handled.
+    ciState: ciState("ci_state").notNull().default("none"),
+    reviewState: reviewState("review_state").notNull().default("none"),
+    lastReviewId: bigint("last_review_id", { mode: "number" }),
     // Code Review and QA bounce-backs (FR-23); reset by a manual move to Planning.
     bounceCount: integer("bounce_count").notNull().default(0),
     // Plan B's predicted paths/globs plus the files the branch actually changed (§9).
