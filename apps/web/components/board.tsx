@@ -36,6 +36,7 @@ import {
   Settings,
   Sparkles,
   Wrench,
+  GitPullRequest,
 } from "lucide-react";
 import { generateKeyBetween } from "fractional-indexing";
 import Link from "next/link";
@@ -188,6 +189,8 @@ export function Board({ projectId }: { projectId: string }) {
       startAnyway?: boolean;
       keepPlan?: boolean;
       requestMd?: string;
+      confirmSkip?: boolean;
+      confirmClose?: boolean;
     };
     const move = (flags: Flags) =>
       api(`/api/tickets/${card.id}/move`, { body: { toColumnId, position, ...flags } });
@@ -216,6 +219,33 @@ export function Board({ projectId }: { projectId: string }) {
               if (!request) return void load();
               flags.requestMd = request;
             } else flags.keepPlan = true;
+          } else if (e.code === "skip_gates" && !flags.confirmSkip) {
+            // §3: Ship before review or QA passed.
+            if (!confirm(`${key(card)}: ${e.message}. Ship it anyway?`)) return void load();
+            flags.confirmSkip = true;
+          } else if (e.code === "pr_open" && !flags.confirmClose) {
+            // §3: Done without a merge closes the PR on GitHub (the branch stays).
+            if (!confirm(`${key(card)}: ${e.message}. Close the PR without merging?`))
+              return void load();
+            flags.confirmClose = true;
+          } else if (e.code === "no_pr") {
+            // §3: PR Review needs a PR; offer to run Ship first.
+            if (!confirm(`${key(card)} has no pull request yet. Move it to Ship to open one?`))
+              return void load();
+            const ship = board.columns.find((c) => c.slug === "ship");
+            if (!ship) return void load();
+            await api(`/api/tickets/${card.id}/move`, {
+              body: {
+                toColumnId: ship.id,
+                position: generateKeyBetween(
+                  board.tickets.filter((t) => t.columnId === ship.id).at(-1)?.position ?? null,
+                  null,
+                ),
+                ...flags,
+                confirmSkip: true,
+              },
+            });
+            break;
           } else throw e;
         }
       }
@@ -697,6 +727,12 @@ function CardBody({
       )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 empty:hidden [&>*]:mt-2">
         <StatusPill flag={card.statusFlag} agent={agent} />
+        {card.prNumber && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+            <GitPullRequest aria-hidden className="size-3" />
+            PR #{card.prNumber}
+          </span>
+        )}
         {card.bounceCount > 0 && (
           <span
             className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
@@ -747,6 +783,11 @@ function StatusPill({ flag, agent }: { flag: StatusFlag; agent: Agent }) {
       icon: <Hand className="size-3" />,
       text: "Approve · needs you",
       cls: "bg-needs text-needs-fg",
+    },
+    pr_open: {
+      icon: <GitPullRequest className="size-3" />,
+      text: "PR open · waiting on CI",
+      cls: "bg-running text-running-fg",
     },
     failed: {
       icon: <AlertTriangle className="size-3" />,

@@ -20,8 +20,8 @@ export const agentFrontmatter = z.object({
   column: z.string().min(1),
   model: z.string().min(1),
   tools: z.array(z.string().min(1)),
-  /** Where Edit/Write may write (§14): nowhere, anywhere in the worktree, or only the project's test globs. */
-  editScope: z.enum(["none", "worktree", "test_globs"]).default("none"),
+  /** Where Edit/Write may write (§14): nowhere, anywhere in the worktree, the test globs, or docs (Markdown, docs/). */
+  editScope: z.enum(["none", "worktree", "test_globs", "docs"]).default("none"),
   /** Bundled plugins from plugins/<name> (§8). Ponytail's level is passed as PONYTAIL_DEFAULT_MODE. */
   plugins: z
     .array(z.object({ name: z.string().regex(/^[a-z0-9-]+$/), level: z.string().optional() }))

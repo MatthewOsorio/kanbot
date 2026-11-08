@@ -1,0 +1,11 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Done."
+      }
+    }
+  ],
+  "costUsd": 0.01
+}

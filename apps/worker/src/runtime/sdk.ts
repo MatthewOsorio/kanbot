@@ -141,6 +141,8 @@ export class SdkRuntime implements AgentRuntime {
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       BASH_DEFAULT_TIMEOUT_MS: "600000",
       BASH_MAX_TIMEOUT_MS: "600000",
+      // Git Bash (the Bash tool on Windows, dev only) would turn a docker command's /c/… mount path back into C:/….
+      ...(process.platform === "win32" ? { MSYS_NO_PATHCONV: "1" } : {}),
     };
 
     const result: RuntimeResult = {

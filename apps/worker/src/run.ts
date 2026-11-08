@@ -31,7 +31,7 @@ import {
   type Db,
   type Tx,
 } from "@kanbot/shared/db";
-import { decryptEnv } from "@kanbot/shared/github";
+import { botIdentity, decryptEnv, loadGitHubApp, repoToken } from "@kanbot/shared/github";
 import { baselineFailures, QA_SETUP_MESSAGE, qaRunnable } from "@kanbot/shared/onboarding";
 import { git, removeWorktree, type ProjectConfig } from "@kanbot/shared/repo";
 import { and, count, desc, eq, isNotNull, max, ne, sql } from "drizzle-orm";
@@ -39,9 +39,11 @@ import { buildContext } from "./context";
 import { EDIT_TOOLS } from "./runtime/fence";
 import { record, redactText } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
+import { pushAndOpenPr, type ShippedPr } from "./ship";
 import {
   changedSince,
   checkAfterRun,
+  commitAs,
   runChecks,
   startApp,
   containerBash,
@@ -371,6 +373,24 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       baselineFailures: baselineFailures(project.baseline),
       app: app ? { url: app.url } : appError ? { error: appError } : undefined,
     });
+    // FR-42: agents' commits carry trailers and, on a GitHub project, the App's bot as author.
+    const ghApp =
+      project.githubRepo && agent.tools.some((t) => t.startsWith("Bash(git commit"))
+        ? await loadGitHubApp(db)
+        : null;
+    const commit = commitAs(
+      agent.slug,
+      key,
+      ghApp
+        ? await botIdentity(
+            ghApp,
+            await repoToken(ghApp, project.githubOwner!, project.githubRepo!),
+          )
+        : undefined,
+    );
+    const container = config.image
+      ? containerBash(config.image, cwd, config.commands, run.id, env.file)
+      : undefined;
     const scenario = ticket.labels.find((l) => l.startsWith("replay:"))?.slice(7) ?? "default";
     const [{ attempt } = { attempt: 1 }] = await db
       .select({ attempt: count() })
@@ -395,9 +415,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         resumeSessionId: run.resumeSessionId ?? undefined,
         appUrl: app?.url,
         // Project commands the agent runs go to the project's image (§7).
-        bash: config.image
-          ? containerBash(config.image, cwd, config.commands, run.id, env.file)
-          : undefined,
+        bash: (c) => commit(c) ?? container?.(c) ?? null,
       },
       emit,
     );
@@ -459,7 +477,10 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     if (run.columnSlug === "in_progress") {
       const base = await git(wt.path, ["merge-base", project.defaultBranch, "HEAD"]);
       outcome.touched = await changedSince(wt.path, base.trim());
-      // The checks gate (§8): a branch that doesn't build, lint and test goes back before review.
+    }
+    if (run.columnSlug === "in_progress" || run.columnSlug === "ship") {
+      // The checks gate (§8): a branch that doesn't build, lint and test goes back before review,
+      // and before Ship pushes it (Ship-It's docs edits run them again).
       if (outcome.state === "succeeded" && config) {
         const checksEnv = await openEnv(decryptEnv(project.env));
         const failed = await runChecks(
@@ -474,6 +495,33 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
           outcome.error = `Kanbot checks: \`${failed.command}\` failed`;
           outcome.checks = { ...failed, output: redactText(failed.output, secrets) };
         }
+      }
+    }
+    if (run.columnSlug === "ship" && outcome.state === "succeeded" && project.githubRepo) {
+      const description =
+        outcome.verdict?.artifacts.find((a) => a.kind === "pr_description")?.markdown ??
+        outcome.verdict?.summary ??
+        "";
+      try {
+        outcome.pr = await pushAndOpenPr(
+          db,
+          { ...project, githubOwner: project.githubOwner!, githubRepo: project.githubRepo },
+          { key, title: ticket.title, prNumber: ticket.prNumber },
+          wt,
+          description,
+        );
+      } catch (e) {
+        return finish(
+          db,
+          run.id,
+          {
+            state: "failed",
+            verdict: outcome.verdict,
+            error: `Couldn't push or open the PR: ${redactText((e as Error).message, secrets)}`,
+            filesChanged: outcome.filesChanged,
+          },
+          result,
+        );
       }
     }
   }
@@ -494,6 +542,8 @@ type Outcome = {
   sessionId?: string;
   /** The checks gate's failure, stored as a test report for the builder's next run. */
   checks?: { command: string; output: string };
+  /** The PR the worker pushed and opened after a Ship run (FR-43). */
+  pr?: ShippedPr;
 };
 
 /** Maps the runtime's result to a run state (requirements §8 report step and failure handling). */
@@ -579,6 +629,19 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         markdown: `Kanbot ran \`${o.checks.command}\` in the worktree after this run, and it failed. Fix it before review.\n\n\`\`\`\n${o.checks.output.replaceAll("```", "'''")}\n\`\`\``,
       });
 
+    if (o.pr) {
+      await tx
+        .update(tickets)
+        .set({ prNumber: o.pr.number, prUrl: o.pr.url, headSha: o.pr.headSha })
+        .where(eq(tickets.id, ticket.id));
+      await logActivity(
+        tx,
+        ticket.id,
+        "pr_opened",
+        { number: o.pr.number, url: o.pr.url, updated: ticket.prNumber === o.pr.number },
+        actor,
+      );
+    }
     const cols = await tx.select().from(columns).where(eq(columns.projectId, ticket.projectId));
     const from = cols.find((c) => c.id === ticket.columnId)!;
     const [project] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
@@ -922,5 +985,6 @@ export function expandTools(tools: readonly string[], commands: ProjectConfig["c
 function editScope(scope: AgentConfig["editScope"], config: ProjectConfig) {
   if (scope === "worktree") return undefined;
   if (scope === "none") return () => false;
+  if (scope === "docs") return (rel: string) => rel.endsWith(".md") || rel.startsWith("docs/");
   return (rel: string) => config.testGlobs.some((g) => matchesGlob(rel, g));
 }

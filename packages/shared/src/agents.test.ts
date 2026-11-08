@@ -40,18 +40,21 @@ describe("loadAgent", () => {
       "nitpick-nancy",
       "testy-mctestface",
       "rubber-duckworth",
+      "captain-ship-it",
+      "archie-the-archivist",
     ];
     for (const slug of shipped) {
       const a = loadAgent(slug);
       expect(DEFAULT_COLUMNS.find((c) => c.agentSlug === slug)?.slug).toBe(a?.column);
     }
     expect(loadAgent("sir-codes-a-lot")?.editScope).toBe("worktree");
+    expect(loadAgent("captain-ship-it")?.editScope).toBe("docs");
     expect(loadAgent("nitpick-nancy")?.plugins).toEqual([
       { name: "ponytail", level: "off" },
       { name: "security-audit" },
     ]);
   });
-  it("returns null for agents not shipped yet", () => {
-    expect(loadAgent("captain-ship-it")).toBeNull();
+  it("returns null for an agent with no file", () => {
+    expect(loadAgent("no-such-agent")).toBeNull();
   });
 });

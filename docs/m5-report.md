@@ -1,6 +1,6 @@
 # M5 report: ship and deploy
 
-Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is built on `m5-onboarding` (2026-11-07), not yet committed, waiting for the owner's review and the real run on NetGPT.
+Status: **in progress (living document, updated as each phase lands).** Branch `m5-ship-and-deploy`, started 2026-11-06. Phases 1 to 3 are merged into `main` (PR #10, 2026-11-07). Phase 4 is merged too (PR #11, 2026-11-07, merge `a3242da`). It includes QA needing a start command, project env vars and the `http_request` fence fix, and `pnpm eval:agents` passes. The owner tests everything at the end of the milestone. Phase 5a (Captain Ship-It opens the PR) is built on branch `m5-ship`, uncommitted, and waiting for review. Its paid eval and the real run on a test repo are still to do.
 
 **Done when:** a ticket goes from Backlog to a human-approved, merged PR.
 
@@ -20,8 +20,10 @@ Status: **in progress (living document, updated as each phase lands).** Branch `
 | 2 | Dockerfiles, compose `web`/`worker`/`caddy`, deploy workflow, nightly cleanup, `docs/deploy.md` | **done locally** (2026-11-06) |
 | 2b | Run Kanbot in WSL; a default image so project code never runs in the worker's container | **done** (2026-11-06); the owner's own `kanbot` distro is set up from `docs/deploy.md` |
 | 3 | GitHub App two-click setup, Sign in with GitHub, auth on every route | **done** (2026-11-07) |
-| 4 | Onboarding (§10 steps 1–7 and 10) | **done** (2026-11-07), checked for real on NetGPT |
-| 5 | Captain Ship-It, CI status, PR Review gate, merge detection, rebase before runs | not started |
+| 4 | Onboarding (§10 steps 1–7 and 10) | **done and merged** (PR #11, 2026-11-07), checked for real on NetGPT. Also in it: QA needs a start command, project env vars, the fence fix; eval passes |
+| 5a | Ship: Captain Ship-It's agent file; push the ticket branch; open the PR; store pr\_number, pr\_url and head\_sha on the ticket; commit trailers and the bot identity (FR-42, FR-43); Ship/Done move confirmations | **built** (2026-11-07) on `m5-ship`; tests, e2e and the browser check pass. Still to do: `pnpm eval:agents` (paid, owner's OK) and the real run on a test repo the owner names |
+| 5b | Watch GitHub: a 60 s poll for CI status, reviews and merges. CI failing bounces to In Progress with the log; changes requested imports the comments and bounces; a merge goes to Done (Archie), a closed PR to Backlog; the owner's own pushes are detected and never rewritten (FR-44 polling, FR-46, FR-47, FR-48); CI on cards and in the drawer | **proposed**, not started. Ends with M5's "done when", for real on the test repo |
+| 5c | Keep branches current: rebase onto the default branch before each run; rebase overlapping branches when main moves (FR-51); GitHub status in `/api/health` | **proposed**, not started. Ends with two tickets in flight while main moves |
 | 6 | Leftovers: `blockWritesOutsideWorkingDirectories`, SDK `sandbox`, SSE `Last-Event-ID`, the disk-over-90% guard | not started |
 
 The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) moved to M6 (2026-11-06).
@@ -67,6 +69,30 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   Testy's prompt changed, so `pnpm eval:agents` is due before merging (paid; owner's OK). For NetGPT, Install `pip install --user pyshark openai` and Test `python -m unittest` in Settings still give the checks gate and Testy's tests something to run. Commands run in `python:3.12-bookworm`, and the packages land in the shared cache volume.
 - **2026-11-07.** Owner asked that onboarding account for projects needing env vars (API keys, connection strings). **Owner's decisions:** every project command gets them, the agents' own project-command calls included; and CI reads them from the repo's Actions secrets, which the owner adds on GitHub (Kanbot doesn't write secrets to GitHub). Built: stored encrypted and write-only; names proposed from `.env.example`; passed to every project command, through an env file in containers; redacted from what Kanbot stores; listed in the starter workflow. Tests, e2e and the browser check pass.
 - **2026-11-07.** `pnpm eval:agents` for Testy's prompt change (owner's OK). The first run failed: `feature` and `security` were blocked after QA. Every `http_request` call had been refused with "/api/todos is outside this run's working directory". The permission hook checked the tool's `path` field as a file path. **This bug predates this branch.** Testy's code-read fallback had hidden it, and with the fallback gone Testy rightly reported `needs_input`. Fixed in `fence.ts`: the HTTP tool skips the file-path checks, since `appRequestUrl` already keeps it on the app. A fence test was added. The second run passed: all 5 golden tickets reached QA and ended in Done, within the baseline's bounces and cost (about $2.57). Testy now checks API criteria against the live app. Page criteria are still checked by reading code or by stub-DOM tests, because there's no browser (the Playwright row on M6). Results: `evals/results/2026-11-07T22-28-30-615Z.json` (failed run) and `…22-39-55-470Z.json` (passing run).
+- **2026-11-07.** Phase 5 planned with the owner, to start next session. **Proposed:** split it into 5a, 5b and 5c (phase table), with plan mode, tests against the GitHub stub, e2e and a browser check for each part, and a stop for review after each.
+  - **A test repo is needed first.** NetGPT can't reach a merged PR: it's a desktop app, so its QA can't pass (§4). Proposed: a small throwaway GitHub repo made from `fixtures/sample-repo`, a web app the eval agents already handle. The real run at the end of 5b pushes branches and opens PRs on the owner's GitHub, so those clicks are the owner's.
+  - **Ship-It is a new agent**, so `pnpm eval:agents` must reach PR Review (§8) with the GitHub stub, and each paid run needs the owner's OK.
+  - **Open decisions** (the owner answers at the start of next session; recommendations in bold):
+    1. Who pushes and opens the PR? **The worker's own code; Ship-It only writes the PR description, changelog and docs, so no agent holds a GitHub token.** The alternative is giving Ship-It push and PR tools.
+    2. Where does the owner merge? On GitHub only, or also with a Merge button in Kanbot (the spec's FR-47: enabled only after a human approval)?
+    3. The "small fix" checkbox (§10 PR Review: a requested change skips straight back to PR Review): build it in 5b, or defer it to M6?
+  - The working branch for phase 5 starts from `main` and carries the uncommitted doc fixes (this report's status, the spec's "Where things stand" and `CLAUDE.md`'s status line).
+- **2026-11-07.** Phase 5 started. **Owner's decisions:**
+  1. The worker pushes and opens the PR with the App's token. Ship-It only writes the PR description, the changelog entry and docs, so no agent holds a GitHub token.
+  2. Merging happens on GitHub only. The Merge button (FR-47) went to the M6 table; 5b detects the merge.
+  3. The "small fix" checkbox went to the M6 table.
+  4. The real run uses a web-app repo the owner names later (not NetGPT, whose QA can't pass).
+- **2026-11-07.** Phase 5a built on branch `m5-ship`:
+  - Ship-It's agent file;
+  - the push and the PR;
+  - the PR fields on the ticket;
+  - commit trailers and the bot author;
+  - the move confirmations for Ship, PR Review and Done.
+
+  Typecheck, lint, 59 shared + 129 worker tests, 16 e2e specs and the browser check pass. Stopped for review. Still to do before 5b: `pnpm eval:agents` for the new agent (paid; owner's OK), and the real run on the test repo. That run pushes and opens a PR on the owner's GitHub, so the clicks are theirs.
+- **2026-11-07.** The owner's first test on a Vite site (Neural-Noir-Website) stuck at QA. Two Kanbot bugs:
+  1. On Windows, every project command an agent ran in the project's image was refused. The `MSYS_NO_PATHCONV=1` prefix on the rewritten `docker run` trips Claude Code's own permission check. Fixed: the SDK runtime sets that variable in the agent's environment instead.
+  2. QA's app never answered: Vite ignores `PORT` and listens on localhost only, which a container's published port can't reach. The owner asked for the worker to handle any technology, not a per-tool list. Fixed: a forwarder container (`alpine/socat`) owns the app's network; the app joins it, and the worker finds whatever port the app listens on (`/proc/net/tcp`) and forwards to it from inside, so a plain `npm run dev` works whatever port or host it picks. Checked with real Vite (`npm run dev`, untouched), and in tests with a localhost-only server, an IPv6-only one, one that reads `PORT` and `python -m http.server`. Onboarding proposes a `dev` script when there's no `start`. A Start command may also say `$PORT`.
 
 ## What you can do
 
@@ -79,6 +105,24 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   6. **Ready.** Agents start when you move tickets. Until then the board says "Finish setup".
 
   A project from a local folder (no GitHub) is still under **Use a local folder instead**.
+- **Give a project its env vars** (API keys, connection strings). Onboarding's Commands step lists the names from the repo's `.env.example`; fill in the values, or **Add variable** for others. Change them later under Settings → **Environment variables**.
+  - Values are stored encrypted and never shown again ("Set (type to replace)").
+  - Every project command gets them: install, the checks, QA's app, and the agents' own runs.
+  - For CI, add the same names under the repo's Settings → Secrets and variables → Actions on GitHub. The CI step links there.
+  - Use development credentials: code an agent writes can read them.
+- **QA needs a start command.** QA runs your app and checks each criterion against it. Without a Start command (Settings), a ticket can't move into QA, and Code Review holds it as "Needs you".
+- **Approve and ship.** A ticket that passed QA has an **Approve and ship** button in its drawer. It moves the ticket to Ship, and Captain Ship-It starts (phase 5a).
+- **Ship a ticket** (phase 5a, GitHub projects).
+  - In Ship, Captain Ship-It adds a changelog entry, fixes docs the change made wrong and writes the PR description.
+  - Then Kanbot runs the checks, pushes the ticket branch and opens the PR, or updates it on a re-ship.
+  - The card shows **PR #n** and "PR open · waiting on CI", and the drawer links to the PR on GitHub.
+  - Merge it on GitHub. Until phase 5b, drag the ticket on yourself after merging.
+  - Agents' commits name the App's bot as author and end with `Kanbot-Agent` and `Kanbot-Ticket` trailers.
+  - Dragging a ticket:
+    - into Ship before QA passed asks first;
+    - into PR Review without a PR offers Ship instead;
+    - into Done with the PR still open asks, then closes the PR (the branch stays).
+  - A local-folder project has no GitHub, so its Ship column stays a gate.
 - **Sign in with GitHub.**
   1. Put `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY` in `.env` (`openssl rand -base64 32` each) and start `pnpm dev`.
   2. Open `http://localhost:3000` and click **Connect GitHub**.
@@ -99,7 +143,7 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 
 ## How to run it
 
-`pnpm db:migrate` (four new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`, `0013_onboarding`), then `pnpm dev`. Clones go to `KANBOT_REPOS_DIR`, or `.kanbot-repos/` at the repo root when it is unset (`pnpm dev`). Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
+`pnpm db:migrate` (six new migrations: `0010_project-image`, `0011_project-dockerfile`, `0012_github-app`, `0013_onboarding`, `0014_project_env`, `0015_ticket-pr`), then `pnpm dev`. Clones go to `KANBOT_REPOS_DIR`, or `.kanbot-repos/` at the repo root when it is unset (`pnpm dev`). Docker must be running for a project with an image. Phase 3 needs two new `.env` variables, `KANBOT_SESSION_SECRET` and `KANBOT_ENCRYPTION_KEY`; without them, every page fails with a message naming the missing one.
 
 ## What was built
 
@@ -178,6 +222,40 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - `e2e/global-setup.ts` stores a fake App and saves a signed session as the specs' `storageState`.
   - `e2e/auth.spec.ts` covers the rest: 401 without a cookie, 401 with a forged one, a page redirecting to `/login` with Sign in, setup refusing a second App, and a callback with the wrong state refused.
 
+### Phase 5a: Captain Ship-It opens the PR
+
+- **The agent.** `agents/captain-ship-it.md` (Sonnet 5.5, $0.50, 10 minutes).
+  - Tools: Read, Grep, Glob, Edit, Write and local git.
+  - A new `editScope: docs` allows Markdown files and `docs/` only, so the post-run check fails a run that touches code.
+  - It reports a `pr_description` artifact (a new artifact kind).
+  - Ship's context bundle has the same branch sections as review and QA, with its own task line.
+- **The worker** (`apps/worker/src/run.ts`, `ship.ts`).
+  - Ship is a worktree column now.
+  - After a successful Ship run, the checks gate runs again (it covers "re-runs tests"). A failure bounces to In Progress like the gate's (new `RUN_RULES` row).
+  - `pushAndOpenPr()` pushes `HEAD` to the `kanbot/…` branch, with the installation token in git's environment (`gitAuth()`, now shared with onboarding's clone). The push is never forced.
+  - It then opens the PR (`POST /pulls`), or updates the title and body when the ticket already has one (`PATCH`). The body is Ship-It's description, plus a footer naming the ticket.
+  - `finish()` stores `pr_number`, `pr_url` and `head_sha` (migration `0015_ticket-pr`) and logs `pr_opened`. The ticket stays in Ship, flagged `pr_open`.
+  - A push or GitHub error fails the run with the message, and Retry works.
+  - `startColumnAgent` keeps Ship a gate on a project without GitHub.
+- **Trailers and identity (FR-42).** `commitAs()` (`worktree.ts`) rewrites an agent's `git commit` in the PreToolUse hook, after the fence has checked the original command.
+  - It adds the `--trailer` lines right after `commit`.
+  - On a GitHub project it also adds `-c user.name/email` for `<slug>[bot]`, with GitHub's noreply address (`botIdentity()`, one `GET /users` per process).
+  - It composes with the container rewrite.
+- **Web.**
+  - `moveTicket()` returns three new 409s:
+    - `skip_gates`: into Ship, unless the ticket comes from QA flagged `awaiting_approval` or from PR Review;
+    - `no_pr`: into PR Review with no PR;
+    - `pr_open`: into Done with an open PR.
+  - The flags are `confirmSkip` and `confirmClose`. Closing reads the PR, closes it before the move's transaction and logs `pr_closed`.
+  - The board answers each with a confirm; `no_pr` offers to move the ticket to Ship instead.
+  - Cards show a PR chip and a "PR open · waiting on CI" pill. The drawer links to the PR.
+- **Tests.**
+  - The stub gained PR numbers, `GET` and `PATCH` on a PR, and `GET /users`.
+  - `ship.test.ts`: a PR opened with the description, its fields stored and the branch on the origin; a re-ship updating the same PR; a refused push; edits outside docs refused; a local project's Ship as a gate; the trailer rewrite, also run through a real shell and `git log`.
+  - `transitions.test`: the Ship rows.
+  - `e2e/ship.spec.ts`: the three confirmations, the chip, the pill and the drawer link, and the PR closed on the stub.
+  - Replay fixtures `captain-ship-it/{default,reship,edits-code,no-report}.json`.
+
 ### After phase 4: project env vars
 
 - **Storage.** `projects.env` (migration `0014_project_env`): encrypted JSON `{NAME: value}`, using `encryptEnv`/`decryptEnv` beside the App's `encrypt`/`decrypt` in `github.ts`. An empty value means the name is known but not set.
@@ -243,6 +321,17 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 
 ## Changes to the spec (`requirements.md`)
 
+- Phase 5a (owner's choices, 2026-11-07):
+  - §4: Ship-It writes, and the worker pushes and opens the PR. Ship-It's tools are docs-only, with no token.
+  - §3: Ship's `success` keeps the ticket in Ship, flagged `pr_open`, and a checks failure there bounces. Manual moves gained `skip_gates`, `no_pr` and `pr_open`, and Ship is a gate on a local project.
+  - FR-42 and FR-43 are marked built.
+  - §10: the Merge button and the "small fix" checkbox moved to M6.
+  - §11: `pr_description`, `pr_opened` and `pr_closed`.
+  - §12: the move's new flags and 409s.
+  - §16: the Ship-It, confirmations and trailers rows came off. The `tickets` row keeps `ci_state` and `review_state`, and a new 5b row covers CI, PR Review and merge detection.
+  - "Where things stand".
+- §4 "How QA runs" (2026-11-07): the app may listen on any port and host; a forwarder container finds the port and relays to it. The start command may say `$PORT`. New pinned image: `alpine/socat:1.8.0.3`.
+
 - §7 "Project toolchains": how commands run (one `docker run` each, mount, cache, label, cleanup), the agent Bash rewrite, rootless Docker with the plain CLI instead of a socket proxy, git not available inside the container, how the image is found (devcontainer image or Dockerfile build, then `project.yml`), the build from the default branch, and the root `Dockerfile` ignored.
 - §4 "How QA runs": the app runs in the image, published on 127.0.0.1, and must listen on all interfaces inside the container.
 - §7 "Deployment": the containers (with `migrate` and the `app` profile), isolation under rootless Docker (the worker is container root), backups as a host cron job, the nightly cleanup, and deploys built on the server after CI. The "Still to build" row for compose and Dockerfiles became "the real deployment on the Droplet" (in 2b: "Running Kanbot in its own WSL distro", with the public server on the M6 table). A row was added for the disk-over-90% guard (§8), which was never built and was found missing while reading §8 for the cleanup.
@@ -276,6 +365,19 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
   - §14: the env-var bullet and its limit.
 
 ## Checks run
+
+- Phase 5a:
+  - `pnpm typecheck` and `pnpm lint` are clean. 59 shared and 129 worker tests pass, including the 7 in `ship.test.ts`.
+  - All 16 e2e specs pass, including `ship.spec.ts`.
+  - Browser check: a throwaway Playwright spec against the e2e stack (dev server, replay worker, GitHub stub), in light and dark, deleted afterwards. All of these passed:
+    - Backlog → Ship asks "Code Review and QA haven't passed. Ship it anyway?";
+    - → PR Review without a PR offers Ship;
+    - the card's chip and pill, and the drawer's PR link;
+    - → Done with the PR open asks, then closes it on the stub;
+    - no page-level horizontal scroll at 390 px.
+
+    The first tries found problems only in the check itself: a GitHub project with no repo really ran Ship-It and failed, and the shared stub remembered the PR the first theme closed. Screenshots: `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\ad21bb2a-5e73-4aa9-9cf1-ae2f423d8942\scratchpad\p5a\{0-local-gates,1-board,2-drawer,3-done}-{light,dark}.png` and `C:\Users\matt\AppData\Local\Temp\claude\ce50016e16918d15\ad21bb2a-5e73-4aa9-9cf1-ae2f423d8942\scratchpad\p5a\4-phone-light.png`.
+  - Not checked yet: `pnpm eval:agents` with Ship-It (paid), a real push and PR on GitHub, and a real agent's commit going through the trailer rewrite inside the SDK.
 
 - `pnpm typecheck`, `pnpm lint`: clean.
 - `pnpm test`: 34 shared + 110 worker tests pass. The new Docker-backed tests ran for real (Docker Desktop 29.9.2, `node:24-alpine`): the checks gate's failing `node --test` output came from the container; the QA app answered from a container on 127.0.0.1; no `kanbot`-labelled container was left afterwards. Pure tests cover `dockerRun`, `containerBash`, `shQuote` and the devcontainer image reader (now `devcontainer()`).
@@ -366,7 +468,11 @@ The public server (Caddy, HTTPS, webhooks, the deploy workflow on a real host) m
 - The disk-over-90% guard (§8) was never built. It is now on the M5 "Still to build" list for phase 6.
 
 - The GitHub App knows the address it was created from: one created on `localhost:3000` can't sign in on `127.0.0.1:3000` or another port. A second address needs a callback URL added in the App's settings on GitHub.
-- Health still reports GitHub as `unknown`; it comes with phase 5's use of the App.
+- Health still reports GitHub as `unknown`; it comes with phase 5c.
+- Phase 5a: a shipped ticket waits in Ship, flagged `pr_open`, until 5b reads CI. Until then the owner drags it on.
+- A move to Done closes the PR before the move's transaction. If the move then fails (rare: a concurrent change), the PR is closed and the ticket stays where it was.
+- The bot identity is looked up once per worker process (`GET /users/<slug>[bot]`), so a renamed App needs a worker restart.
+- **The eval doesn't run Ship-It yet.** Its golden tickets use local projects, where Ship stays a gate. Reaching PR Review (§8) needs a stub-backed GitHub project in the eval. Proposed: build it in 5b, together with CI, so one paid run covers both.
 
 - NetGPT is a desktop app, so its QA can't pass until Kanbot can drive desktop apps (or NetGPT has a web UI).
 - **Owner's goal (2026-11-07): extend Kanbot to projects other than web apps** (desktop apps, CLIs, libraries). It's a row on the M6 "Still to build" table in `requirements.md` §16.

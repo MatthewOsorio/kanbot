@@ -27,7 +27,27 @@ describe("afterRun", () => {
     expect(afterRun("blocked", "interrupted")).toEqual(stay("failed"));
   });
   it("stays put for columns with no rule", () => {
-    expect(afterRun("ship", "succeeded")).toEqual(stay("none"));
+    expect(afterRun("pr_review", "succeeded")).toEqual(stay("none"));
+  });
+});
+
+describe("ship", () => {
+  it("keeps a shipped ticket in Ship, flagged pr_open, waiting for CI", () => {
+    expect(afterRun("ship", "succeeded", { verdict: "success" })).toEqual(stay("pr_open"));
+  });
+  it("bounces to In Progress when the checks fail after Ship-It's edits", () => {
+    expect(afterRun("ship", "changes_requested")).toEqual({
+      to: "in_progress",
+      flag: "none",
+      bounce: true,
+    });
+    expect(afterRun("ship", "changes_requested", { bounces: BOUNCE_LIMIT })).toMatchObject({
+      to: "blocked",
+      reason: "bounce_limit",
+    });
+  });
+  it("sends a failed Ship run to Blocked", () => {
+    expect(afterRun("ship", "failed")).toEqual({ to: "blocked", flag: "failed", bounce: false });
   });
 });
 

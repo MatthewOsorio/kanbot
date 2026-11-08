@@ -1,12 +1,17 @@
-// Test-only: a stand-in for GitHub's REST API, just the calls onboarding makes (§10). Worker tests, e2e
+// Test-only: a stand-in for GitHub's REST API, just the calls onboarding (§10) and Ship (FR-43) make. Worker tests, e2e
 // and browser checks point KANBOT_GITHUB_API at it; clone_url is a local repo, so git needs no network.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 export type GitHubStub = {
   url: string;
-  /** The PUT protection bodies, the PRs opened and the files written, in order. */
-  calls: { protection: unknown[]; pulls: unknown[]; contents: { path: string; body: unknown }[] };
+  /** The PUT protection bodies, the PRs opened, PR updates and the files written, in order. */
+  calls: {
+    protection: unknown[];
+    pulls: unknown[];
+    pullUpdates: { number: number; body: unknown }[];
+    contents: { path: string; body: unknown }[];
+  };
   close: () => Promise<void>;
 };
 
@@ -17,8 +22,9 @@ export async function startGitHubStub(o: {
   workflows?: string[];
   port?: number;
 }): Promise<GitHubStub> {
-  const calls: GitHubStub["calls"] = { protection: [], pulls: [], contents: [] };
+  const calls: GitHubStub["calls"] = { protection: [], pulls: [], pullUpdates: [], contents: [] };
   let protection: unknown = null;
+  const closed = new Set<number>();
   const repo = {
     name: o.repo,
     owner: { login: o.owner },
@@ -75,8 +81,33 @@ export async function startGitHubStub(o: {
       if (route === `GET ${base}/pulls`) return send(200, []);
       if (route === `POST ${base}/pulls`) {
         calls.pulls.push(body);
-        return send(201, { html_url: `https://github.com/${o.owner}/${o.repo}/pull/1` });
+        const number = calls.pulls.length;
+        return send(201, {
+          number,
+          state: "open",
+          html_url: `https://github.com/${o.owner}/${o.repo}/pull/${number}`,
+        });
       }
+      const pr =
+        path.startsWith(`${base}/pulls/`) && /^\d+$/.exec(path.slice(`${base}/pulls/`.length));
+      if (pr) {
+        const number = Number(pr[0]);
+        const view = () => ({
+          number,
+          state: closed.has(number) ? "closed" : "open",
+          merged: false,
+          html_url: `https://github.com/${o.owner}/${o.repo}/pull/${number}`,
+        });
+        if (req.method === "GET") return send(200, view());
+        if (req.method === "PATCH") {
+          calls.pullUpdates.push({ number, body });
+          const state = (body as { state?: string }).state;
+          if (state === "closed") closed.add(number);
+          if (state === "open") closed.delete(number);
+          return send(200, view());
+        }
+      }
+      if (req.method === "GET" && path.startsWith("/users/")) return send(200, { id: 4242 });
       if (route === `GET ${base}/commits/main/check-runs`) return send(200, { check_runs: [] });
       send(404, { message: `stub: no route for ${route}` });
     });

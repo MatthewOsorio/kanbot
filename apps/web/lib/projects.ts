@@ -86,6 +86,7 @@ export async function getBoard(projectId: string) {
         position: tickets.position,
         statusFlag: tickets.statusFlag,
         bounceCount: tickets.bounceCount,
+        prNumber: tickets.prNumber,
         touchPaths: tickets.touchPaths,
         parentId: tickets.parentId,
       })

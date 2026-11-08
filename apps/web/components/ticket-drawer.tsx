@@ -8,7 +8,7 @@ import {
   ticketTypes,
   type BoardEvent,
 } from "@kanbot/shared";
-import { GitBranch, Layers, Loader2 } from "lucide-react";
+import { GitBranch, GitPullRequest, Layers, Loader2 } from "lucide-react";
 import { createContext, useContext, useEffect, useState } from "react";
 import { SELECT } from "@/components/brand";
 import { Markdown } from "@/components/markdown";
@@ -142,6 +142,17 @@ export function TicketDrawer(props: {
                       <GitBranch aria-hidden className="size-3" />
                       {ticket.branchName}
                     </code>
+                  )}
+                  {ticket.prUrl && (
+                    <a
+                      href={ticket.prUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={CHIP + " text-foreground underline-offset-2 hover:underline"}
+                    >
+                      <GitPullRequest aria-hidden className="size-3" />
+                      PR #{ticket.prNumber} on GitHub
+                    </a>
                   )}
                   {ticket.bounceCount > 0 && (
                     <span className={CHIP}>

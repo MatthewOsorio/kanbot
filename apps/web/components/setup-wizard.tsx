@@ -302,7 +302,8 @@ function CommandsStep({
       <p className="text-muted-foreground">
         What Kanbot found in the repo. Edit anything that&apos;s wrong; leave a command empty if the
         project has none. One plain command each, no pipes or chaining. Start is required: QA runs
-        the app and checks each criterion against it.
+        the app the way you would (e.g. <code>npm run dev</code>), finds the port it listens on and
+        checks each criterion against it.
       </p>
       {COMMANDS.map((c) => (
         <label key={c} className="block space-y-1">

@@ -126,6 +126,46 @@ export async function repoToken(app: GitHubApp, owner: string, repo: string) {
   ).token;
 }
 
+/** git's environment for an installation token: not saved in .git/config, not shown in `ps`. */
+export const gitAuth = (token: string) => ({
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "http.extraHeader",
+  GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`,
+});
+
+const bots = new Map<number, { name: string; email: string }>();
+/** The App's bot account, the author of agents' commits (FR-42); looked up once per process. */
+export async function botIdentity(app: GitHubApp, token: string) {
+  const known = bots.get(app.id);
+  if (known) return known;
+  const name = `${app.slug}[bot]`;
+  const { id } = await gh<{ id: number }>(token, `/users/${encodeURIComponent(name)}`);
+  const bot = { name, email: `${id}+${name}@users.noreply.github.com` };
+  bots.set(app.id, bot);
+  return bot;
+}
+
+export type PullRequest = { number: number; html_url: string; state: string; merged?: boolean };
+
+/** Opens the ticket's PR, or updates its title and body when it already has one (FR-43). */
+export function upsertPr(
+  token: string,
+  owner: string,
+  repo: string,
+  pr: { number: number | null; title: string; body: string; head: string; base: string },
+) {
+  const base = `/repos/${owner}/${repo}/pulls`;
+  return pr.number
+    ? gh<PullRequest>(token, `${base}/${pr.number}`, {
+        method: "PATCH",
+        body: { title: pr.title, body: pr.body, state: "open" },
+      })
+    : gh<PullRequest>(token, base, {
+        method: "POST",
+        body: { title: pr.title, body: pr.body, head: pr.head, base: pr.base },
+      });
+}
+
 export type RepoInfo = {
   owner: string;
   name: string;

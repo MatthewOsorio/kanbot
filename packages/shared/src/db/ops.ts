@@ -133,6 +133,8 @@ export async function startColumnAgent(
     .from(projects)
     .where(eq(projects.id, projectId));
   if (p?.repo && p.onboarding?.step !== "ready") throw new AgentsDisabledError();
+  // Ship pushes to GitHub (FR-43): a local-folder project's Ship stays a gate.
+  if (column.slug === "ship" && !p?.repo) return null;
   if (column.slug === "qa" && !(await qaReady(tx, projectId))) throw new QaSetupError();
   const [r] = await tx
     .insert(runs)

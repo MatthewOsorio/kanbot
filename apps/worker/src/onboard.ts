@@ -5,7 +5,14 @@ import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { projectConfigOf, projects, publish, type Db } from "@kanbot/shared/db";
-import { decryptEnv, encryptEnv, getRepo, loadGitHubApp, repoToken } from "@kanbot/shared/github";
+import {
+  decryptEnv,
+  encryptEnv,
+  getRepo,
+  gitAuth,
+  loadGitHubApp,
+  repoToken,
+} from "@kanbot/shared/github";
 import { detect, ENV_EXAMPLES, envNames, type Onboarding } from "@kanbot/shared/onboarding";
 import { git, loadProjectConfig, removeWorktree } from "@kanbot/shared/repo";
 import { eq, sql } from "drizzle-orm";
@@ -81,12 +88,7 @@ async function clone(db: Db, p: Project) {
   if (!app) throw new Error("No GitHub App is connected");
   const token = await repoToken(app, p.githubOwner!, p.githubRepo!);
   const info = await getRepo(token, p.githubOwner!, p.githubRepo!);
-  // Passed through git's environment, so it isn't saved in .git/config or shown in `ps`.
-  const auth = {
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.extraHeader",
-    GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`,
-  };
+  const auth = gitAuth(token);
   const root = reposDir();
   const dir = join(root, p.keyPrefix.toLowerCase());
   await mkdir(root, { recursive: true });
