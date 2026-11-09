@@ -47,4 +47,5 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/pr"
           git archive "$HEAD_SHA" .github/workflows | tar -x -C "$RUNNER_TEMP/pr"
+          git init -q "$RUNNER_TEMP/pr" # actionlint refuses a folder that isn't a git repo
           docker run --rm -v "$RUNNER_TEMP/pr:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
