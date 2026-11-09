@@ -101,9 +101,11 @@ export class SdkRuntime implements AgentRuntime {
           "report_result",
           "Report your final verdict. Call this exactly once, as your last action.",
           verdictShape,
-          async (args) => {
+          (args) => {
             report = args;
-            return { content: [{ type: "text", text: "Recorded. End your turn now." }] };
+            return Promise.resolve({
+              content: [{ type: "text" as const, text: "Recorded. End your turn now." }],
+            });
           },
         ),
         ...(appUrl ? [httpTool(appUrl)] : []),
@@ -119,21 +121,24 @@ export class SdkRuntime implements AgentRuntime {
       tools: [...tools, REPORT_TOOL, ...(appUrl ? [HTTP_TOOL, ...BROWSER_TOOLS] : [])],
       canEdit,
     };
-    const gate: HookCallback = async (input) => {
+    const gate: HookCallback = (input) => {
       const name = "tool_name" in input ? input.tool_name : "";
-      const args = ("tool_input" in input ? input.tool_input : {}) as Record<string, unknown>;
-      const reason = checkToolCall(name, args ?? {}, fence);
+      const args = (("tool_input" in input ? input.tool_input : {}) ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const reason = checkToolCall(name, args, fence);
       // The fence checks the command as the agent wrote it; only then is it moved into the project's image.
       const rewritten =
         !reason && name === "Bash" && bash ? bash(String(args.command ?? "")) : null;
-      return {
+      return Promise.resolve({
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: reason ? "deny" : "allow",
           permissionDecisionReason: reason ?? undefined,
           updatedInput: rewritten ? { ...args, command: rewritten } : undefined,
         },
-      };
+      });
     };
 
     const abortController = new AbortController();

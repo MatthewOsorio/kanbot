@@ -164,7 +164,7 @@ async function look(token: string, owner: string, repo: string, w: Watched): Pro
 
 /** Writes what was seen and makes the move, in one transaction; skips a ticket that changed meanwhile. */
 async function apply(db: Db, w: Watched, s: Seen): Promise<boolean> {
-  let removeAfter: string | null = null;
+  let removeAfter = null as string | null; // set in the transaction callback
   const changed = await db.transaction(async (tx) => {
     const [t] = await tx.select().from(tickets).where(eq(tickets.id, w.ticket.id)).for("update");
     // Moved by the owner, re-shipped or picked up by an agent since `look`: next tick sees it fresh.

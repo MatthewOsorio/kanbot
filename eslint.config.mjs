@@ -31,6 +31,22 @@ export default tseslint.config(
     },
   },
   {
+    // Keeps `any` from spreading and catches checks that can never fail. Source only: tests poke at loose JSON.
+    files: ["**/*.ts"],
+    ignores: ["**/*.config.ts", "**/*.test.ts", "**/test/**"],
+    rules: {
+      "@typescript-eslint/no-unsafe-assignment": "error",
+      "@typescript-eslint/no-unsafe-member-access": "error",
+      "@typescript-eslint/no-unsafe-return": "error",
+      "@typescript-eslint/no-unsafe-call": "error",
+      "@typescript-eslint/no-unsafe-argument": "error",
+      "@typescript-eslint/no-unnecessary-condition": "error",
+      "require-await": "off",
+      "@typescript-eslint/require-await": "error",
+      "@typescript-eslint/only-throw-error": "error",
+    },
+  },
+  {
     files: ["**/*.ts"],
     ignores: ["**/*.test.ts", "**/test/**"],
     rules: { "max-lines": ["error", { max: 600, skipBlankLines: true, skipComments: true }] },

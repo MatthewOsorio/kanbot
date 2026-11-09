@@ -70,7 +70,7 @@ export async function startGitHubStub(o: {
         res.end(body === undefined ? "" : JSON.stringify(body));
       };
       const path = new URL(req.url!, "http://x").pathname;
-      const body = raw ? JSON.parse(raw) : undefined;
+      const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : undefined;
       const route = `${req.method} ${path}`;
       if (route === "POST /login/oauth/access_token")
         return send(200, { access_token: "stub-user-token" });

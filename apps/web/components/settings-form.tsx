@@ -58,6 +58,7 @@ export function SettingsForm({ projectId }: { projectId: string }) {
   const [env, setEnv] = useState<EnvRow[]>([]);
   const [msg, setMsg] = useState<{ error: boolean; text: string } | null>(null);
 
+  type ApiError = { error: { message: string } };
   const load = (d: Settings) => {
     setS(d);
     setGlobs(d.testGlobs.join("\n"));
@@ -67,7 +68,9 @@ export function SettingsForm({ projectId }: { projectId: string }) {
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
       .then(async (r) =>
-        r.ok ? load(await r.json()) : setMsg({ error: true, text: (await r.json()).error.message }),
+        r.ok
+          ? load((await r.json()) as Settings)
+          : setMsg({ error: true, text: ((await r.json()) as ApiError).error.message }),
       )
       .catch((e: Error) => setMsg({ error: true, text: e.message }));
   }, [projectId]);
@@ -94,7 +97,7 @@ export function SettingsForm({ projectId }: { projectId: string }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    const d = await r.json();
+    const d = (await r.json()) as Settings & ApiError;
     if (!r.ok) return setMsg({ error: true, text: d.error.message });
     load(d);
     setMsg({ error: false, text: "Saved" });

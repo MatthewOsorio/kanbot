@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addedLines,
+  agentsHash,
   evaluate,
   parseNameStatus,
   type FileChange,
@@ -22,6 +23,7 @@ function pr(
     base: (p) => o.base?.[p] ?? null,
     head: (p) => o.head?.[p] ?? null,
     labels: new Set(o.labels),
+    agentFiles: Object.keys(o.head ?? {}).filter((p) => /^(agents|plugins)\//.test(p)),
   };
 }
 const M = (path: string): FileChange => ({ status: "M", path });
@@ -40,15 +42,27 @@ describe("weakening", () => {
     "// eslint-disable-next-line",
     "const a = b as any;",
     "  retries: 2,",
+    'it.fails("x", f)',
+    "test.fail();",
+    "expect(true).toBe(true);",
+    'expect("x").toBeTruthy();',
+    "expect(1).toBe(1);",
+    "const a = b as unknown as C;",
+    "await p.catch(() => {});",
   ])("flags %s", (line) => expect(add(line)).toEqual(["weakening"]));
 
   it("flags a shell bypass in a workflow", () => {
     expect(add("run: pnpm test || true", ".github/x.yml")).toContain("weakening");
   });
 
-  it.each(["const apiRetries: 2", "expect(a).toBe(1)", "skip the thing"])("allows %s", (line) =>
-    expect(add(line)).toEqual([]),
-  );
+  it.each([
+    "const apiRetries: 2",
+    "expect(a).toBe(1)",
+    "skip the thing",
+    'expect.fail("unreachable")',
+    'assert.fail("unreachable")',
+    "p.catch((e) => log(e))",
+  ])("allows %s", (line) => expect(add(line)).toEqual([]));
 
   it("ignores docs, fixtures and its own patterns", () => {
     expect(add("it.only(", "docs/a.md")).toEqual([]);
@@ -105,6 +119,25 @@ describe("test loss", () => {
     expect(evaluate(d)).toEqual([]);
   });
 
+  it("flags a test file renamed so it no longer runs", () => {
+    const to = "apps/worker/test/a-helpers.ts";
+    const d = pr([{ status: "R", path: to, oldPath: path }], {
+      base: { [path]: two },
+      head: { [to]: two },
+    });
+    const failures = evaluate(d);
+    expect(failures.map((f) => f.message)).toContain(`${path}: renamed so it no longer runs`);
+    expect(failures.map((f) => f.message)).toContain("2 fewer test cases than the base branch");
+  });
+
+  it("guards existing replay fixtures but not new ones", () => {
+    const fixture = "fixtures/runs/plan-b/default.json";
+    expect(checks(pr([M(fixture)]))).toEqual(["test-loss"]);
+    expect(checks(pr([{ status: "D", path: "fixtures/golden/bug.json" }]))).toEqual(["test-loss"]);
+    expect(evaluate(pr([{ status: "A", path: fixture }]))).toEqual([]);
+    expect(evaluate(pr([M(fixture)], { labels: ["allow-test-removal"] }))).toEqual([]);
+  });
+
   it("does not count test.describe or test.use as tests", () => {
     const setup = 'test.use({});\ntest.describe("x", () => {});';
     const d = pr([M("a.spec.ts")], { base: { "a.spec.ts": setup }, head: { "a.spec.ts": "" } });
@@ -122,6 +155,18 @@ describe("protected files", () => {
     "apps/web/playwright.config.ts",
     "apps/worker/src/ci-guards.ts",
     "packages/shared/src/test-network-guard.ts",
+    "apps/worker/src/runtime/fence.ts",
+    "apps/worker/src/runtime/redact.ts",
+    "apps/web/proxy.ts",
+    "apps/web/lib/auth.ts",
+    "apps/worker/test/global-setup.ts",
+    "apps/web/e2e/global-setup.ts",
+    "apps/worker/test/repo-rules.test.ts",
+    ".claude/settings.json",
+    "Dockerfile",
+    "docker-compose.yml",
+    ".gitattributes",
+    ".npmrc",
   ])("%s needs the label", (path) => {
     expect(checks(pr([M(path)]))).toEqual(["protected"]);
     expect(evaluate(pr([M(path)], { labels: ["ci-change"] }))).toEqual([]);
@@ -131,6 +176,18 @@ describe("protected files", () => {
     const d = pr([M("package.json")], {
       base: { "package.json": '{"scripts":{"test":"vitest run"}}' },
       head: { "package.json": '{"scripts":{"test":"exit 0"}}' },
+    });
+    expect(checks(d)).toEqual(["protected"]);
+  });
+
+  it.each([
+    ['{"engines":{"node":">=26"}}', '{"engines":{"node":">=18"}}'],
+    ['{"packageManager":"pnpm@12.0.0"}', '{"packageManager":"pnpm@9.0.0"}'],
+    ["{}", '{"pnpm":{"overrides":{"zod":"1.0.0"}}}'],
+  ])("flags changed install settings: %s", (before, after) => {
+    const d = pr([M("package.json")], {
+      base: { "package.json": before },
+      head: { "package.json": after },
     });
     expect(checks(d)).toEqual(["protected"]);
   });
@@ -159,13 +216,47 @@ describe("migrations", () => {
       "migrations",
     ]);
   });
+
+  it.each([
+    'DROP TABLE "tickets";',
+    'ALTER TABLE "tickets" DROP COLUMN "title";',
+    'TRUNCATE "runs";',
+    'ALTER TABLE "runs" ALTER COLUMN "cost" SET DATA TYPE integer;',
+    'ALTER TABLE "runs" ALTER COLUMN "cost" SET NOT NULL;',
+  ])("needs the label for %s", (line) => {
+    const added = { [sql]: [line] };
+    expect(checks(pr([{ status: "A", path: sql }], { added }))).toEqual(["migrations"]);
+    expect(
+      evaluate(pr([{ status: "A", path: sql }], { added, labels: ["destructive-migration"] })),
+    ).toEqual([]);
+  });
+
+  it("allows an additive migration", () => {
+    const added = { [sql]: ['ALTER TABLE "runs" ADD COLUMN "note" text;'] };
+    expect(evaluate(pr([{ status: "A", path: sql }], { added }))).toEqual([]);
+  });
 });
 
 describe("agent eval", () => {
-  it("needs a new baseline when a prompt changes", () => {
-    expect(checks(pr([M("agents/plan-b.md")]))).toEqual(["agent-eval"]);
-    expect(evaluate(pr([M("agents/plan-b.md"), M("evals/baseline.json")]))).toEqual([]);
-    expect(evaluate(pr([M("agents/plan-b.md")], { labels: ["eval-skip"] }))).toEqual([]);
+  const agent = "agents/plan-b.md";
+  const baseline = "evals/baseline.json";
+  const save = (runtime: string, hash: string) => JSON.stringify({ runtime, agentsHash: hash });
+
+  it("needs a baseline from a real run on these exact agents", () => {
+    const hash = agentsHash([[agent, "prompt"]]);
+    const head = (b: string) => ({ [agent]: "prompt", [baseline]: b });
+    const files = [M(agent), M(baseline)];
+    expect(checks(pr([M(agent)], { head: { [agent]: "prompt" } }))).toEqual(["agent-eval"]);
+    expect(evaluate(pr(files, { head: head(save("sdk", hash)) }))).toEqual([]);
+    expect(checks(pr(files, { head: head(save("replay", hash)) }))).toEqual(["agent-eval"]);
+    expect(checks(pr(files, { head: head(save("sdk", "stale")) }))).toEqual(["agent-eval"]);
+    expect(evaluate(pr([M(agent)], { labels: ["eval-skip"] }))).toEqual([]);
+  });
+
+  it("hashes the same on Windows and Linux, in any order", () => {
+    const a: [string, string] = ["agents/a.md", "one\r\ntwo"];
+    const b: [string, string] = ["plugins/b.md", "three"];
+    expect(agentsHash([a, b])).toBe(agentsHash([b, ["agents/a.md", "one\ntwo"]]));
   });
 
   it("counts plugins but not avatars", () => {

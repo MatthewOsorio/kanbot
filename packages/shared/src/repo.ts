@@ -105,7 +105,7 @@ export function devcontainer(
     build?: { dockerfile?: unknown; context?: unknown };
   };
   try {
-    d = JSON.parse(json) ?? {};
+    d = (JSON.parse(json) ?? {}) as typeof d;
   } catch {
     return undefined;
   }

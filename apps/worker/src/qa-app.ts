@@ -99,8 +99,8 @@ export async function startApp(
       });
   let output = "";
   const keep = (b: Buffer) => (output = (output + b.toString()).slice(-8_000));
-  child.stdout?.on("data", keep);
-  child.stderr?.on("data", keep);
+  child.stdout.on("data", keep);
+  child.stderr.on("data", keep);
   let exited = child.exitCode !== null;
   const done = new Promise<void>((r) => child.once("exit", () => ((exited = true), r())));
   const stop = async () => {

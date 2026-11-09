@@ -2,6 +2,7 @@
 // reads the PR only as data (.github/workflows/guards.yml), so a PR can't switch off its own guard.
 // Run with BASE_SHA, HEAD_SHA and LABELS (a JSON array) set.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -15,6 +16,8 @@ export type PrDiff = {
   base: (path: string) => string | null;
   head: (path: string) => string | null;
   labels: ReadonlySet<string>;
+  /** Every agent and plugin file on the PR's head. */
+  agentFiles: string[];
 };
 export type Failure = { check: string; message: string; label?: string };
 
@@ -28,7 +31,14 @@ const WEAKENING: RegExp[] = [
   /\|\| true\b/,
   /--no-verify/,
   /\bretries:/,
+  /(?<!expect|assert)\.fails?\(/,
+  /\bexpect\(\s*(true|false|null|undefined|\d+|"[^"]*"|'[^']*')\s*\)/,
+  /\bas unknown as\b/,
+  /\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/,
 ];
+const DESTRUCTIVE_SQL =
+  /\b(DROP\s+(TABLE|COLUMN)|TRUNCATE|ALTER\s+COLUMN\s+\S+\s+(SET\s+DATA\s+)?TYPE|SET\s+NOT\s+NULL)\b/i;
+export const AGENT_FILE = /^agents\/[^/]+\.md$|^plugins\//;
 const CODE = /\.(ts|tsx|mjs|cjs|js|ya?ml)$/;
 const SELF = /(^|\/)ci-guards(\.test)?\.ts$/;
 const TEST = /\.(test|spec)\.tsx?$/;
@@ -44,6 +54,15 @@ const PROTECTED = [
   /^\.gitleaks\.toml$/,
   /^\.node-version$/,
   /test-network-guard\.ts$/,
+  /^apps\/worker\/src\/runtime\/(fence|redact)\.ts$/,
+  /^apps\/web\/(proxy|lib\/auth)\.ts$/,
+  /(^|\/)global-setup\.ts$/,
+  /(^|\/)repo-rules\.test\.ts$/,
+  /^\.claude\//,
+  /^Dockerfile$/,
+  /^docker-compose\.yml$/,
+  /^\.gitattributes$/,
+  /^\.npmrc$/,
   SELF,
 ];
 // The API routes that can't go through route(): auth redirects, SSE and the unauthenticated health check.
@@ -64,10 +83,19 @@ const TEST_CASE =
   /(?<![.\w])(?:it|test)(?:\.(?:only|skip|each|runIf|skipIf|concurrent|fails)\b)*(?:\([^)]*\))?\s*\(/g;
 const ASSERTION = /\bexpect(?:\.\w+)?\(/g;
 
+/** Ties evals/baseline.json to the exact agents it was run on. Line endings don't count. */
+export function agentsHash(files: [path: string, text: string][]) {
+  const hash = createHash("sha256");
+  for (const [path, text] of [...files].sort(([a], [b]) => (a < b ? -1 : 1)))
+    hash.update(`${path}\0${text.replace(/\r\n/g, "\n")}\0`);
+  return hash.digest("hex");
+}
+
 function manifest(text: string | null) {
   const pkg = text ? (JSON.parse(text) as Record<string, Record<string, string> | undefined>) : {};
   return {
     scripts: pkg.scripts ?? {},
+    installSettings: JSON.stringify([pkg.pnpm, pkg.packageManager, pkg.engines]),
     deps: new Set(
       ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"].flatMap((k) =>
         Object.keys(pkg[k] ?? {}),
@@ -98,20 +126,35 @@ export function evaluate(pr: PrDiff): Failure[] {
     }
   }
 
-  const tests = pr.files.filter((f) => TEST.test(f.path));
+  const tests = pr.files.filter((f) => TEST.test(f.path) || TEST.test(f.oldPath ?? ""));
   for (const f of tests.filter((t) => t.status === "D"))
     out.push({
       check: "test-loss",
       message: `${f.path}: test file deleted`,
       label: "allow-test-removal",
     });
+  for (const f of tests.filter((t) => t.status === "R" && !TEST.test(t.path)))
+    out.push({
+      check: "test-loss",
+      message: `${f.oldPath}: renamed so it no longer runs`,
+      label: "allow-test-removal",
+    });
+  for (const f of pr.files)
+    if (f.status !== "A" && /^fixtures\/(runs|golden)\//.test(f.oldPath ?? f.path))
+      out.push({
+        check: "test-loss",
+        message: `${f.path}: existing replay fixture changed`,
+        label: "allow-test-removal",
+      });
   for (const [what, pattern] of [
     ["test cases", TEST_CASE],
     ["assertions", ASSERTION],
   ] as const) {
     const delta = tests.reduce(
       (n, f) =>
-        n + count(f.status === "D" ? null : pr.head(f.path), pattern) - count(baseOf(f), pattern),
+        n +
+        count(f.status !== "D" && TEST.test(f.path) ? pr.head(f.path) : null, pattern) -
+        count(baseOf(f), pattern),
       0,
     );
     if (delta < 0)
@@ -125,13 +168,21 @@ export function evaluate(pr: PrDiff): Failure[] {
   for (const f of pr.files.filter((c) => PROTECTED.some((p) => p.test(c.path))))
     out.push({
       check: "protected",
-      message: `${f.path}: CI's own rules changed`,
+      message: `${f.path}: protected file changed`,
       label: "ci-change",
     });
 
   for (const f of pr.files.filter((c) => /^packages\/shared\/drizzle\/[^/]+\.sql$/.test(c.path)))
     if (f.status !== "A")
       out.push({ check: "migrations", message: `${f.path}: migrations are append-only` });
+  for (const [path, lines] of Object.entries(pr.added))
+    if (/^packages\/shared\/drizzle\/[^/]+\.sql$/.test(path))
+      for (const line of lines.filter((l) => DESTRUCTIVE_SQL.test(l)))
+        out.push({
+          check: "migrations",
+          message: `${path}: can lose data on deploy: "${line.trim().slice(0, 100)}"`,
+          label: "destructive-migration",
+        });
   const journal = "packages/shared/drizzle/meta/_journal.json";
   if (pr.files.some((f) => f.path === journal)) {
     const entries = (t: string | null) =>
@@ -141,13 +192,17 @@ export function evaluate(pr: PrDiff): Failure[] {
       out.push({ check: "migrations", message: `${journal}: existing entries changed` });
   }
 
-  const agentChanged = pr.files.some((f) => /^agents\/[^/]+\.md$|^plugins\//.test(f.path));
-  if (agentChanged && !pr.files.some((f) => f.path === "evals/baseline.json"))
-    out.push({
-      check: "agent-eval",
-      message: "an agent or plugin changed without a new evals/baseline.json (§8)",
-      label: "eval-skip",
-    });
+  if (pr.files.some((f) => AGENT_FILE.test(f.path) || AGENT_FILE.test(f.oldPath ?? ""))) {
+    const saved = JSON.parse(pr.head("evals/baseline.json") ?? "{}") as Record<string, unknown>;
+    const hash = agentsHash(pr.agentFiles.map((p) => [p, pr.head(p) ?? ""]));
+    if (saved.runtime !== "sdk" || saved.agentsHash !== hash)
+      out.push({
+        check: "agent-eval",
+        message:
+          "an agent or plugin changed: evals/baseline.json must come from `pnpm eval:agents --baseline` with real agents on these exact files (§8)",
+        label: "eval-skip",
+      });
+  }
 
   for (const f of changed.filter((c) => /(^|\/)package\.json$/.test(c.path))) {
     if (f.path.startsWith("fixtures/")) continue;
@@ -156,8 +211,16 @@ export function evaluate(pr: PrDiff): Failure[] {
     for (const dep of after.deps)
       if (!before.deps.has(dep))
         out.push({ check: "new-dep", message: `${f.path}: adds ${dep}`, label: "new-dep" });
-    if (f.status !== "A" && !sameScripts(before.scripts, after.scripts))
-      out.push({ check: "protected", message: `${f.path}: scripts changed`, label: "ci-change" });
+    if (
+      f.status !== "A" &&
+      (!sameScripts(before.scripts, after.scripts) ||
+        before.installSettings !== after.installSettings)
+    )
+      out.push({
+        check: "protected",
+        message: `${f.path}: scripts or install settings changed`,
+        label: "ci-change",
+      });
   }
 
   for (const f of changed) {
@@ -250,6 +313,9 @@ function main() {
     base: show(mergeBase),
     head: show(HEAD_SHA),
     labels: new Set(JSON.parse(LABELS ?? "[]") as string[]),
+    agentFiles: git("ls-tree", "-r", "--name-only", HEAD_SHA)
+      .split("\n")
+      .filter((p) => AGENT_FILE.test(p)),
   });
 
   if (files.some((f) => f.path === "pnpm-lock.yaml")) {
