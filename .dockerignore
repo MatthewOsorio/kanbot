@@ -7,4 +7,4 @@
 .env
 .env.*
 !.env.example
-evals/results
+evals

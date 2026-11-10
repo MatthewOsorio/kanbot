@@ -43,7 +43,7 @@ jobs:
           git diff --no-renames --name-status HEAD^1 HEAD | while read -r status path; do
             why=""
             case "$path" in
-              .github/* | scripts/block-command.mts | *eslint.config.* | *tsconfig*.json | *vitest.config.* | *playwright.config.* | \
+              .github/* | *eslint.config.* | *tsconfig*.json | *vitest.config.* | *playwright.config.* | \
                 .prettierignore | knip.json | pnpm-workspace.yaml | *repo-rules.test.ts | *test-network-guard.ts)
                 why="changes the checks themselves" ;;
               */runtime/fence.ts | */runtime/redact.ts | apps/web/proxy.ts | apps/web/lib/auth.ts)
