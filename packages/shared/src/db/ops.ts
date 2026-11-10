@@ -1,6 +1,6 @@
 // Ticket/run operations shared by the web app (manual moves, cancel, retry) and the worker (auto-moves).
 // Each takes the caller's transaction and writes activity + publishes, per the repo convention.
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import { agentFileExists } from "../agents";
 import { activeRunStates } from "../schemas";
@@ -212,7 +212,9 @@ export async function spendToday(tx: Pick<Tx, "select">) {
       spent: sql<number>`coalesce(sum(${runs.costUsd}) filter (where ${runs.endedAt} >= ${midnight}), 0)::float8`,
       reserved: sql<number>`coalesce(sum(${runs.budgetUsd}) filter (where ${runs.state} = 'running'), 0)::float8`,
     })
-    .from(runs);
+    .from(runs)
+    // Only today's rows: the claim loop asks every 5 s, and runs only grows.
+    .where(or(gte(runs.endedAt, midnight), eq(runs.state, "running")));
   return r!;
 }
 

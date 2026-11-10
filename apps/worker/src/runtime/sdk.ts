@@ -11,6 +11,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import { verdictShape } from "@kanbot/shared";
+import { withoutSecrets } from "../commands";
 import { appBrowser } from "./browser";
 import { appRequestUrl, BROWSER_TOOLS, checkToolCall, HTTP_TOOL } from "./fence";
 import type { AgentRuntime, ApiError, RuntimeEvent, RuntimeResult } from "./types";
@@ -144,9 +145,10 @@ export class SdkRuntime implements AgentRuntime {
     const abortController = new AbortController();
     const onAbort = () => abortController.abort(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
-    // The agent never needs our database; DATABASE_URL stays out of its environment. The SDK itself
-    // needs the API key, so the subprocesses it starts (Bash, hooks) get credentials scrubbed (§7, §14).
-    const { DATABASE_URL: _db, ...base } = process.env;
+    // The agent never needs our database or the keys behind the owner's session; they stay out of its
+    // environment. The SDK itself needs the API key, so the subprocesses it starts (Bash, hooks) get
+    // credentials scrubbed (§7, §14).
+    const base = withoutSecrets();
     // Per-command timeout for the agent's Bash tool: the same 10 minutes as the worker's own install.
     const env = {
       ...base,
