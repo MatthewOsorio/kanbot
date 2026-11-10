@@ -4,6 +4,6 @@
   "workspaces": {
     ".": {},
     "apps/web": {},
-    "apps/worker": { "entry": ["src/ci-guards.ts", "test/**/*.ts"] }
+    "apps/worker": { "entry": ["test/**/*.ts"] }
   }
 }

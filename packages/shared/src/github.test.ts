@@ -1,9 +1,9 @@
 import { createVerify, generateKeyPairSync, randomBytes } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { appJwt, decrypt, encrypt } from "./github";
 
 describe("encrypt", () => {
-  beforeAll(() => {
+  beforeEach(() => {
     process.env.KANBOT_ENCRYPTION_KEY = randomBytes(32).toString("base64");
   });
 

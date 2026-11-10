@@ -58,6 +58,37 @@ describe("code conventions", () => {
     expect(routes.filter((p) => !read(p).includes("idParam"))).toEqual([]);
   });
 
+  it("API handlers go through route(), bar auth redirects, SSE and the health check", () => {
+    const unwrapped = [
+      "auth/callback",
+      "auth/login",
+      "auth/logout",
+      "events",
+      "github/callback",
+      "github/setup",
+      "health",
+    ].map((r) => `apps/web/app/api/${r}/route.ts`);
+    const routes = sources.filter((p) => /^apps\/web\/app\/api\/.*\/route\.ts$/.test(p));
+    expect(routes.length).toBeGreaterThan(unwrapped.length);
+    expect(routes.filter((p) => !unwrapped.includes(p) && !/\broute\(/.test(read(p)))).toEqual([]);
+  });
+
+  it("keeps web and worker apart", () => {
+    const imports = (p: string, other: string) =>
+      new RegExp(`from\\s+["'][^"']*(@kanbot/${other}|\\.\\./${other}/)`).test(read(p));
+    expect(
+      sources.filter(
+        (p) =>
+          (p.startsWith("apps/web/") && imports(p, "worker")) ||
+          (p.startsWith("apps/worker/") && imports(p, "web")),
+      ),
+    ).toEqual([]);
+  });
+
+  it("never sorts with localeCompare, which breaks fractional-index order", () => {
+    expect(sources.filter((p) => read(p).includes(".localeCompare("))).toEqual([]);
+  });
+
   it("sorts tickets by position in byte order", () => {
     // Fractional-index keys only sort correctly with collate "C", which a bare asc() doesn't give.
     expect(
