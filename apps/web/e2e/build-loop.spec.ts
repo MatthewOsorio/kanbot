@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prepareSampleRepo } from "@kanbot/shared/db/testing";
+import { prepareSampleRepo } from "@kanbot/shared/testing";
 import { expect, test, type Page } from "@playwright/test";
 
 const column = (p: Page, name: string) => p.getByRole("region", { name, exact: true });

@@ -1,5 +1,5 @@
 import { createLinkBody } from "@kanbot/shared";
-import { projects, ticketChanged, ticketLinks, tickets } from "@kanbot/shared/db";
+import { projects, ticketChanged, ticketLinks, tickets } from "@kanbot/shared/server";
 import { and, eq, or } from "drizzle-orm";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";

@@ -1,5 +1,5 @@
 import { ANTHROPIC_API_ERROR } from "@kanbot/shared";
-import { runEvents, runs } from "@kanbot/shared/db";
+import { runEvents, runs } from "@kanbot/shared/server";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 
@@ -9,7 +9,7 @@ type Status = "ok" | "degraded" | "down" | "unknown";
 
 /**
  * Health of the parts the board depends on (requirements §8). The worker is "up" while it holds a
- * Postgres connection named kanbot-worker; Anthropic is judged from the latest runs. GitHub stays "unknown" until phase 5c.
+ * Postgres connection named kanbot-worker; Anthropic is judged from the latest runs. GitHub stays "unknown" until M6.
  */
 export async function GET() {
   try {

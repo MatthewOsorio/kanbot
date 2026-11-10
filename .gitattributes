@@ -1,2 +1,5 @@
 # The sample repo is copied into fresh git repos and replay patches are applied to it: keep it LF everywhere.
 fixtures/sample-repo/** text eol=lf
+
+# Generated: collapsed in diffs and left out of language stats.
+pnpm-lock.yaml linguist-generated

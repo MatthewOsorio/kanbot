@@ -2,9 +2,9 @@ import { cp } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
-import { git } from "../repo";
-import { createDb } from "./index";
-import { settings } from "./schema";
+import { git } from "../server/repo";
+import { createDb } from "../server/db";
+import { settings } from "../server/db/schema";
 
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgres://kanbot:kanbot@localhost:5432/kanbot_test";

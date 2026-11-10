@@ -1,8 +1,6 @@
 // Ship (requirements §4, FR-43): after Captain Ship-It's run, the worker (never an agent) pushes the
 // ticket branch and opens or updates its PR with the App's installation token.
-import type { Db } from "@kanbot/shared/db";
-import { gitAuth, loadGitHubApp, repoToken, upsertPr } from "@kanbot/shared/github";
-import { git } from "@kanbot/shared/repo";
+import { type Db, git, gitAuth, loadGitHubApp, repoToken, upsertPr } from "@kanbot/shared/server";
 
 export type ShippedPr = { number: number; url: string; headSha: string };
 
@@ -38,7 +36,7 @@ export async function pushAndOpenPr(
 /**
  * §9: before each run, bring the clone's default branch up to GitHub's (merged PRs), so new ticket branches and
  * diffs start from it. Fast-forward only; the clone is Kanbot's, agents only read it.
- * shortcut: best effort (a failed fetch or a diverged default branch only warns), until 5c's rebase loop reports it.
+ * shortcut: best effort (a failed fetch or a diverged default branch only warns), until M6's rebase loop (FR-51) reports it.
  */
 export async function pullDefaultBranch(
   db: Db,
@@ -62,7 +60,7 @@ export async function pullDefaultBranch(
 
 /**
  * FR-48: before a run on a ticket with a PR, take the commits pushed to its branch on GitHub (the owner's own).
- * Fast-forward only, so nobody's commits are rewritten; a branch that diverged stops the run (rebasing is 5c).
+ * Fast-forward only, so nobody's commits are rewritten; a branch that diverged stops the run (rebasing is M6, FR-51).
  */
 export async function pullBranch(
   db: Db,

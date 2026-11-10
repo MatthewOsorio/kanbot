@@ -10,3 +10,6 @@ playwright-report/
 coverage/
 apps/web/e2e/.auth.json
 .kanbot-repos/
+
+# Claude Code local settings
+.claude/

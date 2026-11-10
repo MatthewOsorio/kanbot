@@ -2,8 +2,15 @@ import { execFile } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { columns, projects, runEvents, runs, tickets, type Db } from "@kanbot/shared/db";
-import { removeWorktree } from "@kanbot/shared/repo";
+import {
+  columns,
+  type Db,
+  projects,
+  removeWorktree,
+  runEvents,
+  runs,
+  tickets,
+} from "@kanbot/shared/server";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { worktreesRoot } from "./worktree";
 

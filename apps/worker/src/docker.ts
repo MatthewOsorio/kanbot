@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { posix } from "node:path";
 import { promisify } from "node:util";
 import { IMAGE_REF } from "@kanbot/shared";
-import { git, type ProjectConfig } from "@kanbot/shared/repo";
+import { git, type ProjectConfig } from "@kanbot/shared/server";
 
 const execFileP = promisify(execFile);
 

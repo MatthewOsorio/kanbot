@@ -19,8 +19,8 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { uuidv7 } from "../ids";
-import type { Baseline, Onboarding } from "../onboarding";
+import { uuidv7 } from "../../ids";
+import type { Baseline, Onboarding } from "../../onboarding";
 import type { ProjectConfig } from "../repo";
 import {
   activityActions,
@@ -37,7 +37,7 @@ import {
   runStates,
   statusFlags,
   ticketTypes,
-} from "../schemas";
+} from "../../schemas";
 
 const id = () => uuid("id").primaryKey().$defaultFn(uuidv7);
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();

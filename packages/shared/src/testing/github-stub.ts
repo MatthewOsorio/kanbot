@@ -4,7 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { CheckRun, Review, ReviewComment } from "./github";
+import type { CheckRun, Review, ReviewComment } from "../server/github";
 
 export type GitHubStub = {
   url: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadAgent, parseAgentFile } from "./agents";
-import { DEFAULT_COLUMNS } from "./workflow";
+import { DEFAULT_COLUMNS } from "../workflow";
 
 const file = (front: string, body = "You plan.") => `---\n${front}\n---\n${body}\n`;
 const valid = `slug: plan-b

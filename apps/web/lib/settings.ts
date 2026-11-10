@@ -1,5 +1,5 @@
 import type { patchSettingsBody } from "@kanbot/shared";
-import { getSettings, spendToday, updateSettings } from "@kanbot/shared/db";
+import { getSettings, spendToday, updateSettings } from "@kanbot/shared/server";
 import type { z } from "zod";
 import { db } from "./db";
 

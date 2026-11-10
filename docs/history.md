@@ -1,6 +1,6 @@
 # Milestone history
 
-What M1 to M4.5 decided and how each changed the spec, copied from their reports. How-to-run notes, test logs and real-agent check logs were dropped; the full reports are in git history (`git log -- docs/m3-report.md`). What is still to build is in `requirements.md` §16; the current milestone's report is `m5-report.md`.
+What M1 to M5 decided and how each changed the spec, copied from their reports. How-to-run notes, test logs and real-agent check logs were dropped; the full reports are in git history (`git log -- docs/m3-report.md`, `docs/m5-report.md`). What is still to build is in `requirements.md` §16. A milestone in progress keeps a living `docs/m<n>-report.md`, folded in here when it closes.
 
 ## M1: board without agents
 
@@ -205,8 +205,58 @@ A visual pass over the board and the drawer, plus a record of which agent change
 - **Themes:** light and dark, the OS setting by default, a toggle in the top bar, on Home and in Settings, remembered per browser (`theme-toggle.tsx`). Design tokens (slate and indigo, status colors) live in `apps/web/app/globals.css`; fonts are Plus Jakarta Sans and JetBrains Mono. `brand.tsx` holds the wordmark, and the home page moved into `home.tsx`.
 - **Agent colors:** agent frontmatter has an optional `color` (`packages/shared/src/agents.ts`; default slate). It marks the agent's column stripe, its cards' left stripe and its glyph avatar. A gate column is dashed and says "You decide".
 - **The ticket drawer is a centered dialog** (`ui/dialog.tsx`; `ui/sheet.tsx` removed), up to 85% of the screen height and scrolling inside.
-- **Who changed what:** `runs.files_changed` (migration 0009) holds the files a run itself changed in the worktree, committed or not, excluding files an earlier run left dirty. The worker records it even when the post-run checks fail (`apps/worker/src/run.ts`). `getDiff` in `apps/web/lib/tickets.ts` uses it to name the agents above each file in the Diff tab, and `getTicket` joins each artifact to the agent whose run produced it.
+- **Who changed what:** `runs.files_changed` holds the files a run itself changed in the worktree, committed or not, excluding files an earlier run left dirty. The worker records it even when the post-run checks fail (`apps/worker/src/run.ts`). `getDiff` in `apps/web/lib/tickets.ts` uses it to name the agents above each file in the Diff tab, and `getTicket` joins each artifact to the agent whose run produced it.
 
 **Changes to the spec:** Where things stand; §8 agent frontmatter (`color`); §11 `runs.files_changed`; §13 Board, Ticket drawer and General; §16, where the "Dark theme" row is gone from "Still to build".
 
 **Checked:** the owner checked the revamped UI in a real browser. The Testy eval in the section above passed.
+
+## M5: ship and deploy (closed 2026-11-10)
+
+*Done when:* a ticket goes from Backlog to a human-approved, merged PR. Met on 2026-11-07 on Neural-Noir-Website (NNWEB-3 and NNWEB-4). Phases 5c (keeping branches current) and 6 (leftovers) moved to M6 on 2026-11-10.
+
+### Key decisions
+
+- **Owner decisions at the start (2026-11-06).**
+  - Rootless Docker, with the plain `docker` CLI and no socket proxy.
+  - No Droplet or domain: Kanbot runs on the owner's PC in its own WSL distro. A paid Droplet was more than the owner wanted, and nothing in "done when" needs a public server. A public server is optional and moved to M6.
+  - Onboarding steps 8–9 (hotspot groups, a drafted CLAUDE.md as a PR) moved to M6.
+- **Polling, not webhooks.** GitHub can't reach a PC behind NAT. One poll reads each watched PR, its head's check runs and its reviews: three calls per ticket per minute, far below the App's limit. Webhooks come with a public server (M6).
+- **GitHub's moves are data like the run rules** (`GITHUB_RULES`, `afterGitHub()`), and the watcher reuses `finish()`'s move-and-start, so a CI bounce resumes Sir Codes-a-Lot's session and the bounce limit sends it to Blocked like any other bounce.
+- **GitHub first, then one transaction that re-checks the ticket.** Nothing is locked while GitHub answers; if the owner moved the ticket meanwhile, the tick skips it and the next one sees it fresh.
+- **Only Ship (after the push) and PR Review are watched.** Requested changes are imported only from PR Review (`last_review_id` marks what's handled), as the owner's comments, so Sir Codes-a-Lot's context already carries them.
+- **The owner's pushes: fast-forward only** (FR-48). A diverged branch stops the run with a clear message instead of a merge commit or a rebase.
+- **Project commands run in the project's own image**, one `docker run` per command with a shared cache volume.
+  - No image means the host toolchain, in development only; a containerized worker always has one (`KANBOT_DEFAULT_IMAGE` last).
+  - The image is read only from the database, so an agent can't change its own sandbox. Kanbot's code detects it and builds it from the devcontainer's Dockerfile (not a root `Dockerfile`, which is usually the production image) via `git archive` of the default branch, tagged by tree hash. Images are built on the server, with no registry.
+  - The fence checks the agent's command first and rewrites second, so the fence's rules are unchanged.
+- **A dedicated WSL distro**, with automount and interop off, so an escaped project container can't reach Windows files. The worker runs as root inside its container, which under rootless Docker is the host's unprivileged user; the SDK runs in `dontAsk` mode, which doesn't refuse root.
+- **Login without a session table.** One owner, one cookie: a signed id and an expiry, checked by the proxy with no database call. The owner is whoever created the GitHub App. Plain `fetch` and `node:crypto`, no Octokit. URLs come from the browser's Host header, because Next names its bind host.
+- **Onboarding's GitHub calls are the web app's, git is the worker's.** Detection is Kanbot's code, not an agent's. Baseline failures are skipped by the checks gate, not compared (a new break in an already-failing command is caught by review, QA and CI). The starter workflow runs in the project's image. Branch protection binds admins and never overwrites rules already there; it is checked at setup only.
+- **QA's browser is Kanbot's own five tools on `playwright-core`, not the Playwright plugin**: the plugin has about 25 tools, so fencing it would take a URL check per tool. Every request is fenced in one place (the browser context's routing). Screenshots live in Postgres (`bytea`), so they go with the ticket.
+- **The backup is a host cron job, not a service**, and deploys build on the server after CI.
+- **Migrations squashed (2026-11-10).** The 19 migrations (0000 to 0018) and their snapshots became one `0000_init`, because no database held real data. Anyone with an older local database drops it and runs `pnpm db:migrate` again. CI's "migrations are append-only" step was removed the same day, because the squash deletes the whole chain; add it back once a database holds real data. Older entries in this file that name a migration number refer to the old chain.
+
+### Changes to the spec (`requirements.md`)
+
+- **§3:** GitHub's rows (`GITHUB_RULES`); Ship's `success` keeps the ticket in Ship flagged `pr_open`; merged and closed apply from Ship; a closed PR's worktree is removed. Manual moves gained `skip_gates`, `no_pr`, `pr_open`, `unprotected`, `qa_setup`.
+- **§4:** Ship-It writes and the worker opens the PR; "How QA runs" (the app in the image, the browser and its fence, screenshots, a start command required, a forwarder container for any port).
+- **§7:** "Project toolchains" and "Deployment" (containers, profiles, rootless Docker, backups, the nightly cleanup, WSL and server setups).
+- **§8:** the checks gate skips commands that failed at baseline; stall rules count browser calls; the Playwright plugin isn't used; CI enforces the eval rule.
+- **§10:** onboarding as built (steps 1–7 and 10), the two-click GitHub App setup, project env vars, what counts as CI. The Merge button and the "small fix" checkbox moved to M6.
+- **§11:** `settings.github_app`, `projects.onboarding`, `projects.env`, `image`, `dockerfile`, `screenshots`; `tickets.ci_state`, `review_state`, `last_review_id`; new `activity` actions.
+- **§12:** auth on every route; the GitHub, onboarding and `approve-ship` endpoints; `POST /api/tickets/:id/move` answers `run_active` before closing an open PR.
+- **§14:** agent and host project-command environments lose Kanbot's own credentials; commands run in the project's image.
+- **§16:** M5 rows moved off or to M6; "Where things stand" rewritten.
+
+### Known limits carried over
+
+- Detection covers Node, Python and Go at the repo root. A repo whose workflows never report a check on the ticket's branch leaves the ticket in Ship (drag it on). The CI log tail comes only from GitHub Actions.
+- A GitHub App is tied to the address it was created from; a second address needs a callback URL added on GitHub.
+- A move to Done closes the PR before the move's transaction; if the move then fails, the PR is closed and the ticket stays put. The bot identity is looked up once per worker process.
+- Settings are seeded once from the default branch; a devcontainer added later needs Image set by hand. Devcontainer `features`, `postCreateCommand` and docker-compose devcontainers aren't applied.
+- Python `pip install --user` packages share one cache volume across projects. The images are about 2.9 GB each. Docker Desktop sometimes fails to unpack a first pull; a retry works.
+- Project env vars can't hold multi-line values and aren't pushed to Actions secrets (owner's choice).
+- The eval doesn't run Ship-It: its golden tickets use local projects, where Ship stays a gate. Needs a stub-backed GitHub project in the eval, a paid run with the owner's OK.
+- NetGPT is a desktop app, so its QA can't pass until Kanbot can drive non-web projects (an M6 row).
+- The logon task that keeps the WSL distro running is documented but untested, and rootless Docker's host network in the owner's `kanbot` distro was never checked for real.

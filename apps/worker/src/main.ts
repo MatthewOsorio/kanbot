@@ -1,5 +1,5 @@
-import { EVENTS_CHANNEL, type EventEnvelope } from "@kanbot/shared";
-import { createDb } from "@kanbot/shared/db";
+import { type EventEnvelope, EVENTS_CHANNEL } from "@kanbot/shared";
+import { createDb } from "@kanbot/shared/server";
 import { Client } from "pg";
 import { nightlyCleanup } from "./cleanup";
 import { onboardNext, requeueOnboarding } from "./onboard";
