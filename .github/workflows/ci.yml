@@ -1,13 +1,11 @@
-# Typecheck, lint, worker tests and e2e on every push and PR (requirements §15). Agents only ever
-# run on the replay runtime here: no API key, no spend.
+# The only CI (requirements §15): the same checks on every push to main and every PR, each one a command
+# you can run locally. Agents only ever run on the replay runtime here: no API key, no spend.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: "17 6 * * *" # nightly, to shake out order-dependent tests
 
 permissions:
   contents: read
@@ -65,9 +63,6 @@ jobs:
             exit 1
           fi
       - run: pnpm test
-      - name: Shuffled tests (nightly)
-        if: github.event_name == 'schedule'
-        run: pnpm --filter @kanbot/shared --filter @kanbot/worker exec vitest run --sequence.shuffle
       - run: pnpm eval:agents
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -79,7 +74,6 @@ jobs:
 
   # The deploy images (Dockerfile, docker-compose.yml) still build, so a broken one never reaches the server.
   images:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
