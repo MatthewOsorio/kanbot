@@ -51,6 +51,7 @@ fixtures/runs/       replay scripts: <agent>/<scenario>[.<n>].json; a ticket lab
 fixtures/sample-repo/ zero-dependency todo app (with .kanbot/project.yml) copied into fresh git repos by prepareSampleRepo()
 fixtures/golden/     the golden tickets for `pnpm eval:agents`
 docs/requirements.md the spec;  docs/deploy.md  running Kanbot: A) its own WSL distro, B) a server (rootless Docker, .env, deploys, backups)
+README.md            the public front page; its images are in docs/images/ (the sample repo on the replay runtime: retake them when the UI changes)
 Dockerfile           --target web / --target worker (worker adds git + docker CLI);  Caddyfile  HTTPS in front of web
 docker-compose.yml   db (local default); profile app adds migrate, web (127.0.0.1), worker (host network, Docker socket); profile public adds caddy
 ```
