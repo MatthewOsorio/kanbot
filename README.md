@@ -228,7 +228,6 @@ Still to come: rebasing branches as main moves, the two missing agents, a public
 
 - [`docs/requirements.md`](docs/requirements.md): the spec, with what is built and what is left (§16).
 - [`docs/history.md`](docs/history.md): what each finished milestone decided.
-- [`docs/m5-report.md`](docs/m5-report.md): the milestone in progress.
 
 ## Credits
 

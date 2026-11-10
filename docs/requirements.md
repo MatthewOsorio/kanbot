@@ -1,10 +1,10 @@
 # Kanbot — Technical Requirements
 
-Last updated 2026-11-07 (M5 phase 5a: Captain Ship-It opens the PR).
+Last updated 2026-11-10 (M5 closed; its unfinished rows moved to M6).
 
 ## Where things stand
 
-- **Built (M1–M4.5, plus work since):**
+- **Built (M1–M5, plus work since):**
   - The board: projects, tickets, criteria, comments, activity, drag and drop, live updates over SSE.
   - The worker: a runs-table queue, the Claude Agent SDK runtime behind a permission-hook fence, and a replay runtime for tests.
   - Four agents work the build loop:
@@ -14,13 +14,13 @@ Last updated 2026-11-07 (M5 phase 5a: Captain Ship-It opens the PR).
     - Testy McTestface (QA), who checks each criterion against the app the worker starts, over HTTP and in a headless browser (screenshots on the ticket), with tests where the project has a test setup.
   - Bounce-backs and the bounce limit, the overlap check, stall detection, Ponytail, and the golden-ticket eval.
   - Unblocking (M4): Blocked with Rubber Duckworth, Resume with an answer, session resume on bounce-backs, in-app notifications; the daily cap, Pause all and automatic resume after an outage; Archie's retro and worktree removal at Done; ticket links; project Settings; the cost total on each ticket; CI.
-  - M5 so far (in progress, `docs/m5-report.md`): project commands, the QA app and agents' project commands run in each project's own container image (§7); the GitHub App's two-click setup and Sign in with GitHub on every route (§10, §12); onboarding a GitHub repo, with agents off until branch protection is applied or overridden (§10); QA needs a start command; project env vars, encrypted; the nightly cleanup; Captain Ship-It writes the PR description and the worker opens the PR (FR-43); Testy checks the app in headless Chromium, with screenshots on the ticket (§4); a 60 s poll moves tickets on CI, reviews, merges and closes (FR-44 to FR-48). Kanbot runs on the owner's PC in its own WSL distro; a public server is optional and later.
+  - Ship and deploy (M5, closed 2026-11-10): project commands, the QA app and agents' project commands run in each project's own container image (§7); the GitHub App's two-click setup and Sign in with GitHub on every route (§10, §12); onboarding a GitHub repo, with agents off until branch protection is applied or overridden (§10); QA needs a start command; project env vars, encrypted; the nightly cleanup; Captain Ship-It writes the PR description and the worker opens the PR (FR-43); Testy checks the app in headless Chromium, with screenshots on the ticket (§4); a 60 s poll moves tickets on CI, reviews, merges and closes (FR-44 to FR-48). Kanbot runs on the owner's PC in its own WSL distro; a public server is optional and later.
   - Quality gates and epics (M4.5): the worker's checks gate (build, lint and test after every build run, before Code Review); Nancy's security pass with Cloudflare's security-audit skill; epics, where Plan B splits a ticket or a technical doc into proposed tickets the owner accepts into Backlog.
   - The UI revamp (after M4.5): light and dark themes with a toggle, slate and indigo design tokens, Plus Jakarta Sans and JetBrains Mono, and agent colors: each agent file names a color, which marks its column, its cards and its glyph avatar. The ticket drawer is a centered dialog, and its artifacts and diff files name the agent that made them (`runs.files_changed`).
 - **How it runs:** locally only, bound to 127.0.0.1, behind Sign in with GitHub (the owner only). Tested on Windows only. Project commands, image, env vars, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
-- **Next: the rest of M5 (ship and deploy):** the real run of 5b on a web-app repo, then keeping branches current (5c).
+- **Next: M6.** It starts with keeping branches current (rebase before each run and when main moves, FR-51; GitHub status in `/api/health`), then the leftovers moved from M5 (§16).
 
-The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it. What the finished milestones decided is in `docs/history.md`; M5's report is `docs/m5-report.md` (in progress).
+The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it. What the finished milestones decided is in `docs/history.md`.
 
 ## 1. Overview
 
@@ -749,7 +749,7 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | GET | `/api/runs/:id/events?after=seq` | Paged run log (for catching up before streaming). | Built |
 | POST | `/api/runs/:id/cancel` | Cancel a run. | Built |
 | POST | `/api/tickets/:id/approve-plan` | Moves the ticket to the bottom of Ready, the same as dropping it there. 409 unless the ticket is in Planning, has a plan, and has no active run. | Built |
-| POST | `/api/tickets/:id/approve-ship` | "Approve and ship": moves a ticket that passed QA to the bottom of Ship and starts Ship's agent (none until Captain Ship-It, M5 phase 5). 409 `not_approvable` unless it is in QA flagged `awaiting_approval`. | Built |
+| POST | `/api/tickets/:id/approve-ship` | "Approve and ship": moves a ticket that passed QA to the bottom of Ship and starts Ship's agent (Captain Ship-It). 409 `not_approvable` unless it is in QA flagged `awaiting_approval`. | Built |
 | POST | `/api/tickets/:id/revise-plan` | Body `{requestMd}`. Starts Plan B with the request (UC-3). 409 unless the ticket is in Planning, has a plan, and has no active run. | Built |
 | POST | `/api/runs/:id/retry` | Start a fresh run of the same agent. If the failure moved the ticket (e.g. to Blocked), it goes back to the run's column first. | Built |
 | GET | `/api/health` | Database, worker, Anthropic and GitHub status (section 8). | Built |
@@ -884,32 +884,28 @@ Build in six milestones (plus M4.5, inserted on 2026-11-05), each ending in some
 3. **M3 — Build loop.** *(Done; `docs/history.md`.)* Worktree manager, Sir Codes-a-Lot, Nitpick Nancy, Testy McTestface, transition table with auto-moves and bounce-backs, bounce limit, diff viewer, post-run path checks, touch sets, hotspot groups, the serialize overlap check, Nancy's cross-ticket review, stall detection (repetition), the plugin loader with Ponytail, the sample repo, recorded runs and the golden-ticket quality check. *Done when:* a small feature goes Ready → In Progress → Review → QA on its own, including at least one bounce-back.
 4. **M4 — Unblock (local).** *(Done; `docs/history.md`.)* Blocked column with Rubber Duckworth, resume with answer, Archie's retro and worktree cleanup, in-app notifications, cost tracking and daily cap, Pause all, project Settings in the database, ticket links. Still local: no GitHub, no deployment. *Done when:* a `needs_input` run can be answered and resumed, Pause all and the daily cap stop new runs, and a ticket moved to Done gets Archie's retro and loses its worktree.
    - **M4.5 — Quality gates and epics (local).** *(Done; `docs/history.md`.)* The checks gate after Sir Codes-a-Lot (§8), Nancy's security pass with the vendored security-audit skill (§8), and epics: Plan B splits an epic or a technical doc into proposed tickets the owner accepts (UC-11). Pulled forward from M6: epics and `proposedTickets`. *Done when:* a branch that fails its tests goes back to Sir Codes-a-Lot before review, Nancy runs the security skill, and an epic's accepted proposals land in Backlog as linked children.
-5. **M5 — Ship and deploy.** Running Kanbot in its own WSL distro (section 7; a public server moved to M6) with Sign in with GitHub and the nightly disk cleanup; **project commands and the QA app in each project's own container image (section 7, "Project toolchains"), built first, since without it the server can only build, test and run Node projects**; the onboarding walkthrough (section 10) with GitHub App connection and branch-protection check, Captain Ship-It with PR creation, CI status tracking, the PR Review gate with review-comment bounce-backs, merge detection, auto-rebase when main moves. Also owns its rows in "Still to build" below. *Done when:* a ticket goes from Backlog to a human-approved, merged PR.
+5. **M5 — Ship and deploy.** *(Done 2026-11-10; `docs/history.md`. Auto-rebase when main moves, below, moved to M6.)* Running Kanbot in its own WSL distro (section 7; a public server moved to M6) with Sign in with GitHub and the nightly disk cleanup; **project commands and the QA app in each project's own container image (section 7, "Project toolchains"), built first, since without it the server can only build, test and run Node projects**; the onboarding walkthrough (section 10) with GitHub App connection and branch-protection check, Captain Ship-It with PR creation, CI status tracking, the PR Review gate with review-comment bounce-backs, merge detection, auto-rebase when main moves. Also owns its rows in "Still to build" below. *Done when:* a ticket goes from Backlog to a human-approved, merged PR.
 6. **M6 — Polish (Later items).** Dr. Rabbit Hole and spikes, epics with child tickets, auto-pull from Ready, Marge Conflict, stacked branches, Agents and Costs pages, editable workflow columns, webhooks, container mode, approving from a phone (plans, ship, Blocked answers, pause all), and the kanbot CLI.
 
 MVP = M1 through M5. Everything runs on the owner's PC: M5 moved Kanbot into its own WSL distro and polls GitHub instead of receiving webhooks; a public server is optional (M6).
 
 ### Still to build
 
-Everything the spec describes that isn't built yet, with the milestone that builds it. Whoever builds that milestone owns the row. Anything deferred, cut or moved goes here in the same change. Finished rows are deleted; what each milestone built is in its report (`docs/m<n>-report.md`).
-
-**M5**
-
-| Item | Spec | Notes |
-| --- | --- | --- |
-| `blockWritesOutsideWorkingDirectories` | §7, §14 | Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
-| Running Kanbot in its own WSL distro with rootless Docker | §7 | The files and `docs/deploy.md` (setup A) exist; the stack was checked in WSL on rootful Docker. The owner sets up the `kanbot` distro, which checks rootless Docker for real. |
-| Disk over 90% full: no new runs and a banner | §8 failure handling | The nightly cleanup exists; the guard itself was never built (found 2026-11-06). |
-| A branch the owner pushed to while Kanbot also committed (diverged) | FR-48, §9 | The run stops with "both have commits the other lacks"; the owner merges by hand. Rebasing it is 5c (FR-51). |
-| Rebase onto the default branch before each run; auto-rebase when main moves | §9, FR-51 | Before each run on a GitHub project the worker fast-forwards the clone's default branch from GitHub (best effort, it only warns), so Plan B and new ticket branches see merged PRs. Existing ticket branches aren't rebased yet. M5 phase 5c. |
-| SDK `sandbox` | §7, §14 | Linux/macOS only (dev is Windows; Kanbot itself runs on Linux in WSL). |
-| GitHub status in `/api/health` | §8 | M5 phase 5c. Health reports GitHub `unknown` until then. |
-| SSE `Last-Event-ID` replay | §12 | Only if needed: the board refetches on reconnect and the Live tab pages `/api/runs/:id/events?after=seq`. Revisit when running over real networks. Marked with a `shortcut:` comment. |
+Everything the spec describes that isn't built yet, with the milestone that builds it. Whoever builds that milestone owns the row. Anything deferred, cut or moved goes here in the same change. Finished rows are deleted; what each milestone built is in `docs/history.md`.
 
 **M6**
 
 | Item | Spec | Notes |
 | --- | --- | --- |
+| Rebase onto the default branch before each run; auto-rebase when main moves | §9, FR-51 | Moved from M5 on 2026-11-10 (was phase 5c). Before each run on a GitHub project the worker fast-forwards the clone's default branch from GitHub (best effort, it only warns), so Plan B and new ticket branches see merged PRs. Existing ticket branches aren't rebased yet. Ends with two tickets in flight while main moves. |
+| A branch the owner pushed to while Kanbot also committed (diverged) | FR-48, §9 | Moved from M5 on 2026-11-10. The run stops with "both have commits the other lacks"; the owner merges by hand. Rebasing it comes with FR-51 above. |
+| GitHub status in `/api/health` | §8 | Moved from M5 on 2026-11-10 (was phase 5c). Health reports GitHub `unknown` until then. |
+| `blockWritesOutsideWorkingDirectories` | §7, §14 | Moved from M5 on 2026-11-10. Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
+| SDK `sandbox` | §7, §14 | Moved from M5 on 2026-11-10. Linux/macOS only (dev is Windows; Kanbot itself runs on Linux in WSL). |
+| Disk over 90% full: no new runs and a banner | §8 failure handling | Moved from M5 on 2026-11-10. The nightly cleanup exists; the guard itself was never built (found 2026-11-06). |
+| SSE `Last-Event-ID` replay | §12 | Moved from M5 on 2026-11-10. Only if needed: the board refetches on reconnect and the Live tab pages `/api/runs/:id/events?after=seq`. Revisit when running over real networks. Marked with a `shortcut:` comment. |
+| Checking rootless Docker in the owner's `kanbot` WSL distro | §7 | Moved from M5 on 2026-11-10. The files and `docs/deploy.md` (setup A) exist; the stack was checked in WSL on rootful Docker. Needs `sudo`, so the owner sets the distro up; rootless Docker's host network and a real SDK run as container root (paid, ask first) are still unchecked. |
+| A stub-backed GitHub project in the golden-ticket eval, so Ship-It is evaluated | §8 | Moved from M5 on 2026-11-10. The eval's golden tickets use local projects, where Ship stays a gate. One paid run, with the owner's OK. |
 | A public server: Caddy, HTTPS, webhooks, the deploy workflow on a real host | §7, FR-44 | Moved from M5 (2026-11-06): Kanbot runs locally in WSL for now. The files and `docs/deploy.md` (setup B) exist; checking them needs a server and a domain. Login exists (M5), but `proxy.ts` still answers only on localhost. A server also needs:
 - the domain allowed in the proxy;
 - `X-Forwarded-Proto` trusted from Caddy, for the cookie and the App's URLs;
