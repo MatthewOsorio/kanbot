@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    setupFiles: ["./src/test-network-guard.ts"],
+    setupFiles: ["./src/testing/test-network-guard.ts"],
     env: { KANBOT_GITHUB_API: "http://127.0.0.1:9" },
     expect: { requireAssertions: true },
     coverage: {

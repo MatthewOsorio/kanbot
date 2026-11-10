@@ -4,17 +4,22 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { projectConfigOf, projects, publish, type Db } from "@kanbot/shared/db";
 import {
+  type Db,
   decryptEnv,
   encryptEnv,
   getRepo,
+  git,
   gitAuth,
   loadGitHubApp,
+  loadProjectConfig,
+  projectConfigOf,
+  projects,
+  publish,
+  removeWorktree,
   repoToken,
-} from "@kanbot/shared/github";
-import { detect, ENV_EXAMPLES, envNames, type Onboarding } from "@kanbot/shared/onboarding";
-import { git, loadProjectConfig, removeWorktree } from "@kanbot/shared/repo";
+} from "@kanbot/shared/server";
+import { detect, ENV_EXAMPLES, envNames, type Onboarding } from "@kanbot/shared";
 import { eq, sql } from "drizzle-orm";
 import { redactText } from "./runtime/redact";
 import { openEnv, runBaseline } from "./commands";

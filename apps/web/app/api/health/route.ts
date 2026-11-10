@@ -1,5 +1,5 @@
 import { ANTHROPIC_API_ERROR } from "@kanbot/shared";
-import { runEvents, runs } from "@kanbot/shared/db";
+import { runEvents, runs } from "@kanbot/shared/server";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 

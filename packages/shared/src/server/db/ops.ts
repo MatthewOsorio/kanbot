@@ -3,9 +3,9 @@
 import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import { agentFileExists } from "../agents";
-import { activeRunStates } from "../schemas";
-import { BOUNCE_LIMIT } from "../transitions";
-import { QA_SETUP_MESSAGE, qaRunnable } from "../onboarding";
+import { activeRunStates } from "../../schemas";
+import { BOUNCE_LIMIT } from "../../transitions";
+import { QA_SETUP_MESSAGE, qaRunnable } from "../../onboarding";
 import { loadProjectConfig, projectConfig } from "../repo";
 import { projects, runs, settings, tickets } from "./schema";
 import { logActivity, OWNER, publish, type Actor, type Tx } from "./write";

@@ -34,15 +34,14 @@ apps/worker/         Node process (tsx): claims queued runs, runs agents, applie
   src/eval.ts          `pnpm eval:agents`: golden tickets end to end, compared with evals/baseline.json
   src/runtime/         AgentRuntime interface; sdk.ts (Claude Agent SDK; Kanbot's MCP server with report_result and QA's http_request), browser.ts (QA's headless Chromium tools, fenced to the app's origin), replay.ts (fixtures + record()), redact.ts (secrets out of stored text), fence.ts (permission hook logic, appRequestUrl)
   test/                Vitest against kanbot_test with the replay runtime
-packages/shared/     shared by web and worker
-  src/schemas.ts       zod API bodies + enums;  src/events.ts  SSE event union + NOTIFY channel
-  src/transitions.ts   the transition table as data (afterRun);  src/verdict.ts  report_result schema
-  src/agents.ts        agent file loader (server-only export "@kanbot/shared/agents")
-  src/repo.ts          git(), .kanbot/project.yml loader, overlap(), branchName() (server-only "@kanbot/shared/repo")
-  src/github.ts        the GitHub App's credentials, AES-256-GCM in settings.github_app; gh(), appJwt(), repoToken() (server-only "@kanbot/shared/github"); github-stub.ts for tests
-  src/onboarding.ts    onboarding steps, detect(), starterWorkflow(), protection rules ("@kanbot/shared/onboarding")
-  src/db/schema.ts     Drizzle schema;  src/db/write.ts publish(), logActivity(), ticketChanged();  src/db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd, projectConfigOf (settings, seeded once from project.yml)
-  src/db/testing.ts    prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval
+packages/shared/     what web and worker both need, in 3 import paths so the browser bundle never pulls in node: code
+  src/                 "@kanbot/shared": browser-safe, no I/O. schemas.ts zod API bodies + enums;  events.ts SSE event union + NOTIFY channel;  transitions.ts the transition table as data (afterRun);  verdict.ts report_result schema;  workflow.ts default columns;  onboarding.ts steps, detect(), starterWorkflow(), protection rules
+  src/server/          "@kanbot/shared/server": server-only, never import it from a client component
+    agents.ts            agent file loader
+    repo.ts              git(), .kanbot/project.yml loader, overlap(), branchName()
+    github.ts            the GitHub App's credentials, AES-256-GCM in settings.github_app; gh(), appJwt(), repoToken()
+    db/schema.ts         Drizzle schema;  db/write.ts publish(), logActivity(), ticketChanged();  db/ops.ts startColumnAgent, cancelActiveRun, moveToColumnEnd, projectConfigOf (settings, seeded once from project.yml)
+  src/testing/         "@kanbot/shared/testing": test helpers. db.ts prepareTestDatabase(), prepareSampleRepo() for tests, e2e and the eval;  github-stub.ts a fake GitHub;  test-network-guard.ts the Vitest setup file that blocks real network calls
   drizzle/             generated SQL migrations (commit them)
 agents/              one <slug>.md per agent (YAML frontmatter + system prompt) and avatars/: plan-b, sir-codes-a-lot, nitpick-nancy, testy-mctestface, captain-ship-it, rubber-duckworth, archie-the-archivist
 plugins/             vendored, pinned plugins (each has a VENDORED.md); agents list plugins in frontmatter

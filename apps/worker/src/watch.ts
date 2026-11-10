@@ -3,31 +3,29 @@
 import { afterGitHub, type CiState, type GitHubEvent, type ReviewState } from "@kanbot/shared";
 import {
   activeRun,
-  columns,
-  comments,
-  logActivity,
-  projectConfigOf,
-  projects,
-  publish,
-  tickets,
-  type Db,
-} from "@kanbot/shared/db";
-import {
   checkRuns,
   ciOf,
+  columns,
+  comments,
+  type Db,
   decryptEnv,
   gh,
   jobLogTail,
   listReviews,
   loadGitHubApp,
-  repoToken,
-  reviewComments,
-  workflowFiles,
+  logActivity,
+  projectConfigOf,
+  projects,
+  publish,
   type PullRequest,
+  removeWorktree,
+  repoToken,
   type Review,
   type ReviewComment,
-} from "@kanbot/shared/github";
-import { removeWorktree } from "@kanbot/shared/repo";
+  reviewComments,
+  tickets,
+  workflowFiles,
+} from "@kanbot/shared/server";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { moveAndStart } from "./finish";
 import { storeArtifact } from "./results";

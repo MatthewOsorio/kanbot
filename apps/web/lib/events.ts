@@ -2,7 +2,7 @@ import { EVENTS_CHANNEL, type EventEnvelope } from "@kanbot/shared";
 import { Client } from "pg";
 
 // publish() lives in shared so the worker writes events the same way.
-export { publish, type Tx } from "@kanbot/shared/db";
+export { publish, type Tx } from "@kanbot/shared/server";
 
 type Listener = (e: EventEnvelope) => void;
 const g = globalThis as { kanbotListeners?: Set<Listener>; kanbotListen?: Promise<void> };

@@ -1,7 +1,6 @@
 "use client";
 
-import { QA_SETUP_MESSAGE } from "@kanbot/shared/onboarding";
-import { priorities, ticketTypes, type BoardEvent } from "@kanbot/shared";
+import { type BoardEvent, priorities, QA_SETUP_MESSAGE, ticketTypes } from "@kanbot/shared";
 import { GitBranch, GitPullRequest, Layers } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SELECT } from "@/components/brand";

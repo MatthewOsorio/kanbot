@@ -1,6 +1,6 @@
 "use client";
 
-import type { Baseline, Onboarding, OnboardingStep } from "@kanbot/shared/onboarding";
+import type { Baseline, Onboarding, OnboardingStep } from "@kanbot/shared";
 import { ArrowRight, Check, CircleAlert, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";

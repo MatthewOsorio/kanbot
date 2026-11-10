@@ -12,6 +12,7 @@ import {
   acceptanceCriteria,
   columns,
   createDb,
+  git,
   moveToColumnEnd,
   projects,
   runs,
@@ -20,13 +21,8 @@ import {
   startColumnAgent,
   ticketChanged,
   tickets,
-} from "@kanbot/shared/db";
-import {
-  prepareSampleRepo,
-  prepareTestDatabase,
-  TEST_DATABASE_URL,
-} from "@kanbot/shared/db/testing";
-import { git } from "@kanbot/shared/repo";
+} from "@kanbot/shared/server";
+import { prepareSampleRepo, prepareTestDatabase, TEST_DATABASE_URL } from "@kanbot/shared/testing";
 import { and, eq, inArray } from "drizzle-orm";
 import { claimNext } from "./queue";
 import { executeRun } from "./run";

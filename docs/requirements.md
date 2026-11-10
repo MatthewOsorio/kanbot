@@ -305,7 +305,7 @@ The web app and worker never call each other directly: the web app writes jobs t
 | Database | PostgreSQL 16 with Drizzle ORM and drizzle-kit migrations | Typed queries; Postgres also backs the queue. |
 | Job queue | The `runs` table itself: the worker claims `queued` rows with `FOR UPDATE SKIP LOCKED`, woken by `NOTIFY` (5 s poll as backup) | Durable, no Redis and no second job record to keep in sync with the run; the concurrency limits are one SQL condition. |
 | Agent runtime | Claude Agent SDK (TypeScript), behind an `AgentRuntime` adapter | Same agent loop and tools as Claude Code; adapter keeps other backends possible. |
-| Git | `git` CLI via `git()` in `packages/shared/src/repo.ts` (`execFile`, no shell) | Worktrees, branches, diffs, commits. |
+| Git | `git` CLI via `git()` in `packages/shared/src/server/repo.ts` (`execFile`, no shell) | Worktrees, branches, diffs, commits. |
 | GitHub | Octokit | Push status, PR creation, merge detection. |
 | Live updates | Server-Sent Events from the web app, fed by Postgres `LISTEN/NOTIFY` from the worker | One-way streaming is all the board needs; simpler than WebSockets. |
 | Validation | zod | Agent frontmatter, verdict payloads, API bodies. |

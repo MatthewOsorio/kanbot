@@ -1,4 +1,4 @@
-import { apiBase, loadGitHubApp, webBase } from "@kanbot/shared/github";
+import { apiBase, loadGitHubApp, webBase } from "@kanbot/shared/server";
 import { NextResponse, type NextRequest } from "next/server";
 import { originOf, sessionCookie, STATE_COOKIE } from "@/lib/auth";
 import { oauthReturn } from "@/lib/oauth";

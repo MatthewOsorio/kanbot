@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { branchName, git, type ProjectConfig } from "@kanbot/shared/repo";
+import { branchName, git, type ProjectConfig } from "@kanbot/shared/server";
 import { NO_ENV, runCommand, type ProjectEnv } from "./commands";
 
 /** Columns whose agents work in the ticket's worktree (FR-40); earlier columns use the checkout. */

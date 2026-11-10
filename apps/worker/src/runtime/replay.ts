@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { runEventTypes, uuidv7 } from "@kanbot/shared";
-import { git } from "@kanbot/shared/repo";
+import { git } from "@kanbot/shared/server";
 import { redactText } from "./redact";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./types";
 

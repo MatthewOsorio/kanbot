@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
-import { EVENTS_CHANNEL, type BoardEvent, type EventEnvelope } from "../events";
-import { uuidv7 } from "../ids";
-import type { ActivityAction } from "../schemas";
+import { EVENTS_CHANNEL, type BoardEvent, type EventEnvelope } from "../../events";
+import { uuidv7 } from "../../ids";
+import type { ActivityAction } from "../../schemas";
 import type { Db } from "./index";
 import { activity } from "./schema";
 

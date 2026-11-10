@@ -5,14 +5,16 @@ import {
   artifacts,
   columns,
   comments,
+  type Db,
+  git,
+  overlap,
+  type ProjectConfig,
   projects,
   runEvents,
   runs,
   tickets,
-  type Db,
-} from "@kanbot/shared/db";
+} from "@kanbot/shared/server";
 import { IN_FLIGHT_COLUMNS } from "@kanbot/shared";
-import { git, overlap, type ProjectConfig } from "@kanbot/shared/repo";
 import { and, asc, desc, eq, gt, inArray, isNotNull, ne, type SQL } from "drizzle-orm";
 
 const CAP = 20_000; // chars per section; past it the agent is pointed at the file instead

@@ -12,6 +12,8 @@ import {
   columns,
   comments,
   createDb,
+  git,
+  loadProjectConfig,
   moveToColumnEnd,
   projectConfigOf,
   projects,
@@ -22,9 +24,8 @@ import {
   startColumnAgent,
   ticketLinks,
   tickets,
-} from "@kanbot/shared/db";
-import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
-import { git, loadProjectConfig } from "@kanbot/shared/repo";
+} from "@kanbot/shared/server";
+import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/testing";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";

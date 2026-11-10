@@ -7,15 +7,20 @@ import {
   AgentsDisabledError,
   columns,
   createDb,
+  decryptEnv,
+  encryptEnv,
+  git,
   projects,
   settings,
   startColumnAgent,
   tickets,
-} from "@kanbot/shared/db";
-import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
-import { decryptEnv, encryptEnv } from "@kanbot/shared/github";
-import { git } from "@kanbot/shared/repo";
-import { startGitHubStub, type GitHubStub } from "@kanbot/shared/github-stub";
+} from "@kanbot/shared/server";
+import {
+  type GitHubStub,
+  prepareSampleRepo,
+  startGitHubStub,
+  TEST_DATABASE_URL,
+} from "@kanbot/shared/testing";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { onboardNext } from "../src/onboard";

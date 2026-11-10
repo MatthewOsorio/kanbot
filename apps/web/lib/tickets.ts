@@ -1,6 +1,5 @@
 import {
   acceptProposalsBody,
-  type VerdictPayload,
   createCommentBody,
   createCriterionBody,
   createTicketBody,
@@ -8,6 +7,7 @@ import {
   moveTicketBody,
   patchCriterionBody,
   patchTicketBody,
+  type VerdictPayload,
 } from "@kanbot/shared";
 import {
   acceptanceCriteria,
@@ -18,19 +18,23 @@ import {
   columnEnd,
   columns,
   comments,
+  gh,
+  git,
   logActivity,
+  overlap,
   OWNER,
   projectConfigOf,
   projects,
+  type PullRequest,
+  removeWorktree,
+  repoToken,
   runs,
   screenshots,
   startColumnAgent,
   ticketChanged,
   ticketLinks,
   tickets,
-} from "@kanbot/shared/db";
-import { gh, repoToken, type PullRequest } from "@kanbot/shared/github";
-import { git, overlap, removeWorktree } from "@kanbot/shared/repo";
+} from "@kanbot/shared/server";
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";

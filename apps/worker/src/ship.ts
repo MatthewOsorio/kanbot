@@ -1,8 +1,6 @@
 // Ship (requirements §4, FR-43): after Captain Ship-It's run, the worker (never an agent) pushes the
 // ticket branch and opens or updates its PR with the App's installation token.
-import type { Db } from "@kanbot/shared/db";
-import { gitAuth, loadGitHubApp, repoToken, upsertPr } from "@kanbot/shared/github";
-import { git } from "@kanbot/shared/repo";
+import { type Db, git, gitAuth, loadGitHubApp, repoToken, upsertPr } from "@kanbot/shared/server";
 
 export type ShippedPr = { number: number; url: string; headSha: string };
 

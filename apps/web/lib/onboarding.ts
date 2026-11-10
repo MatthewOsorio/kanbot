@@ -1,27 +1,31 @@
 // Onboarding a GitHub repo, the owner's side (requirements §10 steps 2 and 4–7, 10). The worker clones
 // and runs the baseline (apps/worker/src/onboard.ts); this file only calls GitHub's API, never git.
-import type { createProjectBody, onboardingActionBody } from "@kanbot/shared";
-import { projectConfigOf, projects, publish, qaReady } from "@kanbot/shared/db";
-import {
-  GitHubError,
-  getRepo,
-  gh,
-  listAppRepos,
-  loadGitHubApp,
-  repoToken,
-  workflowFiles as repoWorkflows,
-  type GitHubApp,
-} from "@kanbot/shared/github";
 import {
   branchProtection,
+  type createProjectBody,
   missingRules,
+  type Onboarding,
+  type onboardingActionBody,
   protectionRules,
   QA_SETUP_MESSAGE,
   STARTER_CHECK,
   STARTER_WORKFLOW_PATH,
   starterWorkflow,
-  type Onboarding,
-} from "@kanbot/shared/onboarding";
+} from "@kanbot/shared";
+import {
+  getRepo,
+  gh,
+  type GitHubApp,
+  GitHubError,
+  listAppRepos,
+  loadGitHubApp,
+  projectConfigOf,
+  projects,
+  publish,
+  qaReady,
+  repoToken,
+  workflowFiles as repoWorkflows,
+} from "@kanbot/shared/server";
 import { eq, isNotNull, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";

@@ -1,4 +1,4 @@
-import { createDb, projects, runs, tickets } from "@kanbot/shared/db";
+import { createDb, projects, runs, tickets } from "@kanbot/shared/server";
 import { expect, test } from "@playwright/test";
 import { eq } from "drizzle-orm";
 import { TEST_DATABASE_URL } from "../playwright.config";

@@ -4,8 +4,8 @@ import {
   acceptanceCriteria,
   artifacts,
   cancelActiveRun,
-  comments,
   columns,
+  comments,
   createDb,
   getSettings,
   projects,
@@ -17,8 +17,8 @@ import {
   ticketLinks,
   tickets,
   updateSettings,
-} from "@kanbot/shared/db";
-import { TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
+} from "@kanbot/shared/server";
+import { TEST_DATABASE_URL } from "@kanbot/shared/testing";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";

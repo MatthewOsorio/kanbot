@@ -1,4 +1,4 @@
-import type { AgentConfig } from "@kanbot/shared/agents";
+import type { AgentConfig } from "@kanbot/shared/server";
 import type { RunEventType } from "@kanbot/shared";
 
 /** One entry in the run's live log (stored as a run_event). */

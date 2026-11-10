@@ -4,7 +4,7 @@ import { matchesGlob, posix } from "node:path";
 import { promisify } from "node:util";
 import { parse } from "yaml";
 import { z } from "zod";
-import { IMAGE_REF } from "./schemas";
+import { IMAGE_REF } from "../schemas";
 
 const run = promisify(execFile);
 

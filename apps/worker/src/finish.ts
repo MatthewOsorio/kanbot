@@ -2,27 +2,28 @@
 import {
   afterRun,
   ANTHROPIC_API_ERROR,
+  QA_SETUP_MESSAGE,
+  qaRunnable,
+  type RunOutcome,
   stateForVerdict,
   verdictPayload,
-  type RunOutcome,
   type VerdictPayload,
 } from "@kanbot/shared";
 import {
+  agentActor,
   columns,
+  type Db,
   logActivity,
   moveToColumnEnd,
+  projectConfigOf,
   projects,
   publish,
   runs,
   startColumnAgent,
   tickets,
-  projectConfigOf,
-  updateSettings,
-  type Db,
   type Tx,
-  agentActor,
-} from "@kanbot/shared/db";
-import { QA_SETUP_MESSAGE, qaRunnable } from "@kanbot/shared/onboarding";
+  updateSettings,
+} from "@kanbot/shared/server";
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { RuntimeResult } from "./runtime/types";
 import { type ShippedPr } from "./ship";

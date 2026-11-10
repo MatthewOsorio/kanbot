@@ -2,11 +2,8 @@ import { generateKeyPairSync } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createDb, settings } from "@kanbot/shared/db";
-import { prepareSampleRepo, prepareTestDatabase } from "@kanbot/shared/db/testing";
-import { saveGitHubApp } from "@kanbot/shared/github";
-import { startGitHubStub } from "@kanbot/shared/github-stub";
-import { git } from "@kanbot/shared/repo";
+import { createDb, git, saveGitHubApp, settings } from "@kanbot/shared/server";
+import { prepareSampleRepo, prepareTestDatabase, startGitHubStub } from "@kanbot/shared/testing";
 import { SESSION_COOKIE, signSession } from "../lib/auth";
 import { AUTH_STATE, E2E_TMP, GITHUB_STUB_PORT, TEST_DATABASE_URL } from "../playwright.config";
 
