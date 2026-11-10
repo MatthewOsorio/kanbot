@@ -109,6 +109,27 @@ export async function gh<T = unknown>(
   return (res.status === 204 ? null : await res.json()) as T;
 }
 
+const PAGE = 100;
+/**
+ * Every item of a list endpoint: asks for `page=1, 2, …` until a page comes back short. `key` names the
+ * array inside an object body (`check_runs`, `repositories`).
+ * shortcut: stops at 50 pages (5,000 items) so a misbehaving server can't loop forever; raise it if a real list is longer.
+ */
+export async function ghAll<T>(token: string, path: string, key?: string): Promise<T[]> {
+  const sep = path.includes("?") ? "&" : "?";
+  const all: T[] = [];
+  for (let page = 1; page <= 50; page++) {
+    const body = await gh<T[] | Record<string, T[]>>(
+      token,
+      `${path}${sep}per_page=${PAGE}&page=${page}`,
+    );
+    const items = Array.isArray(body) ? body : (body[key ?? ""] ?? []);
+    all.push(...items);
+    if (items.length < PAGE) break;
+  }
+  return all;
+}
+
 /** The App's own JWT (RS256, 9 minutes, backdated 60 s for clock drift), for /app endpoints. */
 export function appJwt(app: Pick<GitHubApp, "id" | "pem">, now = Date.now()) {
   const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
@@ -162,14 +183,9 @@ export type CheckRun = {
   conclusion: string | null;
   html_url?: string;
 };
-/** The check runs on a commit (FR-46). shortcut: the first 100; page if a repo runs more checks per commit. */
-export const checkRuns = async (token: string, owner: string, repo: string, sha: string) =>
-  (
-    await gh<{ check_runs: CheckRun[] }>(
-      token,
-      `/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`,
-    )
-  ).check_runs;
+/** The check runs on a commit (FR-46). */
+export const checkRuns = (token: string, owner: string, repo: string, sha: string) =>
+  ghAll<CheckRun>(token, `/repos/${owner}/${repo}/commits/${sha}/check-runs`, "check_runs");
 
 const FAILED = ["failure", "cancelled", "timed_out", "action_required", "startup_failure"];
 /** CI for one head: any failed check fails it; all completed passes it; none yet is pending. */
@@ -225,20 +241,15 @@ export type Review = {
   body: string | null;
 };
 export type ReviewComment = { path: string; line: number | null; body: string };
-/** shortcut: the first 100 reviews and comments per review; page if a PR ever gets more. */
 export const listReviews = (token: string, owner: string, repo: string, pr: number) =>
-  gh<Review[]>(token, `/repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100`);
+  ghAll<Review>(token, `/repos/${owner}/${repo}/pulls/${pr}/reviews`);
 export const reviewComments = (
   token: string,
   owner: string,
   repo: string,
   pr: number,
   id: number,
-) =>
-  gh<ReviewComment[]>(
-    token,
-    `/repos/${owner}/${repo}/pulls/${pr}/reviews/${id}/comments?per_page=100`,
-  );
+) => ghAll<ReviewComment>(token, `/repos/${owner}/${repo}/pulls/${pr}/reviews/${id}/comments`);
 
 /** Opens the ticket's PR, or updates its title and body when it already has one (FR-43). */
 export function upsertPr(
@@ -285,13 +296,10 @@ export async function getRepo(token: string, owner: string, repo: string) {
   return repoInfo(await gh<ApiRepo>(token, `/repos/${owner}/${repo}`));
 }
 
-/**
- * Every repo the App's installations can see (onboarding step 2).
- * shortcut: the first 100 repos per installation; page with `page=` if an installation has more.
- */
+/** Every repo the App's installations can see (onboarding step 2). */
 export async function listAppRepos(app: GitHubApp): Promise<RepoInfo[]> {
   const jwt = appJwt(app);
-  const insts = await gh<{ id: number }[]>(jwt, "/app/installations?per_page=100");
+  const insts = await ghAll<{ id: number }>(jwt, "/app/installations");
   const lists = await Promise.all(
     insts.map(async (i) => {
       const { token } = await gh<{ token: string }>(
@@ -299,9 +307,7 @@ export async function listAppRepos(app: GitHubApp): Promise<RepoInfo[]> {
         `/app/installations/${i.id}/access_tokens`,
         { method: "POST" },
       );
-      return (
-        await gh<{ repositories: ApiRepo[] }>(token, "/installation/repositories?per_page=100")
-      ).repositories;
+      return ghAll<ApiRepo>(token, "/installation/repositories", "repositories");
     }),
   );
   return lists.flat().map(repoInfo);

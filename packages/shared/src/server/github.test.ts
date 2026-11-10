@@ -1,6 +1,8 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { createVerify, generateKeyPairSync, randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
-import { appJwt, decrypt, encrypt } from "./github";
+import { appJwt, decrypt, encrypt, ghAll } from "./github";
 
 describe("encrypt", () => {
   beforeEach(() => {
@@ -46,5 +48,37 @@ describe("appJwt", () => {
     expect(
       createVerify("RSA-SHA256").update(`${h}.${p}`).verify(publicKey, sig!, "base64url"),
     ).toBe(true);
+  });
+});
+
+describe("ghAll", () => {
+  it("asks for pages until one comes back short, for arrays and for keyed bodies", async () => {
+    const seen: string[] = [];
+    const server = createServer((req, res) => {
+      const url = new URL(req.url!, "http://x");
+      seen.push(url.pathname + url.search);
+      const page = Number(url.searchParams.get("page"));
+      const items = Array.from({ length: page === 1 ? 100 : 3 }, (_, i) => ({
+        id: page * 1000 + i,
+      }));
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(url.pathname === "/wrapped" ? { things: items } : items));
+    });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const before = process.env.KANBOT_GITHUB_API;
+    process.env.KANBOT_GITHUB_API = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      expect(await ghAll("t", "/plain")).toHaveLength(103);
+      expect(await ghAll("t", "/wrapped?x=1", "things")).toHaveLength(103);
+      expect(seen).toEqual([
+        "/plain?per_page=100&page=1",
+        "/plain?per_page=100&page=2",
+        "/wrapped?x=1&per_page=100&page=1",
+        "/wrapped?x=1&per_page=100&page=2",
+      ]);
+    } finally {
+      process.env.KANBOT_GITHUB_API = before;
+      await new Promise((ok) => server.close(ok));
+    }
   });
 });
