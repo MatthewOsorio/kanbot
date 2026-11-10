@@ -1,12 +1,11 @@
 // The orchestrator against the replay runtime (requirements §8): no API calls, real Postgres (kanbot_test).
-import { activeRunStates, DEFAULT_COLUMNS, uuidv7 } from "@kanbot/shared";
+import { DEFAULT_COLUMNS, uuidv7 } from "@kanbot/shared";
 import {
   acceptanceCriteria,
   artifacts,
   cancelActiveRun,
   columns,
   comments,
-  createDb,
   getSettings,
   projects,
   runEvents,
@@ -18,9 +17,8 @@ import {
   tickets,
   updateSettings,
 } from "@kanbot/shared/server";
-import { TEST_DATABASE_URL } from "@kanbot/shared/testing";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
 import {
   afterPrevious,
@@ -30,20 +28,10 @@ import {
   resumeInterrupted,
 } from "../src/queue";
 import { executeRun } from "../src/run";
-import { ReplayRuntime } from "../src/runtime/replay";
 import type { AgentRuntime } from "../src/runtime/types";
+import { db, runtime, ticketNow, useTestDb } from "./helpers";
 
-const db = createDb(TEST_DATABASE_URL);
-const runtime = new ReplayRuntime();
-afterAll(() => db.$client.end());
-
-// claimNext is global: leftovers from an aborted e2e run must not be claimed by these tests.
-beforeEach(async () => {
-  await db
-    .update(runs)
-    .set({ state: "cancelled" })
-    .where(inArray(runs.state, [...activeRunStates]));
-});
+useTestDb();
 
 /** A project with a ticket sitting in Planning and Plan B queued for it, as a manual move leaves it. */
 async function plannedTicket(scenario?: string) {
@@ -91,8 +79,6 @@ async function claimAndRun(signal = new AbortController().signal) {
   return (await db.select().from(runs).where(eq(runs.id, run!.id)))[0]!;
 }
 
-const ticketNow = async (id: string) =>
-  (await db.select().from(tickets).where(eq(tickets.id, id)))[0]!;
 const columnSlug = (cols: { id: string; slug: string }[], id: string) =>
   cols.find((c) => c.id === id)!.slug;
 

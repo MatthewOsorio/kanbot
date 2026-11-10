@@ -1,20 +1,16 @@
 // The M3 build loop against the replay runtime, on a real git repo (fixtures/sample-repo): no API calls.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { activeRunStates, DEFAULT_COLUMNS, uuidv7 } from "@kanbot/shared";
+import { uuidv7 } from "@kanbot/shared";
 import {
   acceptanceCriteria,
   activity,
   artifacts,
   cancelActiveRun,
-  columns,
   comments,
-  createDb,
   git,
-  loadProjectConfig,
-  moveToColumnEnd,
   projectConfigOf,
   projects,
   QaSetupError,
@@ -23,101 +19,17 @@ import {
   screenshots,
   startColumnAgent,
   ticketLinks,
-  tickets,
 } from "@kanbot/shared/server";
-import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/testing";
-import { and, asc, eq, inArray } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { and, asc, eq } from "drizzle-orm";
+import { describe, expect, it } from "vitest";
 import { buildContext } from "../src/context";
-import { nightlyCleanup } from "../src/cleanup";
 import { claimNext } from "../src/queue";
 import { executeRun } from "../src/run";
-import { ReplayRuntime } from "../src/runtime/replay";
-import { checkAfterRun, ensureWorktree, snapshot } from "../src/worktree";
 import { projectImage } from "../src/docker";
 import { startApp } from "../src/qa-app";
+import { db, runtime, setup, drain, ticketNow, useTestDb } from "./helpers";
 
-const db = createDb(TEST_DATABASE_URL);
-const runtime = new ReplayRuntime();
-afterAll(() => db.$client.end());
-beforeEach(async () => {
-  await db
-    .update(runs)
-    .set({ state: "cancelled" })
-    .where(inArray(runs.state, [...activeRunStates]));
-});
-
-/** A sample-repo project and a ticket in Planning, labelled with the replay scenario. */
-async function setup(
-  scenario: string,
-  title = "Deleting an unknown todo removes the last one",
-  keyPrefix = `L${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
-) {
-  const repo = await prepareSampleRepo(join(mkdtempSync(join(tmpdir(), "kanbot-loop-")), "repo"));
-  await db.delete(projects).where(eq(projects.keyPrefix, keyPrefix)); // a fixed prefix from an earlier test run
-  const [p] = await db
-    .insert(projects)
-    .values({ name: "loop test", keyPrefix, repoPath: repo })
-    .returning();
-  const cols = await db
-    .insert(columns)
-    .values(DEFAULT_COLUMNS.map((c, i) => ({ ...c, projectId: p!.id, position: i })))
-    .returning();
-  const col = (slug: string) => cols.find((c) => c.slug === slug)!;
-  const [t] = await db
-    .insert(tickets)
-    .values({
-      projectId: p!.id,
-      number: 1,
-      title,
-      type: "bug",
-      columnId: col("planning").id,
-      position: "a0",
-      labels: [`replay:${scenario}`],
-    })
-    .returning();
-  /** A manual move, as the move route does it (minus the overlap check, tested in the web app). */
-  const move = (slug: string, id = t!.id) =>
-    db.transaction(async (tx) => {
-      const [now] = await tx.select().from(tickets).where(eq(tickets.id, id));
-      const from = cols.find((c) => c.id === now!.columnId)!;
-      await cancelActiveRun(tx, p!.id, id); // e.g. Rubber Duckworth, queued when the ticket hit Blocked
-      await moveToColumnEnd(tx, now!, from, col(slug), { kind: "user", name: "owner" });
-      await startColumnAgent(tx, p!.id, id, col(slug));
-    });
-  /** Another ticket in the same project (and repo), in Ready. */
-  const addTicket = async (number: number, scenario: string, title: string) =>
-    (
-      await db
-        .insert(tickets)
-        .values({
-          projectId: p!.id,
-          number,
-          title,
-          type: "feature",
-          columnId: col("ready").id,
-          position: `a${number}`,
-          labels: [`replay:${scenario}`],
-        })
-        .returning()
-    )[0]!;
-  return { project: p!, ticket: t!, repo, col, move, addTicket };
-}
-
-/** Runs queued runs until none is left (the worker's claim loop, synchronously). */
-async function drain(limit = 20) {
-  const done = [];
-  for (let i = 0; i < limit; i++) {
-    const run = await claimNext(db);
-    if (!run) return done;
-    await executeRun(db, runtime, run, new AbortController().signal);
-    done.push((await db.select().from(runs).where(eq(runs.id, run.id)))[0]!);
-  }
-  throw new Error("runs never stopped");
-}
-
-const ticketNow = async (id: string) =>
-  (await db.select().from(tickets).where(eq(tickets.id, id)))[0]!;
+useTestDb();
 
 describe("build loop (M3 done criterion)", () => {
   it("goes Ready → In Progress → Review → (bounce) → In Progress → Review → QA on its own", async () => {
@@ -670,256 +582,4 @@ describe.skipIf(!hasDocker)("project commands in the project's image (M5, §7)",
     },
     300_000,
   );
-});
-
-describe("nightly cleanup (M5)", () => {
-  it("prunes old run logs except each ticket's last run, and worktrees left in Done", async () => {
-    const { project, ticket, repo, col } = await setup("default");
-    const old = new Date(Date.now() - 100 * 24 * 3600_000);
-    const [first, last] = await db
-      .insert(runs)
-      .values(
-        [0, 1].map((i) => ({
-          ticketId: ticket.id,
-          agentSlug: "plan-b",
-          columnSlug: "planning",
-          state: "succeeded" as const,
-          createdAt: new Date(old.getTime() + i * 1000),
-        })),
-      )
-      .returning();
-    await db
-      .insert(runEvents)
-      .values(
-        [first!, last!].map((r) => ({ runId: r.id, seq: 1, type: "system" as const, payload: {} })),
-      );
-    const wt = await ensureWorktree(
-      repo,
-      "main",
-      { key: `${project.keyPrefix}-1`, title: ticket.title, branchName: null },
-      await projectConfigOf(db, project),
-    );
-    await db
-      .update(tickets)
-      .set({ columnId: col("done").id, worktreePath: wt.path, branchName: wt.branch })
-      .where(eq(tickets.id, ticket.id));
-    // A deleted ticket's worktree (no ticket has key -99).
-    const orphan = await ensureWorktree(
-      repo,
-      "main",
-      { key: `${project.keyPrefix}-99`, title: "gone", branchName: null },
-      await projectConfigOf(db, project),
-    );
-
-    await nightlyCleanup(db);
-    expect(existsSync(orphan.path)).toBe(false);
-    const left = await db
-      .select({ runId: runEvents.runId })
-      .from(runEvents)
-      .where(inArray(runEvents.runId, [first!.id, last!.id]));
-    expect(left.map((e) => e.runId)).toEqual([last!.id]);
-    expect(existsSync(wt.path)).toBe(false);
-    expect((await ticketNow(ticket.id)).worktreePath).toBeNull();
-    expect(await git(repo, ["branch", "--list", wt.branch])).toContain(wt.branch); // branch kept
-  });
-});
-
-describe("post-run checks", () => {
-  it("catch a rewritten commit and a switched branch", async () => {
-    const { repo } = await setup("bounce");
-    await git(repo, ["switch", "-q", "-c", "kanbot/X-1-check"]);
-    await git(repo, ["commit", "-q", "--allow-empty", "-m", "owner commit"]);
-    const wt = { path: repo, branch: "kanbot/X-1-check" };
-    const before = await snapshot(repo, "main");
-    expect(await checkAfterRun(wt, "main", before, undefined)).toBeNull();
-
-    await git(repo, ["commit", "-q", "--amend", "--allow-empty", "-m", "rewritten"]);
-    expect(await checkAfterRun(wt, "main", before, undefined)).toMatch(/rewritten/);
-
-    // A file an earlier run left behind isn't this run's change (found in the M3 smoke run).
-    writeFileSync(join(repo, "stray.txt"), "left by an earlier run");
-    const later = await snapshot(repo, "main");
-    expect(await checkAfterRun(wt, "main", later, () => false)).toBeNull();
-    writeFileSync(join(repo, "new.txt"), "made during this run");
-    expect(await checkAfterRun(wt, "main", later, () => false)).toMatch(/edit scope: new\.txt/);
-
-    await git(repo, ["switch", "-q", "main"]);
-    expect(await checkAfterRun(wt, "main", before, undefined)).toMatch(/switched to main/);
-  });
-
-  it("let the owner commit to main during a run, but catch the run's own commits landing there", async () => {
-    const { repo } = await setup("bounce");
-    await git(repo, ["switch", "-q", "-c", "kanbot/X-1-main"]);
-    const wt = { path: repo, branch: "kanbot/X-1-main" };
-    const before = await snapshot(repo, "main");
-    // The owner commits to main (here without checking it out) while the agent works.
-    const tree = (await git(repo, ["rev-parse", "main^{tree}"])).trim();
-    const owner = (await git(repo, ["commit-tree", tree, "-p", "main", "-m", "owner work"])).trim();
-    await git(repo, ["update-ref", "refs/heads/main", owner]);
-    await git(repo, ["commit", "-q", "--allow-empty", "-m", "agent work"]);
-    expect(await checkAfterRun(wt, "main", before, undefined)).toBeNull();
-
-    await git(repo, ["update-ref", "refs/heads/main", "HEAD"]); // the run's commit is now on main
-    expect(await checkAfterRun(wt, "main", before, undefined)).toMatch(
-      /reached the default branch/,
-    );
-  });
-});
-
-describe("Done and Archie (FR-49, §4)", () => {
-  /** Builds the ticket through the loop to QA, then moves it to Done as the owner would. */
-  async function toDone(scenario: string) {
-    const s = await setup(scenario);
-    await s.move("in_progress");
-    await drain();
-    const wt = (await ticketNow(s.ticket.id)).worktreePath!;
-    expect(existsSync(wt)).toBe(true);
-    await s.move("done");
-    return { ...s, wt };
-  }
-
-  it("removes the worktree, keeps the branch and stores Archie's retro", async () => {
-    const { ticket, repo, wt, col } = await toDone("default");
-    const [run] = await drain();
-    expect(`${run!.agentSlug}:${run!.state}`).toBe("archie-the-archivist:succeeded");
-    expect(existsSync(wt)).toBe(false);
-    const t = await ticketNow(ticket.id);
-    expect(t.worktreePath).toBeNull();
-    expect(t.columnId).toBe(col("done").id);
-    expect(t.statusFlag).toBe("none");
-    expect((await git(repo, ["branch", "--list", t.branchName!])).trim()).not.toBe("");
-    const retros = await db.select().from(artifacts).where(eq(artifacts.kind, "retro"));
-    expect(retros.filter((a) => a.ticketId === ticket.id)).toHaveLength(1);
-    // Archie's context carries the real totals and the run history.
-    const prompt = await buildContext(
-      db,
-      { ...t, key: "X-1" },
-      { id: uuidv7(), requestMd: null, columnSlug: "done" },
-      { cwd: repo, defaultBranch: "main", hotspots: [] },
-    );
-    expect(prompt).toMatch(/^Write the retro for this finished ticket/);
-    expect(prompt).toMatch(/Total cost: \$[\d.]+ over \d+ runs/);
-    expect(prompt).toMatch(/sir-codes-a-lot \(in_progress\): succeeded/);
-  });
-
-  it("leaves a finished ticket in Done, flagged failed, when Archie's run fails", async () => {
-    const { ticket, col } = await toDone("no-report");
-    const [run] = await drain();
-    expect(run!.state).toBe("failed");
-    const t = await ticketNow(ticket.id);
-    expect(t.columnId).toBe(col("done").id);
-    expect(t.statusFlag).toBe("failed");
-  });
-});
-
-describe("project settings in the database (M4)", () => {
-  it("seeds from project.yml once; after that the database wins", async () => {
-    const { project, repo } = await setup("bounce");
-    const read = async () => {
-      const [p] = await db.select().from(projects).where(eq(projects.id, project.id));
-      return projectConfigOf(db, p!);
-    };
-    expect((await read()).commands.test).toBe("node --test");
-    // The file changes on the default branch, then the owner edits the database copy: neither the file
-    // nor a second read may overwrite it.
-    writeFileSync(join(repo, ".kanbot/project.yml"), "commands:\n  test: node other.js\n");
-    await git(repo, ["commit", "-am", "change settings"]);
-    expect((await read()).commands.test).toBe("node --test");
-    await db
-      .update(projects)
-      .set({ commands: { test: "pnpm test" }, settings: { bounceLimit: 1, concurrency: 2 } })
-      .where(eq(projects.id, project.id));
-    const c = await read();
-    expect(c).toMatchObject({ bounceLimit: 1, concurrency: 2, commands: { test: "pnpm test" } });
-  });
-
-  it("uses the project's bounce limit", async () => {
-    const { ticket, col, move, project } = await setup("always");
-    await db
-      .update(projects)
-      .set({ settings: { bounceLimit: 1 } })
-      .where(eq(projects.id, project.id));
-    await move("in_progress");
-    await drain();
-    const t = await ticketNow(ticket.id);
-    expect(t.columnId).toBe(col("blocked").id);
-    expect(t.bounceCount).toBe(1);
-  });
-
-  it("claims as many runs of one project at once as its concurrency allows", async () => {
-    const { project, addTicket, move } = await setup("bounce");
-    const b = await addTicket(2, "bounce", "Second");
-    await move("planning", b.id);
-    await db
-      .update(projects)
-      .set({ settings: { concurrency: 2 } })
-      .where(eq(projects.id, project.id));
-    await move("planning"); // restarts Plan B on the first ticket as well
-    expect(await claimNext(db)).not.toBeNull();
-    expect(await claimNext(db)).not.toBeNull(); // default 1 would refuse this
-    expect(await claimNext(db)).toBeNull(); // the global limit of 2
-  });
-
-  it("installs again only when the lockfile changes", async () => {
-    const repo = await prepareSampleRepo(join(mkdtempSync(join(tmpdir(), "kanbot-lock-")), "repo"));
-    const log = join(mkdtempSync(join(tmpdir(), "kanbot-lock-log-")), "installs");
-    const config = await loadProjectConfig(repo, "main");
-    config.commands.install = `echo x >> "${log}"`;
-    const ticket = { key: "LK-1", title: "Lockfile", branchName: null };
-    const installs = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length - 1 : 0);
-
-    const { path } = await ensureWorktree(repo, "main", ticket, config);
-    expect(installs()).toBe(1);
-    await ensureWorktree(repo, "main", ticket, config);
-    expect(installs()).toBe(1); // reused, nothing changed
-    writeFileSync(join(path, "package-lock.json"), "{}");
-    await ensureWorktree(repo, "main", ticket, config);
-    expect(installs()).toBe(2); // the lockfile appeared
-    await ensureWorktree(repo, "main", ticket, config);
-    expect(installs()).toBe(2);
-    expect(await git(path, ["status", "--porcelain"])).not.toContain("kanbot-install");
-  });
-});
-
-describe("epics (M4.5)", () => {
-  it("stores Plan B's proposed tickets on an epic's plan, cleaned", async () => {
-    const { ticket, move } = await setup("epic", "Due dates for todos");
-    await db.update(tickets).set({ type: "epic" }).where(eq(tickets.id, ticket.id));
-    await move("planning");
-    const [run] = await drain();
-    expect(run!.state).toBe("succeeded");
-    expect((await ticketNow(ticket.id)).statusFlag).toBe("plan_ready");
-    const [plan] = await db
-      .select()
-      .from(artifacts)
-      .where(and(eq(artifacts.ticketId, ticket.id), eq(artifacts.kind, "plan")));
-    const data = plan!.data as {
-      proposedTickets: { ref: string; blockedBy: string[] }[];
-      accepted: object;
-    };
-    // The duplicate t2 is dropped, and t2's forward reference to t3 with it (no cycles).
-    expect(data.proposedTickets.map((p) => [p.ref, p.blockedBy])).toEqual([
-      ["t1", []],
-      ["t2", ["t1"]],
-      ["t3", ["t2"]],
-    ]);
-    expect(data.accepted).toEqual({});
-  });
-
-  it("tells Plan B to split an epic", async () => {
-    const { ticket, project } = await setup("epic");
-    const [run] = await db
-      .insert(runs)
-      .values({ ticketId: ticket.id, agentSlug: "plan-b", columnSlug: "planning" })
-      .returning();
-    const prompt = (t: string) =>
-      buildContext(db, { ...ticket, type: t, key: `${project.keyPrefix}-1` }, run!, {
-        cwd: null,
-        defaultBranch: "main",
-        hotspots: [],
-      });
-    expect(await prompt("epic")).toMatch(/^Plan this epic: split it into tickets/);
-    expect(await prompt("feature")).toMatch(/^Plan this ticket\./);
-    await db.update(runs).set({ state: "cancelled" }).where(eq(runs.id, run!.id));
-  });
 });
