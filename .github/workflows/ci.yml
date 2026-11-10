@@ -33,6 +33,41 @@ jobs:
       KANBOT_RUNTIME: replay
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2 # on a PR, HEAD is the merge commit and HEAD^1 the base it merges into
+      # What CI can't judge. An edited migration fails: the real database never re-runs one. The rest
+      # are warnings for the owner's review and never fail.
+      - name: Changes only the owner can judge
+        if: github.event_name == 'pull_request'
+        run: |
+          edited=$(git diff --no-renames --name-only --diff-filter=MD HEAD^1 HEAD -- 'packages/shared/drizzle/*.sql')
+          for f in $edited; do
+            echo "::error file=$f::Migrations are append-only: add a new one with pnpm db:generate instead."
+          done
+          [ -z "$edited" ] || exit 1
+          git diff --no-renames --name-status HEAD^1 HEAD | while read -r status path; do
+            why=""
+            case "$path" in
+              .github/* | .claude/* | *eslint.config.* | *tsconfig*.json | *vitest.config.* | *playwright.config.* | \
+                .prettierignore | knip.json | pnpm-workspace.yaml | *repo-rules.test.ts | *test-network-guard.ts)
+                why="changes the checks themselves" ;;
+              */runtime/fence.ts | */runtime/redact.ts | apps/web/proxy.ts | apps/web/lib/auth.ts)
+                why="security boundary" ;;
+              agents/*.md | plugins/*)
+                why="agent changed: run pnpm eval:agents (paid) before merging" ;;
+              fixtures/runs/*)
+                if [ "$status" != A ]; then why="changes an existing replay fixture"; fi ;;
+              *.test.ts | *.spec.ts)
+                if [ "$status" = D ]; then why="deletes a test file"; fi ;;
+              package.json | */package.json)
+                why="dependencies or scripts" ;;
+            esac
+            if [ -n "$why" ]; then
+              echo "::warning file=$path::$why"
+              if [ ! -s "$GITHUB_STEP_SUMMARY" ]; then echo "### Changes only you can judge" >> "$GITHUB_STEP_SUMMARY"; fi
+              echo "- \`$path\` ($status): $why" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4; version from package.json
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

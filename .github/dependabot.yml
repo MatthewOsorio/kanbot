@@ -1,12 +1,13 @@
 version: 2
+# Minor and patch bumps come grouped; each major gets its own PR, so one breaking major cannot hold back the rest.
 updates:
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
     groups:
-      all: { patterns: ["*"] }
+      all: { patterns: ["*"], update-types: [minor, patch] }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
     groups:
-      all: { patterns: ["*"] }
+      all: { patterns: ["*"], update-types: [minor, patch] }

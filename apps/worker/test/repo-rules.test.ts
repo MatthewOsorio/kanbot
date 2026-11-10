@@ -1,4 +1,4 @@
-// Conventions checked across the whole tree, unlike the guards, which only read what a PR changed.
+// Conventions checked across the whole tree, so they hold whichever change would have broken them.
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, "../../..");
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 const claudeMd = read("CLAUDE.md");
 
-const sources = ["apps", "packages"]
+const files = ["apps", "packages"]
   .flatMap((dir) =>
     readdirSync(join(root, dir), { recursive: true, withFileTypes: true })
       .filter((e) => e.isFile() && /\.tsx?$/.test(e.name))
@@ -17,8 +17,10 @@ const sources = ["apps", "packages"]
           .replaceAll("\\", "/"),
       ),
   )
-  .filter((p) => !/(^|\/)(node_modules|\.next[^/]*|test-results)\//.test(p))
-  .filter((p) => !/\/(test|e2e)\/|\.(test|spec)\.tsx?$/.test(p));
+  .filter((p) => !/(^|\/)(node_modules|\.next[^/]*|test-results)\//.test(p));
+const isTest = (p: string) => /\/(test|e2e)\/|\.(test|spec)\.tsx?$/.test(p);
+const sources = files.filter((p) => !isTest(p));
+const tests = files.filter(isTest);
 
 describe("CLAUDE.md matches the repo", () => {
   it("names only paths that exist", () => {
@@ -83,6 +85,23 @@ describe("code conventions", () => {
           (p.startsWith("apps/worker/") && imports(p, "web")),
       ),
     ).toEqual([]);
+  });
+
+  it("never skips a test quietly", () => {
+    // An unconditional skip is a deleted test that still looks like one.
+    expect(tests.filter((p) => /\.(skip|todo|fails|fixme)\(/.test(read(p)))).toEqual([]);
+    // Conditional skips are pinned, so adding one (say, skipIf on process.env.CI) means editing this list.
+    const conditional = tests
+      .flatMap((p) =>
+        [...read(p).matchAll(/\.(skipIf|runIf)\(([^)]*)\)/g)].map((m) => `${p}: ${m[2]}`),
+      )
+      .sort();
+    expect(conditional).toEqual([
+      "apps/worker/test/browser.test.ts: !hasDocker || !hasChromium", // CI throws without them
+      "apps/worker/test/build-loop.test.ts: !hasDocker", // CI throws without it
+      "apps/worker/test/fence.test.ts: linked",
+      'apps/worker/test/fence.test.ts: process.platform === "win32"',
+    ]);
   });
 
   it("never sorts with localeCompare, which breaks fractional-index order", () => {
