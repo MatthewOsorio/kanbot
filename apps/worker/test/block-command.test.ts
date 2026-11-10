@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { blockReason } from "../../../.claude/hooks/block-command.mjs";
+import { blockReason } from "../../../scripts/block-command.mjs";
 
-const hook = resolve(import.meta.dirname, "../../../.claude/hooks/block-command.mts");
+const hook = resolve(import.meta.dirname, "../../../scripts/block-command.mts");
 
 describe("AI session seatbelt", () => {
   it.each([
