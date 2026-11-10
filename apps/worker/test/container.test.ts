@@ -1,14 +1,28 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { redactText } from "../src/runtime/redact";
 import { appPort, listeningPorts } from "../src/qa-app";
 import { containerBash, dockerRun, projectImage, shQuote } from "../src/docker";
-import { openEnv } from "../src/commands";
+import { commandEnv, openEnv, withoutSecrets } from "../src/commands";
 
 const cwd = process.platform === "win32" ? "C:\\r\\wt" : "/r/wt";
 const mounted = process.platform === "win32" ? "/c/r/wt" : "/r/wt";
 
 describe("project commands in containers (§7)", () => {
+  it("keeps Kanbot's own credentials from project commands and agents (§14)", () => {
+    vi.stubEnv("KANBOT_SESSION_SECRET", "s".repeat(32));
+    vi.stubEnv("KANBOT_ENCRYPTION_KEY", "k");
+    vi.stubEnv("ANTHROPIC_API_KEY", "a");
+    vi.stubEnv("KANBOT_KEPT", "yes");
+    const agent = withoutSecrets();
+    expect(agent).toMatchObject({ ANTHROPIC_API_KEY: "a", KANBOT_KEPT: "yes" }); // the SDK needs its key
+    expect(commandEnv()).not.toHaveProperty("ANTHROPIC_API_KEY");
+    for (const env of [agent, commandEnv()])
+      for (const k of ["DATABASE_URL", "KANBOT_SESSION_SECRET", "KANBOT_ENCRYPTION_KEY"])
+        expect(env).not.toHaveProperty(k);
+    vi.unstubAllEnvs();
+  });
+
   it("mounts only the worktree and the cache, passes no host env, joins the forwarder's network", () => {
     const args = dockerRun("node:24", cwd, "node --test", { name: "n", port: 4100, network: "f" });
     expect(args.join(" ")).toBe(
