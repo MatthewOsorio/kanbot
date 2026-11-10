@@ -184,9 +184,9 @@ test("a blocked ticket shows Duckworth's questions; Resume sends the answer back
   await newBoard(page);
   await addTicket(page, "Pick a filter");
   await card(page, "Pick a filter").click();
-  await page.getByLabel("Labels").fill("replay:needs-input");
-  await page.getByLabel("Labels").blur();
-  await expect(page.getByLabel("Labels")).toHaveValue("replay:needs-input");
+  await page.getByRole("textbox", { name: "Labels" }).fill("replay:needs-input");
+  await page.getByRole("textbox", { name: "Labels" }).blur();
+  await expect(page.getByRole("textbox", { name: "Labels" })).toHaveValue("replay:needs-input");
   await page.keyboard.press("Escape");
 
   await drag(page, "Pick a filter", "Planning");
