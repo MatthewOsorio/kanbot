@@ -1,6 +1,7 @@
 // Project commands' containers (§7): which image, building it, and the `docker run` line.
 import { execFile, spawn } from "node:child_process";
-import { posix } from "node:path";
+import { statSync } from "node:fs";
+import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { IMAGE_REF } from "@kanbot/shared";
 import { git, type ProjectConfig } from "@kanbot/shared/server";
@@ -29,6 +30,15 @@ const mountPath = (p: string) =>
   // shortcut: Windows (dev only) mounts C:\a at /c/a; the server is Linux, where the path is unchanged.
   process.platform === "win32" ? `/${p[0]!.toLowerCase()}${p.slice(2).replaceAll("\\", "/")}` : p;
 
+/** A worktree's `.git` is a file naming its repository; anything else (a plain checkout) gets no extra mount. */
+const isGitFile = (cwd: string) => {
+  try {
+    return statSync(join(cwd, ".git")).isFile();
+  } catch {
+    return false;
+  }
+};
+
 /** Label on every container Kanbot starts, so they can be found and removed (`kanbot.run=<run id>` for agents'). */
 export const LABEL = "kanbot";
 
@@ -54,6 +64,9 @@ export function dockerRun(
     ...(o.name ? ["--name", o.name] : []),
     "-v",
     `${cwd}:${dir}`,
+    // Read-only: code in the container could repoint it at a gitdir with `core.fsmonitor`, which the
+    // worker's own `git status` would then run, beside the Docker socket.
+    ...(isGitFile(cwd) ? ["-v", `${join(cwd, ".git")}:${dir}/.git:ro`] : []),
     "-w",
     dir,
     "-v",
@@ -86,7 +99,27 @@ export async function projectImage(
 ): Promise<string | undefined> {
   if (config.image) return config.image;
   if (!config.dockerfile) return defaultImage();
-  const { file, context } = config.dockerfile;
+  const { tag, tree, inContext } = await devcontainerImage(
+    repoPath,
+    defaultBranch,
+    config.dockerfile,
+    key,
+  );
+  const built = await execFileP("docker", ["image", "inspect", tag]).then(
+    () => true,
+    () => false,
+  );
+  if (!built) await buildImage(repoPath, tree, inContext, tag);
+  return tag;
+}
+
+/** The tag a devcontainer's image has on the default branch: the project's key and the build context's tree hash. */
+export async function devcontainerImage(
+  repoPath: string,
+  defaultBranch: string,
+  { file, context }: NonNullable<ProjectConfig["dockerfile"]>,
+  key: string,
+) {
   const inContext = context === "." ? file : posix.relative(context, file);
   if (inContext.startsWith("../"))
     throw new Error(
@@ -95,12 +128,7 @@ export async function projectImage(
   const tree = `${defaultBranch}:${context === "." ? "" : context}`;
   const hash = (await git(repoPath, ["rev-parse", tree])).trim().slice(0, 12);
   const tag = `kanbot-${key.toLowerCase().replace(/[^a-z0-9]/g, "")}:${hash}`;
-  const built = await execFileP("docker", ["image", "inspect", tag]).then(
-    () => true,
-    () => false,
-  );
-  if (!built) await buildImage(repoPath, tree, inContext, tag);
-  return tag;
+  return { tree, inContext, tag };
 }
 
 /**
