@@ -405,7 +405,7 @@ export async function moveTicket(
     throw new HttpError(400, "invalid_position", "position is not a valid order key");
   }
   // Before the transaction: GitHub is slow, and a PR that can't be closed stops the move.
-  const closed = await closePrForDone(id, toColumnId, !!confirmClose);
+  const closed = await closePrForDone(id, toColumnId, !!confirmClose, !!confirmCancel);
   return db.transaction(async (tx) => {
     const [t] = await tx
       .select({
@@ -492,7 +492,12 @@ export async function moveTicket(
 }
 
 /** A move into Done with an open PR (§3): 409 `pr_open` until confirmed, then the PR is closed. Returns its number. */
-async function closePrForDone(id: string, toColumnId: string, confirmed: boolean) {
+async function closePrForDone(
+  id: string,
+  toColumnId: string,
+  confirmed: boolean,
+  confirmCancel: boolean,
+) {
   const [row] = await db
     .select({
       prNumber: tickets.prNumber,
@@ -510,6 +515,10 @@ async function closePrForDone(id: string, toColumnId: string, confirmed: boolean
   const pr = await github(() => gh<PullRequest>(token, pull));
   if (pr.state !== "open" || pr.merged) return null;
   if (!confirmed) throw new HttpError(409, "pr_open", `Its PR #${row.prNumber} is still open`);
+  // Asked before the PR closes: refused after, the move would leave it closed with no pr_closed entry.
+  const active = await db.transaction((tx) => activeRun(tx, id));
+  if (active && !confirmCancel)
+    throw new HttpError(409, "run_active", `${active.agentSlug} is working on this ticket`);
   await github(() => gh(token, pull, { method: "PATCH", body: { state: "closed" } }));
   return row.prNumber;
 }

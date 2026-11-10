@@ -246,6 +246,7 @@ export const runs = pgTable(
       .where(sql`${t.state} in ('queued', 'running')`),
     index().on(t.state, t.createdAt),
     index().on(t.ticketId, t.createdAt),
+    index().on(t.endedAt), // today's spend (spendToday), on every claim
   ],
 );
 
