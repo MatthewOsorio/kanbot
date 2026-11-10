@@ -211,7 +211,8 @@ describe("the PR Review gate (FR-47)", () => {
       bounceCount: 0,
     });
     const imported = await db.select().from(comments).where(eq(comments.ticketId, ticket.id));
-    expect(imported.map((c) => [c.authorKind, c.file, c.line])).toEqual([
+    // One insert: the rows share created_at and their ids aren't monotonic within a millisecond, so any order.
+    expect(imported.map((c) => [c.authorKind, c.file, c.line]).sort()).toEqual([
       ["user", null, null],
       ["user", "src/todo.js", 12],
     ]);
