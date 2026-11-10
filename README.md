@@ -227,7 +227,6 @@ Kanbot is a personal project in active development, built for one developer on t
 Still to come: rebasing branches as main moves, the two missing agents, a public server with webhooks (today it is localhost and a 60-second poll), and per-project columns.
 
 - [`docs/requirements.md`](docs/requirements.md): the spec, with what is built and what is left (§16).
-- [`docs/history.md`](docs/history.md): what each finished milestone decided.
 
 ## Credits
 
