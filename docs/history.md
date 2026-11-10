@@ -205,7 +205,7 @@ A visual pass over the board and the drawer, plus a record of which agent change
 - **Themes:** light and dark, the OS setting by default, a toggle in the top bar, on Home and in Settings, remembered per browser (`theme-toggle.tsx`). Design tokens (slate and indigo, status colors) live in `apps/web/app/globals.css`; fonts are Plus Jakarta Sans and JetBrains Mono. `brand.tsx` holds the wordmark, and the home page moved into `home.tsx`.
 - **Agent colors:** agent frontmatter has an optional `color` (`packages/shared/src/agents.ts`; default slate). It marks the agent's column stripe, its cards' left stripe and its glyph avatar. A gate column is dashed and says "You decide".
 - **The ticket drawer is a centered dialog** (`ui/dialog.tsx`; `ui/sheet.tsx` removed), up to 85% of the screen height and scrolling inside.
-- **Who changed what:** `runs.files_changed` (migration 0009) holds the files a run itself changed in the worktree, committed or not, excluding files an earlier run left dirty. The worker records it even when the post-run checks fail (`apps/worker/src/run.ts`). `getDiff` in `apps/web/lib/tickets.ts` uses it to name the agents above each file in the Diff tab, and `getTicket` joins each artifact to the agent whose run produced it.
+- **Who changed what:** `runs.files_changed` holds the files a run itself changed in the worktree, committed or not, excluding files an earlier run left dirty. The worker records it even when the post-run checks fail (`apps/worker/src/run.ts`). `getDiff` in `apps/web/lib/tickets.ts` uses it to name the agents above each file in the Diff tab, and `getTicket` joins each artifact to the agent whose run produced it.
 
 **Changes to the spec:** Where things stand; §8 agent frontmatter (`color`); §11 `runs.files_changed`; §13 Board, Ticket drawer and General; §16, where the "Dark theme" row is gone from "Still to build".
 
@@ -235,6 +235,7 @@ A visual pass over the board and the drawer, plus a record of which agent change
 - **Onboarding's GitHub calls are the web app's, git is the worker's.** Detection is Kanbot's code, not an agent's. Baseline failures are skipped by the checks gate, not compared (a new break in an already-failing command is caught by review, QA and CI). The starter workflow runs in the project's image. Branch protection binds admins and never overwrites rules already there; it is checked at setup only.
 - **QA's browser is Kanbot's own five tools on `playwright-core`, not the Playwright plugin**: the plugin has about 25 tools, so fencing it would take a URL check per tool. Every request is fenced in one place (the browser context's routing). Screenshots live in Postgres (`bytea`), so they go with the ticket.
 - **The backup is a host cron job, not a service**, and deploys build on the server after CI.
+- **Migrations squashed (2026-11-10).** The 19 migrations (0000 to 0018) and their snapshots became one `0000_init`, because no database held real data. Anyone with an older local database drops it and runs `pnpm db:migrate` again. From here migrations are append-only. Older entries in this file that name a migration number refer to the old chain.
 
 ### Changes to the spec (`requirements.md`)
 
