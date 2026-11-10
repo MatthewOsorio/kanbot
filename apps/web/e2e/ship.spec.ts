@@ -1,4 +1,4 @@
-import { createDb, projects, tickets } from "@kanbot/shared/db";
+import { createDb, projects, runs, tickets } from "@kanbot/shared/db";
 import { expect, test } from "@playwright/test";
 import { eq } from "drizzle-orm";
 import { TEST_DATABASE_URL } from "../playwright.config";
@@ -88,7 +88,19 @@ test("Ship, PR Review and Done confirmations, and the PR on the card and drawer"
     code: "pr_open",
     message: "Its PR #7 is still open",
   });
-  expect((await move("done", { confirmClose: true })).status()).toBe(204);
+  // An agent at work: asked before the PR closes, so the confirmed retry still closes it and logs pr_closed.
+  const db3 = createDb(TEST_DATABASE_URL);
+  await db3.insert(runs).values({
+    ticketId: t.id,
+    agentSlug: "sir-codes-a-lot",
+    columnSlug: "in_progress",
+    state: "running",
+  });
+  await db3.$client.end();
+  const busy = await move("done", { confirmClose: true });
+  expect(busy.status()).toBe(409);
+  expect((await busy.json()).error.code).toBe("run_active");
+  expect((await move("done", { confirmClose: true, confirmCancel: true })).status()).toBe(204);
   const activity = await (await request.get(`/api/tickets/${t.id}/activity`)).json();
   expect(activity.map((a: { action: string }) => a.action)).toContain("pr_closed");
   // Closed now: moving it out of Done and back asks nothing more about the PR. Archie may still be at work

@@ -21,8 +21,7 @@ function ensureListening(): Promise<void> {
     client.on("error", reconnect);
     client.on("notification", (msg) => {
       if (!msg.payload) return;
-      const envelope = JSON.parse(msg.payload) as EventEnvelope;
-      for (const l of listeners) l(envelope);
+      fanOut(JSON.parse(msg.payload) as EventEnvelope);
     });
     try {
       await client.connect();
@@ -34,8 +33,23 @@ function ensureListening(): Promise<void> {
   })());
 }
 
+/** Every listener gets the event: one whose stream already closed must not starve the rest. */
+export function fanOut(envelope: EventEnvelope) {
+  for (const l of listeners)
+    try {
+      l(envelope);
+    } catch {
+      listeners.delete(l);
+    }
+}
+
 export async function subscribe(listener: Listener): Promise<() => void> {
   listeners.add(listener);
-  await ensureListening();
+  try {
+    await ensureListening();
+  } catch (e) {
+    listeners.delete(listener); // its stream fails with this error; the browser reconnects
+    throw e;
+  }
   return () => listeners.delete(listener);
 }

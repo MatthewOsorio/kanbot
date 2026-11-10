@@ -90,9 +90,21 @@ export async function runBaseline(
 }
 
 /** The environment project commands get: the worker's, minus its credentials. */
-export function commandEnv() {
-  const { DATABASE_URL: _db, ANTHROPIC_API_KEY: _key, ...env } = process.env;
-  return env;
+export const commandEnv = () => withoutSecrets(["ANTHROPIC_API_KEY"]);
+
+/** Kanbot's own credentials: the database, and the keys that sign the owner's session and decrypt the App. */
+const SECRETS = [
+  "DATABASE_URL",
+  "TEST_DATABASE_URL",
+  "POSTGRES_PASSWORD",
+  "KANBOT_SESSION_SECRET",
+  "KANBOT_ENCRYPTION_KEY",
+];
+
+/** The worker's environment without Kanbot's credentials (and `also`), for anything agents or projects run. */
+export function withoutSecrets(also: string[] = []) {
+  const drop = new Set([...SECRETS, ...also]);
+  return Object.fromEntries(Object.entries(process.env).filter(([k]) => !drop.has(k)));
 }
 
 /**
