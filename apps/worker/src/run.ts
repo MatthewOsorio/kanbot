@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, matchesGlob, resolve } from "node:path";
 import {
+  agentActor,
   type AgentConfig,
   botIdentity,
   type Db,
@@ -26,7 +27,7 @@ import { buildContext } from "./context";
 import { redact, redactText } from "./runtime/redact";
 import { record } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
-import { pullBranch, pullDefaultBranch, pushAndOpenPr } from "./ship";
+import { keepCurrent, pullDefaultBranch, pushAndOpenPr, recordRebase } from "./ship";
 import {
   changedSince,
   checkAfterRun,
@@ -175,12 +176,28 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
           .set({ worktreePath: wt.path, branchName: wt.branch })
           .where(eq(tickets.id, ticket.id));
       // FR-48: the next run starts from the PR branch's head on GitHub, the owner's pushes included.
-      if (project.githubRepo && project.githubOwner && ticket.prNumber)
-        await pullBranch(
-          db,
-          { githubOwner: project.githubOwner, githubRepo: project.githubRepo },
-          wt,
+      const gh =
+        project.githubRepo && project.githubOwner
+          ? { githubOwner: project.githubOwner, githubRepo: project.githubRepo }
+          : null;
+      // FR-51: then onto the default branch (just brought up to GitHub's), so the run builds on what merged.
+      const { pushedSha, conflict } = await keepCurrent(
+        db,
+        gh,
+        !!ticket.prNumber,
+        wt,
+        project.defaultBranch,
+      );
+      if (pushedSha)
+        await db.transaction((tx) =>
+          recordRebase(tx, ticket, project.defaultBranch, pushedSha, agentActor(run.agentSlug)),
         );
+      if (conflict)
+        return finish(db, run.id, {
+          state: "awaiting_input",
+          error: `Rebasing onto ${conflict.onto} hit conflicts in ${conflict.files.join(", ")}`,
+          conflict,
+        });
       before = await snapshot(wt.path, project.defaultBranch);
     }
     canEdit = editScope(agent.editScope, config);

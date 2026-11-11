@@ -18,7 +18,7 @@ Last updated 2026-11-10 (M5 closed; its unfinished rows moved to M6).
   - Quality gates and epics (M4.5): the worker's checks gate (build, lint and test after every build run, before Code Review); Nancy's security pass with Cloudflare's security-audit skill; epics, where Plan B splits a ticket or a technical doc into proposed tickets the owner accepts into Backlog.
   - The UI revamp (after M4.5): light and dark themes with a toggle, slate and indigo design tokens, Plus Jakarta Sans and JetBrains Mono, and agent colors: each agent file names a color, which marks its column, its cards and its glyph avatar. The ticket drawer is a centered dialog, and its artifacts and diff files name the agent that made them (`runs.files_changed`).
 - **How it runs:** locally only, bound to 127.0.0.1, behind Sign in with GitHub (the owner only). Tested on Windows only. Project commands, image, env vars, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
-- **Next: M6.** It starts with keeping branches current (rebase before each run and when main moves, FR-51; GitHub status in `/api/health`), then the leftovers moved from M5 (§16).
+- **M6 (started 2026-11-10).** Phase 1 is built: branches are kept current (rebase before each run and when main moves, FR-51, FR-48) and `/api/health` reports GitHub. Next are the leftovers in §16.
 
 The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it.
 
@@ -270,7 +270,7 @@ Requirements marked MVP must ship in the first usable version; Later items are d
 | FR-45 | Project setup verifies branch protection on the default branch (PR required, 1 approval, required checks, no force-push) and offers to apply it; agents stay disabled on unprotected projects unless overridden. | MVP |
 | FR-46 | CI status shown on cards and in the drawer; failing CI bounces the ticket to In Progress with a log excerpt. | MVP |
 | FR-47 | PR Review gate: human review comments are imported, "changes requested" bounces to In Progress, and the Merge button is enabled only after a human approval. | MVP |
-| FR-48 | Commits pushed by the human to a ticket branch are detected and never rewritten; the next run starts from the latest head. | MVP |
+| FR-48 | Commits pushed by the human to a ticket branch are detected and never lost or overwritten by Kanbot's own commits; the next run starts from the latest head. A rebase onto main (FR-51) keeps their content and authorship but gives them new SHAs. | MVP |
 | FR-49 | Remove the worktree when a ticket reaches Done or is deleted (the worker does it, not Archie); keep the branch until merged. | MVP |
 | FR-50 | Touch set per ticket, project hotspot groups, and an overlap check before In Progress (hotspot overlap always serializes); per-project `overlapPolicy` of `serialize` (default) or `parallel`. | MVP |
 | FR-51 | When main moves, rebase overlapping in-flight branches; clean rebases push with `--force-with-lease` on `kanbot/*` branches only. | MVP |
@@ -507,7 +507,7 @@ Outside services fail routinely, so the worker sorts every error into transient 
 | Database unavailable | The web app shows an error page; the worker stops claiming jobs until it reconnects. |
 | Disk over 90% full | No new runs start and a banner appears. A nightly cleanup job prunes worktrees of finished tickets, package caches and run logs past retention, so this should be rare. |
 
-`GET /api/health` reports database, worker, Anthropic and GitHub status; the board's top bar shows it as a single indicator. The worker counts as up while it holds a Postgres connection named `kanbot-worker` (`pg_stat_activity`), so no heartbeat table is needed. Anthropic is judged from the latest runs: an API retry in a running run is `degraded`, an API error on the last finished run is `down`. GitHub reports `unknown` until M5.
+`GET /api/health` reports database, worker, Anthropic and GitHub status; the board's top bar shows it as a single indicator. The worker counts as up while it holds a Postgres connection named `kanbot-worker` (`pg_stat_activity`), so no heartbeat table is needed. Anthropic is judged from the latest runs: an API retry in a running run is `degraded`, an API error on the last finished run is `down`. GitHub is judged by a call to `GET /app` with the App's own key: `ok` when it answers, `degraded` when GitHub refuses the key (4xx, e.g. the App was deleted), `down` on a network error or a 5xx, `unknown` before an App is connected. It is checked on each health poll (every 30 s from the board), with no cache.
 
 ### Testing without real agents
 
@@ -585,10 +585,13 @@ Nancy catches the overlap that file lists miss: one ticket changing a contract t
 
 ### Keeping in-flight branches current
 
-- Before every agent run, the worker fetches and, if the ticket branch is behind main, rebases it first. Agents never run git rebase themselves.
-- When a PR merges into main, the worker finds open tickets whose touch sets overlap the merged files and queues a rebase for each.
-- A clean rebase is pushed with `--force-with-lease`. This is the only force-push in the system, done by the worker and only on `kanbot/*` branches. CI then reruns on GitHub.
-- A rebase with conflicts starts **Marge Conflict**.
+- Before every agent run in a worktree column, the worker fast-forwards the clone's default branch from GitHub and, if the ticket branch is behind it, rebases the branch first. Agents never run git rebase themselves. Authors are kept; the committer is Kanbot.
+- A branch with a PR is first brought up to what is on GitHub (FR-48): a fast-forward when Kanbot has nothing new, and when both sides have commits, Kanbot's commits are replayed on top of the owner's, which that step leaves as they are. The rebase onto main that follows rewrites the whole branch, the owner's commits included: same content and authors, new SHAs, so the owner resets their local copy after Kanbot's force-push.
+- When a PR merges into main, the watcher rebases every other ticket in PR Review (or in Ship waiting on CI) with no run in flight whose touch set or hotspot overlaps the merged ticket's. Tickets still before Ship rebase when their next run starts.
+- A rebased branch with a PR is pushed with `--force-with-lease`, leased on the head GitHub had when it was fetched. This is the only force-push in the system, done by the worker and only on `kanbot/*` branches. CI then reruns on GitHub.
+- A worktree with uncommitted changes to tracked files is not rebased (a stash re-apply can fail silently); the branch stays behind main until a run starts on a clean worktree. Untracked files, such as build output, don't count.
+- The watcher rebases once per merge and doesn't retry a failure (it is logged); the next run's own rebase covers that ticket. A run that starts between the watcher's idle check and its rebase can race it.
+- A rebase with conflicts is aborted (the branch is left as it was) and the ticket goes to Blocked with the conflicted files and hunks as a test-report artifact (shown as a diff, not side by side, until the side-by-side diff exists). Until Marge Conflict ships (M6), that is every conflict.
 
 ### Marge Conflict
 
@@ -653,7 +656,7 @@ Captain Ship-It opens the PR with a description linking the ticket, plan, review
 | --- | --- | --- |
 | Approve and merge | GitHub (a Merge button in Kanbot is on the M6 table) | Ticket to Done; Archie runs. Kanbot never merges without a human click. |
 | Request changes | GitHub review, or comments in Kanbot's Diff tab | Comments imported; ticket bounces to In Progress; Sir Codes-a-Lot pushes fixes to the same PR, which goes back through Code Review and QA. A "small fix" checkbox to skip straight back to PR Review is on the M6 table. |
-| Push their own commits | Locally or on GitHub | Kanbot records the new head; the next agent run starts from it, and human commits are never rewritten. |
+| Push their own commits | Locally or on GitHub | Kanbot records the new head; the next agent run starts from it, and Kanbot's own commits never overwrite them (a rebase onto main later gives them new SHAs, §9). |
 | Close the PR | GitHub | Ticket returns to Backlog; worktree removed, branch kept. |
 
 ### Where the human is in the loop
@@ -897,9 +900,7 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 
 | Item | Spec | Notes |
 | --- | --- | --- |
-| Rebase onto the default branch before each run; auto-rebase when main moves | §9, FR-51 | Moved from M5 on 2026-11-10 (was phase 5c). Before each run on a GitHub project the worker fast-forwards the clone's default branch from GitHub (best effort, it only warns), so Plan B and new ticket branches see merged PRs. Existing ticket branches aren't rebased yet. Ends with two tickets in flight while main moves. |
-| A branch the owner pushed to while Kanbot also committed (diverged) | FR-48, §9 | Moved from M5 on 2026-11-10. The run stops with "both have commits the other lacks"; the owner merges by hand. Rebasing it comes with FR-51 above. |
-| GitHub status in `/api/health` | §8 | Moved from M5 on 2026-11-10 (was phase 5c). Health reports GitHub `unknown` until then. |
+| Check rebasing with two real tickets in flight while main moves | §9, FR-51 | Built in M6 phase 1 and tested against local repos and the GitHub stub; not yet tried on a real repo (owner's call, e.g. Neural-Noir-Website). |
 | `blockWritesOutsideWorkingDirectories` | §7, §14 | Moved from M5 on 2026-11-10. Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
 | SDK `sandbox` | §7, §14 | Moved from M5 on 2026-11-10. Linux/macOS only (dev is Windows; Kanbot itself runs on Linux in WSL). |
 | Disk over 90% full: no new runs and a banner | §8 failure handling | Moved from M5 on 2026-11-10. The nightly cleanup exists; the guard itself was never built (found 2026-11-06). |

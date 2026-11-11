@@ -1,6 +1,19 @@
 // Ship (requirements §4, FR-43): after Captain Ship-It's run, the worker (never an agent) pushes the
 // ticket branch and opens or updates its PR with the App's installation token.
-import { type Db, git, gitAuth, loadGitHubApp, repoToken, upsertPr } from "@kanbot/shared/server";
+import {
+  type Actor,
+  type Db,
+  git,
+  gitAuth,
+  loadGitHubApp,
+  logActivity,
+  publish,
+  repoToken,
+  tickets,
+  type Tx,
+  upsertPr,
+} from "@kanbot/shared/server";
+import { eq } from "drizzle-orm";
 
 export type ShippedPr = { number: number; url: string; headSha: string };
 
@@ -58,27 +71,141 @@ export async function pullDefaultBranch(
   }
 }
 
+export type Conflict = { files: string[]; diff: string };
+
+const isAncestor = (cwd: string, a: string, b: string) =>
+  git(cwd, ["merge-base", "--is-ancestor", a, b]).then(
+    () => true,
+    () => false,
+  );
+
 /**
- * FR-48: before a run on a ticket with a PR, take the commits pushed to its branch on GitHub (the owner's own).
- * Fast-forward only, so nobody's commits are rewritten; a branch that diverged stops the run (rebasing is M6, FR-51).
+ * FR-51: replays the branch's own commits onto `onto`. Authors are kept; the committer is Kanbot. A conflict aborts the
+ * rebase (the worktree is left as it was) and returns the conflicted files and their hunks.
+ * shortcut: the hunks are cut at 400 lines; show them side by side when the side-by-side diff exists (§16).
  */
-export async function pullBranch(
+export async function rebaseBranch(
+  wt: { path: string; branch: string },
+  onto: string,
+): Promise<{ rebased: boolean; conflict?: Conflict }> {
+  if (!wt.branch.startsWith("kanbot/")) throw new Error(`Refusing to rebase ${wt.branch}`);
+  if (await isAncestor(wt.path, onto, "HEAD")) return { rebased: false };
+  // shortcut: a worktree with uncommitted changes to tracked files is left behind main (autostash can exit 0 with a
+  // conflicted pop); the next clean run rebases it. Untracked files don't count: build output must not stop rebasing.
+  if ((await git(wt.path, ["status", "--porcelain", "--untracked-files=no"])).trim())
+    return { rebased: false };
+  try {
+    await git(wt.path, ["rebase", onto], {
+      GIT_COMMITTER_NAME: "Kanbot",
+      GIT_COMMITTER_EMAIL: "kanbot@localhost",
+    });
+    return { rebased: true };
+  } catch (e) {
+    const files = (await git(wt.path, ["diff", "--name-only", "--diff-filter=U"]).catch(() => ""))
+      .split("\n")
+      .filter(Boolean);
+    if (!files.length) {
+      await git(wt.path, ["rebase", "--abort"]).catch(() => {});
+      throw e;
+    }
+    const diff = (await git(wt.path, ["diff"]).catch(() => ""))
+      .split("\n")
+      .slice(0, 400)
+      .join("\n");
+    await git(wt.path, ["rebase", "--abort"]);
+    return { rebased: false, conflict: { files, diff } };
+  }
+}
+
+/** The artifact text for a conflict (shown on the ticket, FR-51). */
+export const conflictMarkdown = (onto: string, c: Conflict) =>
+  `Rebasing this branch onto \`${onto}\` hit conflicts in ${c.files.map((f) => `\`${f}\``).join(", ")}. Nothing was changed. Resolve it on the branch, then move the ticket on.\n\n\`\`\`diff\n${c.diff.replaceAll("```", "'''")}\n\`\`\``;
+
+/**
+ * The only force-push in the system (FR-51): a rebased `kanbot/*` branch, with a lease on what GitHub had when we
+ * last fetched it, so anyone's push in between wins and the next run reports it.
+ */
+async function pushRebased(
   db: Db,
   p: { githubOwner: string; githubRepo: string },
   wt: { path: string; branch: string },
+  remoteSha: string,
 ) {
+  if (!wt.branch.startsWith("kanbot/")) throw new Error(`Refusing to push ${wt.branch}`);
+  const token = await appToken(db, p);
+  await git(
+    wt.path,
+    [
+      "push",
+      `--force-with-lease=refs/heads/${wt.branch}:${remoteSha}`,
+      "origin",
+      `HEAD:refs/heads/${wt.branch}`,
+    ],
+    gitAuth(token),
+  );
+  return (await git(wt.path, ["rev-parse", "HEAD"])).trim();
+}
+
+/** After a force-push of a rebased branch: the new head, CI starting over, and the timeline entry (FR-51). */
+export async function recordRebase(
+  tx: Tx,
+  t: { id: string; projectId: string },
+  onto: string,
+  sha: string,
+  actor: Actor,
+) {
+  await tx
+    .update(tickets)
+    .set({ headSha: sha, ciState: "pending", updatedAt: new Date() })
+    .where(eq(tickets.id, t.id));
+  await logActivity(tx, t.id, "pushed", { rebasedOnto: onto, sha }, actor);
+  await publish(tx, t.projectId, {
+    type: "ticket.updated",
+    ticketId: t.id,
+    fields: ["headSha", "ciState"],
+  });
+}
+
+/**
+ * FR-48 + FR-51: brings a ticket's worktree up to date: the owner's pushes first (when the ticket has a PR), then the
+ * default branch. A rebased PR branch is force-pushed with a lease; the rebase gives every commit on the branch, the
+ * owner's included, a new SHA (same content and authors). A conflict leaves the worktree as it was.
+ */
+export async function keepCurrent(
+  db: Db,
+  gh: { githubOwner: string; githubRepo: string } | null,
+  hasPr: boolean,
+  wt: { path: string; branch: string },
+  defaultBranch: string,
+): Promise<{ pushedSha?: string; conflict?: Conflict & { onto: string } }> {
+  const pulled = gh && hasPr ? await pullBranch(db, gh, wt) : null;
+  if (pulled?.conflict) return { conflict: { onto: `${wt.branch} on GitHub`, ...pulled.conflict } };
+  const r = await rebaseBranch(wt, defaultBranch);
+  if (r.conflict) return { conflict: { onto: defaultBranch, ...r.conflict } };
+  if (r.rebased && gh && pulled)
+    return { pushedSha: await pushRebased(db, gh, wt, pulled.remoteSha) };
+  return {};
+}
+
+/**
+ * FR-48: before a run on a ticket with a PR, take the commits pushed to its branch on GitHub (the owner's own).
+ * Fast-forwards when Kanbot has nothing new; when both have commits, Kanbot's are replayed on top of the owner's, so
+ * this step never rewrites the owner's commits (a later rebase onto main does, see keepCurrent). Returns GitHub's head
+ * (the lease for a later push) and any conflict.
+ */
+async function pullBranch(
+  db: Db,
+  p: { githubOwner: string; githubRepo: string },
+  wt: { path: string; branch: string },
+): Promise<{ remoteSha: string; conflict?: Conflict }> {
   const token = await appToken(db, p);
   await git(wt.path, ["fetch", "-q", "origin", `refs/heads/${wt.branch}`], gitAuth(token));
-  const contains = (a: string, b: string) =>
-    git(wt.path, ["merge-base", "--is-ancestor", a, b]).then(
-      () => true,
-      () => false,
-    );
-  if (await contains("FETCH_HEAD", "HEAD")) return false;
-  if (!(await contains("HEAD", "FETCH_HEAD")))
-    throw new Error(
-      `${wt.branch} on GitHub and Kanbot's worktree both have commits the other lacks. Merge them on the branch by hand, then retry.`,
-    );
-  await git(wt.path, ["merge", "-q", "--ff-only", "FETCH_HEAD"]);
-  return true;
+  const remoteSha = (await git(wt.path, ["rev-parse", "FETCH_HEAD"])).trim();
+  if (await isAncestor(wt.path, remoteSha, "HEAD")) return { remoteSha };
+  if (await isAncestor(wt.path, "HEAD", remoteSha)) {
+    await git(wt.path, ["merge", "-q", "--ff-only", remoteSha]);
+    return { remoteSha };
+  }
+  const { conflict } = await rebaseBranch(wt, remoteSha);
+  return { remoteSha, conflict };
 }

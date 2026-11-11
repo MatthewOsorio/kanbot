@@ -15,10 +15,24 @@ import {
   type Tx,
 } from "@kanbot/shared/server";
 import { and, eq, max } from "drizzle-orm";
+import { type Conflict, conflictMarkdown } from "./ship";
 
 export type Run = typeof runs.$inferSelect;
 
 export type TicketRef = { id: string; projectId: string };
+
+/** A rebase that hit conflicts (FR-51): the files and hunks, as a test report on the ticket. */
+export const storeConflict = (
+  tx: Tx,
+  ticket: TicketRef,
+  run: Pick<Run, "id"> | null,
+  c: Conflict & { onto: string },
+) =>
+  storeArtifact(tx, ticket, run, {
+    kind: "test_report",
+    title: `Rebase conflict with ${c.onto}`,
+    markdown: conflictMarkdown(c.onto, c),
+  });
 
 /** Adds an agent comment, logs it and announces it. */
 export async function agentComment(
