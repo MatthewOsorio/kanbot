@@ -110,7 +110,9 @@ export function describe(a: Activity): string {
     case "review_imported":
       return `@${String(d.by)} requested changes (${String(d.comments)} comment${d.comments === 1 ? "" : "s"} imported)`;
     case "pushed":
-      return `has a new head ${String(d.sha).slice(0, 7)} pushed outside Kanbot`;
+      return d.rebasedOnto
+        ? `was rebased onto ${String(d.rebasedOnto)} (new head ${String(d.sha).slice(0, 7)})`
+        : `has a new head ${String(d.sha).slice(0, 7)} pushed outside Kanbot`;
     default:
       return a.action;
   }

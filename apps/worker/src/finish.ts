@@ -26,7 +26,7 @@ import {
 } from "@kanbot/shared/server";
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { RuntimeResult } from "./runtime/types";
-import { type ShippedPr } from "./ship";
+import { type Conflict, conflictMarkdown, type ShippedPr } from "./ship";
 import { storeResults, storeArtifact, agentComment, type TicketRef } from "./results";
 
 export type Outcome = {
@@ -45,6 +45,8 @@ export type Outcome = {
   checks?: { command: string; output: string };
   /** The PR the worker pushed and opened after a Ship run (FR-43). */
   pr?: ShippedPr;
+  /** A rebase that hit conflicts (FR-51): stored as an artifact; the ticket goes to Blocked. */
+  conflict?: Conflict & { onto: string };
 };
 
 /** Maps the runtime's result to a run state (requirements §8 report step and failure handling). */
@@ -126,6 +128,13 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         kind: "test_report",
         title: `Kanbot checks: \`${o.checks.command}\` failed`,
         markdown: `Kanbot ran \`${o.checks.command}\` in the worktree after this run, and it failed. Fix it before review.\n\n\`\`\`\n${o.checks.output.replaceAll("```", "'''")}\n\`\`\``,
+      });
+
+    if (o.conflict)
+      await storeArtifact(tx, ticket, run, {
+        kind: "test_report",
+        title: `Rebase conflict with ${o.conflict.onto}`,
+        markdown: conflictMarkdown(o.conflict.onto, o.conflict),
       });
 
     if (o.pr) {

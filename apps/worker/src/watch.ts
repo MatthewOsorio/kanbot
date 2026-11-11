@@ -14,6 +14,7 @@ import {
   listReviews,
   loadGitHubApp,
   logActivity,
+  overlap,
   projectConfigOf,
   projects,
   publish,
@@ -26,9 +27,10 @@ import {
   tickets,
   workflowFiles,
 } from "@kanbot/shared/server";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { moveAndStart } from "./finish";
 import { storeArtifact } from "./results";
+import { conflictMarkdown, keepCurrent, pullDefaultBranch } from "./ship";
 import { redactText } from "./runtime/redact";
 
 const GITHUB = { kind: "agent" as const, name: "GitHub" }; // the timeline shows it as the actor
@@ -68,6 +70,7 @@ export async function watchGitHub(db: Db): Promise<number> {
       if (!tokens.has(w.project.id)) tokens.set(w.project.id, repoToken(app, owner!, repo!));
       const seen = await look(await tokens.get(w.project.id)!, owner!, repo!, w);
       if (await apply(db, w, seen)) changed++;
+      if (seen.event === "merged") await rebaseOthers(db, w);
     } catch (e) {
       tokens.delete(w.project.id); // a token error shouldn't stick for the rest of the tick
       console.error(`watching ${w.project.keyPrefix}-${w.ticket.number} failed`, e);
@@ -288,4 +291,87 @@ async function apply(db: Db, w: Watched, s: Seen): Promise<boolean> {
   // §10: a closed PR's ticket loses its worktree; the branch stays.
   if (removeAfter && w.project.repoPath) await removeWorktree(w.project.repoPath, removeAfter);
   return changed;
+}
+
+/**
+ * FR-51: main moved, so each idle PR (PR Review, or Ship waiting on CI) whose touch set overlaps the merged ticket's is
+ * rebased and force-pushed; CI reruns on GitHub. A conflict puts the ticket in Blocked with the hunks. Tickets with a
+ * run in flight, or still before Ship, rebase when their next run starts (run.ts).
+ * shortcut: a run that starts between the check and the rebase can race; the run's own rebase is then a no-op.
+ */
+async function rebaseOthers(db: Db, w: Watched) {
+  const p = w.project;
+  if (!p.repoPath || !p.githubOwner || !p.githubRepo) return;
+  const gh = { githubOwner: p.githubOwner, githubRepo: p.githubRepo };
+  await pullDefaultBranch(db, { ...gh, defaultBranch: p.defaultBranch, repoPath: p.repoPath });
+  const config = await projectConfigOf(db, p);
+  const others = await db
+    .select({ ticket: tickets, column: columns })
+    .from(tickets)
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .where(
+      and(
+        eq(tickets.projectId, p.id),
+        ne(tickets.id, w.ticket.id),
+        inArray(columns.slug, WATCHED),
+        isNotNull(tickets.prNumber),
+        isNotNull(tickets.worktreePath),
+        isNotNull(tickets.branchName),
+      ),
+    );
+  for (const { ticket: t, column } of others) {
+    if (column.slug === "ship" && t.statusFlag !== "pr_open") continue;
+    const shared = overlap(w.ticket.touchPaths, t.touchPaths, config.hotspots);
+    if (!shared.files.length && !shared.hotspots.length) continue;
+    try {
+      if (await db.transaction((tx) => activeRun(tx, t.id))) continue;
+      const wt = { path: t.worktreePath!, branch: t.branchName! };
+      const { pushedSha, conflict } = await keepCurrent(db, gh, true, wt, p.defaultBranch);
+      await db.transaction(async (tx) => {
+        const key = `${p.keyPrefix}-${t.number}`;
+        if (pushedSha) {
+          await tx
+            .update(tickets)
+            .set({ headSha: pushedSha, ciState: "pending", updatedAt: new Date() })
+            .where(eq(tickets.id, t.id));
+          await logActivity(
+            tx,
+            t.id,
+            "pushed",
+            { rebasedOnto: p.defaultBranch, sha: pushedSha },
+            GITHUB,
+          );
+          await publish(tx, p.id, {
+            type: "ticket.updated",
+            ticketId: t.id,
+            fields: ["headSha", "ciState"],
+          });
+        }
+        if (!conflict) return;
+        await tx.update(tickets).set({ statusFlag: "needs_input" }).where(eq(tickets.id, t.id));
+        await storeArtifact(tx, t, null, {
+          kind: "test_report",
+          title: `Rebase conflict with ${conflict.onto}`,
+          markdown: conflictMarkdown(conflict.onto, conflict),
+        });
+        const cols = await tx.select().from(columns).where(eq(columns.projectId, p.id));
+        await moveAndStart(
+          tx,
+          t,
+          column,
+          cols.find((c) => c.slug === "blocked")!,
+          GITHUB,
+          false,
+        );
+        await publish(tx, p.id, {
+          type: "notification",
+          kind: "needs_input",
+          ticketId: t.id,
+          message: `${key}: rebasing onto ${conflict.onto} hit conflicts, needs your help`,
+        });
+      });
+    } catch (e) {
+      console.error(`rebasing ${p.keyPrefix}-${t.number} failed`, e);
+    }
+  }
 }

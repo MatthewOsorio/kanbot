@@ -1,5 +1,5 @@
 import { ANTHROPIC_API_ERROR } from "@kanbot/shared";
-import { runEvents, runs } from "@kanbot/shared/server";
+import { appJwt, gh, GitHubError, loadGitHubApp, runEvents, runs } from "@kanbot/shared/server";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 
@@ -9,7 +9,7 @@ type Status = "ok" | "degraded" | "down" | "unknown";
 
 /**
  * Health of the parts the board depends on (requirements §8). The worker is "up" while it holds a
- * Postgres connection named kanbot-worker; Anthropic is judged from the latest runs. GitHub stays "unknown" until M6.
+ * Postgres connection named kanbot-worker; Anthropic is judged from the latest runs; GitHub from a call with the App's key.
  */
 export async function GET() {
   try {
@@ -51,6 +51,18 @@ export async function GET() {
     database: "ok",
     worker: workers && workers.n > 0 ? "ok" : "down",
     anthropic,
-    github: "unknown",
+    github: await githubStatus(),
   } satisfies Record<string, Status>);
+}
+
+/** Can the App's own key still talk to GitHub? No App is "unknown"; an outage is "down", a refused key "degraded". */
+async function githubStatus(): Promise<Status> {
+  try {
+    const app = await loadGitHubApp(db);
+    if (!app) return "unknown";
+    await gh(appJwt(app), "/app");
+    return "ok";
+  } catch (e) {
+    return e instanceof GitHubError && e.status < 500 ? "degraded" : "down";
+  }
 }
