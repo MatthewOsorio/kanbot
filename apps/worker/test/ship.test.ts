@@ -9,15 +9,19 @@ import {
   artifacts,
   columns,
   createDb,
+  git,
   projects,
   runs,
   settings,
   startColumnAgent,
   tickets,
-} from "@kanbot/shared/db";
-import { prepareSampleRepo, TEST_DATABASE_URL } from "@kanbot/shared/db/testing";
-import { startGitHubStub, type GitHubStub } from "@kanbot/shared/github-stub";
-import { git } from "@kanbot/shared/repo";
+} from "@kanbot/shared/server";
+import {
+  type GitHubStub,
+  prepareSampleRepo,
+  startGitHubStub,
+  TEST_DATABASE_URL,
+} from "@kanbot/shared/testing";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { claimNext } from "../src/queue";

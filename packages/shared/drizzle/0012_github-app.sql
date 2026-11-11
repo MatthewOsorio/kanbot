@@ -1,1 +1,0 @@
-ALTER TABLE "settings" ADD COLUMN "github_app" text;

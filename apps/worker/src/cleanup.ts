@@ -2,19 +2,53 @@ import { execFile } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { columns, projects, runEvents, runs, tickets, type Db } from "@kanbot/shared/db";
-import { removeWorktree } from "@kanbot/shared/repo";
+import {
+  columns,
+  type Db,
+  projectConfigOf,
+  projects,
+  removeWorktree,
+  runEvents,
+  runs,
+  tickets,
+} from "@kanbot/shared/server";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { devcontainerImage } from "./docker";
 import { worktreesRoot } from "./worktree";
 
 const execFileP = promisify(execFile);
+
+/**
+ * Images built from devcontainers carry the `kanbot` label (§7). Each project keeps the one its default
+ * branch builds now; older ones go (`until` filters on build time, so it would delete a current image too).
+ * One a running container still uses is refused by docker and stays.
+ */
+async function pruneImages(db: Db) {
+  const keep = new Set<string>();
+  for (const p of await db.select().from(projects).where(isNotNull(projects.repoPath))) {
+    const { image, dockerfile } = await projectConfigOf(db, p);
+    if (image || !dockerfile) continue;
+    keep.add((await devcontainerImage(p.repoPath!, p.defaultBranch, dockerfile, p.keyPrefix)).tag);
+  }
+  const listed = await execFileP("docker", [
+    "images",
+    "--filter",
+    "label=kanbot",
+    "--format",
+    "{{.Repository}}:{{.Tag}}",
+  ]);
+  for (const tag of listed.stdout.split("\n").map((t) => t.trim()))
+    if (tag && !tag.includes("<none>") && !keep.has(tag))
+      await execFileP("docker", ["rmi", tag]).catch(() => {}); // in use
+  await execFileP("docker", ["image", "prune", "-f", "--filter", "label=kanbot"]); // untagged leftovers
+}
 
 /** Run logs are kept this long, except each ticket's last run (§11). */
 const RUN_EVENTS_DAYS = 90;
 
 /**
  * The nightly disk cleanup (§8 "Disk over 90% full", M5): run logs past retention, worktrees that
- * finished tickets still hold or deleted tickets left behind, and project images Kanbot built that nothing has used for a week.
+ * finished tickets still hold or deleted tickets left behind, and project images Kanbot built that are no longer current.
  * shortcut: the shared `kanbot-cache` package volume isn't pruned; clear it by hand (docs/deploy.md) if it grows.
  */
 export async function nightlyCleanup(db: Db) {
@@ -55,20 +89,19 @@ export async function nightlyCleanup(db: Db) {
         .map((o) => `${o.prefix}-${o.number}`),
     );
     for (const d of readdirSync(root, { withFileTypes: true }))
-      if (d.isDirectory() && !keys.has(d.name) && (await removeWorktree(repo, join(root, d.name))))
+      // "_baseline" (onboarding) isn't a ticket key: it is in use, or onboarding removes it itself.
+      if (
+        d.isDirectory() &&
+        !d.name.startsWith("_") &&
+        !keys.has(d.name) &&
+        (await removeWorktree(repo, join(root, d.name)))
+      )
         worktrees++;
   }
 
-  // Images built from devcontainers carry the `kanbot` label (§7); an image still in use is kept.
-  await execFileP("docker", [
-    "image",
-    "prune",
-    "-af",
-    "--filter",
-    "label=kanbot",
-    "--filter",
-    "until=168h",
-  ]).catch((e: Error) => console.warn(`docker image prune failed: ${e.message}`));
+  await pruneImages(db).catch((e: Error) =>
+    console.warn(`docker image prune failed: ${e.message}`),
+  );
 
   return { runEvents: events.rowCount ?? 0, worktrees };
 }

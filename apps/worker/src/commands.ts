@@ -4,9 +4,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { uuidv7 } from "@kanbot/shared";
-import type { Baseline } from "@kanbot/shared/onboarding";
-import { type ProjectConfig } from "@kanbot/shared/repo";
+import { type Baseline, uuidv7 } from "@kanbot/shared";
+import { type ProjectConfig } from "@kanbot/shared/server";
 import { dockerRun, pullImage, removeContainers, shQuote, tailOf } from "./docker";
 
 const execFileP = promisify(execFile);

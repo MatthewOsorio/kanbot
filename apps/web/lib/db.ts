@@ -1,4 +1,4 @@
-import { createDb, type Db } from "@kanbot/shared/db";
+import { createDb, type Db } from "@kanbot/shared/server";
 
 const g = globalThis as { kanbotDb?: Db };
 

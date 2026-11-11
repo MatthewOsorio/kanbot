@@ -3,10 +3,20 @@ node_modules/
 next-env.d.ts
 *.tsbuildinfo
 .env
-evals/results/
+evals/
 .env.local
 test-results/
 playwright-report/
 coverage/
 apps/web/e2e/.auth.json
 .kanbot-repos/
+
+# Claude Code local settings
+.claude/
+
+# Local only: the owner's AI-session setup and records, kept on disk but not on GitHub
+/CLAUDE.md
+apps/web/AGENTS.md
+docs/history.md
+docs/m*-report.md
+scripts/

@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { redactText } from "../src/runtime/redact";
 import { appPort, listeningPorts } from "../src/qa-app";
@@ -30,6 +32,19 @@ describe("project commands in containers (§7)", () => {
         "-v kanbot-cache:/cache -e HOME=/cache --network container:f -e PORT=4100 " +
         "node:24 sh -c node --test",
     );
+  });
+
+  it("mounts a worktree's .git file read-only, so container code can't repoint git at its own config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kanbot-wt-"));
+    try {
+      expect(dockerRun("node:24", dir, "true").join(" ")).not.toContain(".git"); // no .git: nothing to mount
+      writeFileSync(join(dir, ".git"), "gitdir: /r/.git/worktrees/x\n");
+      expect(dockerRun("node:24", dir, "true").join(" ")).toMatch(
+        /-v \S+[\\/]\.git:\S+\/\.git:ro /,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("finds the ports listening in a namespace, preferring the one QA gave", () => {

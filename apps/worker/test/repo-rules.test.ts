@@ -1,11 +1,10 @@
 // Conventions checked across the whole tree, so they hold whichever change would have broken them.
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "../../..");
 const read = (path: string) => readFileSync(join(root, path), "utf8");
-const claudeMd = read("CLAUDE.md");
 
 const files = ["apps", "packages"]
   .flatMap((dir) =>
@@ -21,24 +20,6 @@ const files = ["apps", "packages"]
 const isTest = (p: string) => /\/(test|e2e)\/|\.(test|spec)\.tsx?$/.test(p);
 const sources = files.filter((p) => !isTest(p));
 const tests = files.filter(isTest);
-
-describe("CLAUDE.md matches the repo", () => {
-  it("names only paths that exist", () => {
-    const named = claudeMd.match(
-      /\b(apps|packages|fixtures|agents|plugins|docs|evals)\/[\w./-]+\.[a-z]+/g,
-    );
-    expect(named?.length).toBeGreaterThan(5);
-    // Next's build folder is gitignored, so a clean checkout doesn't have it.
-    const tracked = named!.filter((p) => !p.includes("/.next"));
-    expect(tracked.filter((p) => !existsSync(join(root, p)))).toEqual([]);
-  });
-
-  it("names every worker module", () => {
-    const modules = readdirSync(join(root, "apps/worker/src")).filter((f) => f.endsWith(".ts"));
-    expect(modules.length).toBeGreaterThan(5);
-    expect(modules.filter((f) => !claudeMd.includes(f))).toEqual([]);
-  });
-});
 
 describe("code conventions", () => {
   it(".env.example lists every variable the code reads", () => {

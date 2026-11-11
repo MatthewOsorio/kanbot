@@ -1,6 +1,5 @@
 import { DEFAULT_COLUMNS } from "@kanbot/shared";
-import { loadAgent } from "@kanbot/shared/agents";
-import { loadGitHubApp } from "@kanbot/shared/github";
+import { loadAgent, loadGitHubApp } from "@kanbot/shared/server";
 import { Home } from "@/components/home";
 import { db } from "@/lib/db";
 

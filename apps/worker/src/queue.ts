@@ -1,17 +1,17 @@
 // Which run goes next, and which come back after a crash, an outage or Pause all (§8).
 import { ANTHROPIC_API_ERROR } from "@kanbot/shared";
-import { loadAgent } from "@kanbot/shared/agents";
 import {
   activeRun,
+  agentActor,
   columns,
+  type Db,
   getSettings,
+  loadAgent,
   runs,
   spendToday,
   startColumnAgent,
   tickets,
-  type Db,
-  agentActor,
-} from "@kanbot/shared/db";
+} from "@kanbot/shared/server";
 import { and, eq, sql } from "drizzle-orm";
 import { finish } from "./finish";
 import type { Run } from "./results";

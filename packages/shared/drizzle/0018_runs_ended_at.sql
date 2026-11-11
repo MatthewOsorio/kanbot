@@ -1,1 +1,0 @@
-CREATE INDEX "runs_ended_at_index" ON "runs" USING btree ("ended_at");

@@ -1,0 +1,52 @@
+import { cp } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { Client } from "pg";
+import { git } from "../server/repo";
+import { createDb } from "../server/db";
+import { settings } from "../server/db/schema";
+
+export const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ?? "postgres://kanbot:kanbot@localhost:5432/kanbot_test";
+
+/** Creates the test database if missing and brings it to the latest migration (e2e and worker tests). */
+export async function prepareTestDatabase(url = TEST_DATABASE_URL) {
+  const u = new URL(url);
+  const dbName = u.pathname.slice(1);
+  const admin = new Client({
+    connectionString: Object.assign(new URL(u), { pathname: "/postgres" }).href,
+  });
+  await admin.connect();
+  const { rowCount } = await admin.query("select 1 from pg_database where datname = $1", [dbName]);
+  if (!rowCount) await admin.query(`create database "${dbName}"`);
+  await admin.end();
+
+  const db = createDb(url);
+  await migrate(db, {
+    migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
+  });
+  // Replay runs record made-up costs, so a test database would hit the $5 daily cap within a day of runs.
+  const reset = { paused: false, pausedReason: null, dailyBudgetUsd: 1_000 };
+  await db
+    .insert(settings)
+    .values({ id: 1, ...reset })
+    .onConflictDoUpdate({ target: settings.id, set: reset });
+  await db.$client.end();
+}
+
+/**
+ * Copies fixtures/sample-repo into `dir` (which must not exist) as a fresh git repo with one commit on
+ * `main`. Used by worker tests, e2e and `pnpm eval:agents`.
+ */
+export async function prepareSampleRepo(dir: string) {
+  await cp(fileURLToPath(new URL("../../../../fixtures/sample-repo", import.meta.url)), dir, {
+    recursive: true,
+  });
+  await git(dir, ["init", "-q", "-b", "main"]);
+  await git(dir, ["config", "user.name", "Sample Owner"]);
+  await git(dir, ["config", "user.email", "owner@sample.local"]);
+  await git(dir, ["config", "core.autocrlf", "false"]);
+  await git(dir, ["add", "-A"]);
+  await git(dir, ["commit", "-q", "-m", "Initial sample app"]);
+  return dir;
+}

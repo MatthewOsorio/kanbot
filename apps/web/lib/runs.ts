@@ -13,7 +13,7 @@ import {
   startColumnAgent,
   ticketChanged,
   tickets,
-} from "@kanbot/shared/db";
+} from "@kanbot/shared/server";
 import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
 import { HttpError, notFound } from "./api";
 import { db } from "./db";

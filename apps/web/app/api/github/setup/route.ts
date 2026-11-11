@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { loadGitHubApp } from "@kanbot/shared/github";
+import { loadGitHubApp } from "@kanbot/shared/server";
 import { NextResponse, type NextRequest } from "next/server";
 import { cookieOptions, newState, originOf, STATE_COOKIE } from "@/lib/auth";
 import { db } from "@/lib/db";

@@ -1,4 +1,4 @@
-import { loadGitHubApp } from "@kanbot/shared/github";
+import { loadGitHubApp } from "@kanbot/shared/server";
 import { LogIn } from "lucide-react";
 import { Wordmark } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";

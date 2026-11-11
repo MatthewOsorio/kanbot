@@ -1,20 +1,26 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, matchesGlob, resolve } from "node:path";
-import { loadAgent, type AgentConfig } from "@kanbot/shared/agents";
 import {
+  type AgentConfig,
+  botIdentity,
+  type Db,
+  decryptEnv,
+  git,
+  loadAgent,
+  loadGitHubApp,
+  type ProjectConfig,
+  projectConfigOf,
   projects,
   publish,
+  removeWorktree,
+  repoToken,
   runEvents,
   runs,
   screenshots,
   tickets,
-  projectConfigOf,
-  type Db,
-} from "@kanbot/shared/db";
-import { botIdentity, decryptEnv, loadGitHubApp, repoToken } from "@kanbot/shared/github";
-import { baselineFailures } from "@kanbot/shared/onboarding";
-import { git, removeWorktree, type ProjectConfig } from "@kanbot/shared/repo";
+} from "@kanbot/shared/server";
+import { baselineFailures } from "@kanbot/shared";
 import { and, count, eq } from "drizzle-orm";
 import { buildContext } from "./context";
 import { redact, redactText } from "./runtime/redact";

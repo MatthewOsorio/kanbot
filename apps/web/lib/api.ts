@@ -1,4 +1,4 @@
-import { AgentsDisabledError, QaSetupError } from "@kanbot/shared/db";
+import { AgentsDisabledError, QaSetupError } from "@kanbot/shared/server";
 import { z } from "zod";
 
 export class HttpError extends Error {

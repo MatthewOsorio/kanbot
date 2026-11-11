@@ -1,4 +1,4 @@
-import { apiBase, saveGitHubApp } from "@kanbot/shared/github";
+import { apiBase, saveGitHubApp } from "@kanbot/shared/server";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { STATE_COOKIE } from "@/lib/auth";

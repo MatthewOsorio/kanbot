@@ -4,13 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./db": "./src/db/index.ts",
-    "./db/testing": "./src/db/testing.ts",
-    "./agents": "./src/agents.ts",
-    "./repo": "./src/repo.ts",
-    "./github": "./src/github.ts",
-    "./onboarding": "./src/onboarding.ts",
-    "./github-stub": "./src/github-stub.ts"
+    "./server": "./src/server/index.ts",
+    "./testing": "./src/testing/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p . --noEmit",

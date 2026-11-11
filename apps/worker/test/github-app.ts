@@ -1,6 +1,5 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
-import { settings, type Db } from "@kanbot/shared/db";
-import { saveGitHubApp } from "@kanbot/shared/github";
+import { type Db, saveGitHubApp, settings } from "@kanbot/shared/server";
 
 /** Points the worker at a GitHub stub and stores a test App, replacing what the shared test database holds. */
 export async function connectTestApp(db: Db, stubUrl: string) {

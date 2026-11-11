@@ -2,6 +2,7 @@
 import { type VerdictPayload } from "@kanbot/shared";
 import {
   acceptanceCriteria,
+  agentActor,
   artifacts,
   comments,
   logActivity,
@@ -12,8 +13,7 @@ import {
   ticketLinks,
   tickets,
   type Tx,
-  agentActor,
-} from "@kanbot/shared/db";
+} from "@kanbot/shared/server";
 import { and, eq, max } from "drizzle-orm";
 
 export type Run = typeof runs.$inferSelect;

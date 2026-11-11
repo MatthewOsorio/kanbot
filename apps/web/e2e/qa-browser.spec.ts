@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prepareSampleRepo } from "@kanbot/shared/db/testing";
+import { prepareSampleRepo } from "@kanbot/shared/testing";
 import { expect, test } from "@playwright/test";
 
 // §4: QA's browser screenshots show under the test report of the run that took them, and open full size.

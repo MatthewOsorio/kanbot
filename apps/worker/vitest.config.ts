@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     globalSetup: "./test/global-setup.ts",
-    setupFiles: ["../../packages/shared/src/test-network-guard.ts"],
+    setupFiles: ["../../packages/shared/src/testing/test-network-guard.ts"],
     env: { KANBOT_RUNTIME: "replay", KANBOT_GITHUB_API: "http://127.0.0.1:9" },
     expect: { requireAssertions: true },
     testTimeout: 30_000,
