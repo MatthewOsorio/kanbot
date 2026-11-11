@@ -32,6 +32,7 @@ import {
   screenshots,
   startColumnAgent,
   ticketChanged,
+  ticketSpend,
   ticketLinks,
   tickets,
 } from "@kanbot/shared/server";
@@ -193,7 +194,7 @@ export async function getTicket(id: string) {
     .innerJoin(columns, eq(columns.id, tickets.columnId))
     .where(eq(tickets.id, id));
   if (!row) throw notFound("Ticket not found");
-  const [criteria, runList, artifactList, links, [cost], children, [parent], shots] =
+  const [criteria, runList, artifactList, links, cost, children, [parent], shots] =
     await Promise.all([
       db
         .select()
@@ -211,10 +212,7 @@ export async function getTicket(id: string) {
         .orderBy(desc(artifacts.createdAt), desc(artifacts.version)),
       linksOf(id),
       // A SQL sum, not the run list above: that one is capped at 20.
-      db
-        .select({ costUsd: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8` })
-        .from(runs)
-        .where(eq(runs.ticketId, id)),
+      ticketSpend(db, id),
       // An epic's children (UC-11), in creation order.
       db
         .select({
@@ -249,7 +247,7 @@ export async function getTicket(id: string) {
     columnSlug: row.columnSlug,
     criteria,
     runs: runList,
-    costUsd: cost?.costUsd ?? 0,
+    costUsd: cost,
     artifacts: artifactList,
     screenshots: shots,
     links,

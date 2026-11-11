@@ -76,7 +76,11 @@ export const projects = pgTable("projects", {
   dockerfile: jsonb("dockerfile").$type<ProjectConfig["dockerfile"]>(),
   // The project's env vars (§10), encrypted JSON {NAME: value} (github.ts encryptEnv); "" = not set yet.
   env: text("env"),
-  settings: jsonb("settings").$type<{ bounceLimit?: number; concurrency?: number }>(),
+  settings: jsonb("settings").$type<{
+    bounceLimit?: number;
+    concurrency?: number;
+    ticketBudgetUsd?: number;
+  }>(),
   ticketSeq: integer("ticket_seq").notNull().default(0),
   createdAt: createdAt(),
 });

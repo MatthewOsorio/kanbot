@@ -220,6 +220,7 @@ export const patchProjectBody = z
       .max(50),
     bounceLimit: z.number().int().min(1).max(10),
     concurrency: z.number().int().min(1).max(2),
+    ticketBudgetUsd: z.number().min(0.5).max(100),
     // The project's env vars (§10), the whole set: a string sets the value, null keeps the stored one,
     // a name left out is removed. Values are write-only: reads return names only.
     env: z

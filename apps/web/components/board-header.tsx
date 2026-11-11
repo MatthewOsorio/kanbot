@@ -9,7 +9,7 @@ import { api } from "@/lib/client";
 import type { Card } from "@/lib/projects";
 import type { settingsView } from "@/lib/settings";
 
-export type Health = Record<"database" | "worker" | "anthropic" | "github", string>;
+export type Health = Record<"database" | "worker" | "anthropic" | "github" | "disk", string>;
 
 export type SettingsView = Awaited<ReturnType<typeof settingsView>>;
 
@@ -160,6 +160,8 @@ export function Banner({ settings: s, health }: { settings: SettingsView; health
       `Agents are paused${s.pausedReason ? ` because of an ${s.pausedReason}` : ""}. Nothing new starts; stopped runs restart when you resume.`,
     s.spentTodayUsd >= s.dailyBudgetUsd &&
       `Daily budget reached (${usd(s.spentTodayUsd)} of ${usd(s.dailyBudgetUsd)}). Nothing new starts until midnight or until you raise the cap.`,
+    health?.disk === "degraded" &&
+      "A disk is over 90% full. Nothing new starts until space is freed (the nightly cleanup prunes old worktrees and logs).",
     health?.anthropic === "down" &&
       "Anthropic is unreachable. Interrupted runs restart on their own once it's back.",
   ].filter(Boolean);

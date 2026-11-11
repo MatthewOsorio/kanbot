@@ -19,6 +19,8 @@ import {
   runEvents,
   runs,
   screenshots,
+  TICKET_BUDGET_USD,
+  ticketSpend,
   tickets,
 } from "@kanbot/shared/server";
 import { baselineFailures } from "@kanbot/shared";
@@ -84,9 +86,25 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
     });
   }
 
-  // The daily cap (§14) can leave less than the agent's own budget.
-  const dayCapped = run.budgetUsd != null && run.budgetUsd < agent.maxBudgetUsd;
-  if (dayCapped) agent = { ...agent, maxBudgetUsd: run.budgetUsd! };
+  // The ticket's budget (§14): what its earlier runs cost is gone; Retry after raising it in project Settings.
+  const ticketCap = project.settings?.ticketBudgetUsd ?? TICKET_BUDGET_USD;
+  // Archie's retro in Done is exempt: a merged ticket must not show as failed because it was costly.
+  const ticketLeft =
+    run.columnSlug === "done" ? Infinity : ticketCap - (await ticketSpend(db, ticket.id));
+  if (ticketLeft < 0.01)
+    return finish(db, run.id, {
+      state: "budget_exceeded",
+      error: `Ticket budget reached: $${(ticketCap - ticketLeft).toFixed(2)} of $${ticketCap.toFixed(2)}. Raise it in project Settings, then Retry.`,
+    });
+
+  // The daily cap (§14) and the ticket's budget can leave less than the agent's own budget.
+  const ticketCapped = ticketLeft < Math.min(run.budgetUsd ?? Infinity, agent.maxBudgetUsd);
+  const dayCapped = !ticketCapped && run.budgetUsd != null && run.budgetUsd < agent.maxBudgetUsd;
+  if (ticketCapped) {
+    agent = { ...agent, maxBudgetUsd: ticketLeft };
+    // The day's reserve (spendToday) counts runs.budget_usd: release what this run can't spend.
+    await db.update(runs).set({ budgetUsd: ticketLeft }).where(eq(runs.id, run.id));
+  } else if (dayCapped) agent = { ...agent, maxBudgetUsd: run.budgetUsd! };
 
   // KANBOT_RECORD=1 saves each real run as a replay script (§8 recorded runs).
   const recording = process.env.KANBOT_RECORD === "1";
@@ -306,7 +324,9 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   }
 
   const outcome = outcomeOf(result);
-  if (dayCapped && outcome.state === "budget_exceeded")
+  if (ticketCapped && outcome.state === "budget_exceeded")
+    outcome.error = `Ticket budget reached: this run could spend only $${ticketLeft.toFixed(2)} of the $${ticketCap.toFixed(2)} ticket budget. Raise it in project Settings, then Retry.`;
+  else if (dayCapped && outcome.state === "budget_exceeded")
     outcome.error = `Daily budget reached: this run could spend only $${run.budgetUsd!.toFixed(2)} of what was left today`;
   if (wt && before) {
     // Who changed what (Diff tab); kept even when the checks below fail, since the changes stay on the branch.

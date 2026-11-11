@@ -50,7 +50,20 @@ export async function projectConfigOf(
     ...c,
     bounceLimit: p.settings?.bounceLimit ?? BOUNCE_LIMIT,
     concurrency: p.settings?.concurrency ?? 1,
+    ticketBudgetUsd: p.settings?.ticketBudgetUsd ?? TICKET_BUDGET_USD,
   };
+}
+
+/** Default per-ticket budget (§14); a project's Settings override it. */
+export const TICKET_BUDGET_USD = 3;
+
+/** What a ticket's runs have cost so far. shortcut: a cancelled or interrupted run records $0, so this can undercount. */
+export async function ticketSpend(tx: Pick<Tx, "select">, ticketId: string) {
+  const [r] = await tx
+    .select({ spent: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8` })
+    .from(runs)
+    .where(eq(runs.ticketId, ticketId));
+  return r!.spent;
 }
 
 /** Thrown by startColumnAgent while a GitHub project is still onboarding (the web app answers 409). */
