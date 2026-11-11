@@ -125,7 +125,7 @@ export const conflictMarkdown = (onto: string, c: Conflict) =>
  * The only force-push in the system (FR-51): a rebased `kanbot/*` branch, with a lease on what GitHub had when we
  * last fetched it, so anyone's push in between wins and the next run reports it.
  */
-export async function pushRebased(
+async function pushRebased(
   db: Db,
   p: { githubOwner: string; githubRepo: string },
   wt: { path: string; branch: string },
@@ -193,7 +193,7 @@ export async function keepCurrent(
  * this step never rewrites the owner's commits (a later rebase onto main does, see keepCurrent). Returns GitHub's head
  * (the lease for a later push) and any conflict.
  */
-export async function pullBranch(
+async function pullBranch(
   db: Db,
   p: { githubOwner: string; githubRepo: string },
   wt: { path: string; branch: string },
