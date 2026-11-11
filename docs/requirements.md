@@ -505,7 +505,7 @@ Outside services fail routinely, so the worker sorts every error into transient 
 | A command hangs (tests, install) | A per-command timeout (default 10 min) kills the process; the agent sees the timeout and decides what to do. (The worker's own install has it, and an agent's Bash tool gets `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` set to 10 minutes.) |
 | Worker crashes mid-run | On restart the run becomes `interrupted`; pushes are safe to repeat because they target a known commit. |
 | Database unavailable | The web app shows an error page; the worker stops claiming jobs until it reconnects. |
-| Disk over 90% full | No new runs start and a banner appears. A nightly cleanup job prunes worktrees of finished tickets, package caches and run logs past retention, so this should be rare. |
+| Disk over 90% full | No new runs start and a banner appears. A nightly cleanup job prunes worktrees of finished tickets, package caches and run logs past retention, so this should be rare. Built (M6): the worker claims nothing while a project's repo filesystem is over 90% (runs already going finish), `/api/health` reports `disk`, and the board banner says so. Only project repo filesystems are checked, not Postgres's or Docker's storage. |
 
 `GET /api/health` reports database, worker, Anthropic and GitHub status; the board's top bar shows it as a single indicator. The worker counts as up while it holds a Postgres connection named `kanbot-worker` (`pg_stat_activity`), so no heartbeat table is needed. Anthropic is judged from the latest runs: an API retry in a running run is `degraded`, an API error on the last finished run is `down`. GitHub is judged by a call to `GET /app` with the App's own key: `ok` when it answers, `degraded` when GitHub refuses the key (4xx, e.g. the App was deleted), `down` on a network error or a 5xx, `unknown` before an App is connected. It is checked on each health poll (every 30 s from the board), with no cache.
 
@@ -736,7 +736,7 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | GET / POST | `/api/projects` | List or create projects. A body with `githubOwner` and `githubRepo` starts onboarding (409 `repo_taken`); otherwise `repoPath` is an optional local folder. | Built |
 | GET / POST | `/api/projects/:id/onboarding` | GET: the setup page's data (step, detected settings, baseline, the repo's workflows at step 6, the missing protection rules at step 7). POST body `{action}`: `confirm-commands` (with `settings`, as in PATCH `/api/projects/:id`; 400 `qa_setup` without a start command), `retry`, `rerun-baseline`, `accept-baseline`, `open-ci-pr`, `skip-ci`, `apply-protection`, `override-protection`. 409 `wrong_step` for an action the current step doesn't take; 502 `github` with GitHub's message. | Built |
 | GET | `/api/github/repos` | The repos the App's installations can see, each with `taken` when it's already a project. | Built |
-| GET / PATCH | `/api/projects/:id` | Read or update project settings (commands, test globs, hotspots, bounce limit, concurrency, env vars). A GET seeds an unseeded project. In a PATCH, `env` is the whole set, `{NAME: value \| null}`: null keeps the stored value, and a name left out is removed. Reads return `env: [{name, set}]`, never values. | Built |
+| GET / PATCH | `/api/projects/:id` | Read or update project settings (commands, test globs, hotspots, bounce limit, concurrency, ticket budget, env vars). A GET seeds an unseeded project. In a PATCH, `env` is the whole set, `{NAME: value \| null}`: null keeps the stored value, and a name left out is removed. Reads return `env: [{name, set}]`, never values. | Built |
 | GET | `/api/projects/:id/board` | Columns with ordered ticket cards (one call renders the board). | Built |
 | POST | `/api/projects/:id/tickets` | Create a ticket. | Built |
 | GET / PATCH / DELETE | `/api/tickets/:id` | Read (with criteria, latest artifacts, active run), edit, delete. | Built |
@@ -820,7 +820,7 @@ Spend by day (bar chart), by agent, and by ticket, with token counts; budget set
 
 ### Settings
 
-Built: a page per project (linked from the board's top bar) with commands (install, build, test, lint, and `start`, which QA runs to start the app), test globs, hotspots, bounce limit and concurrent runs. Still to come: the rest of the QA settings (ready URL, required services), repo, workflow columns (Later), global concurrency, budgets, serious mode, notification and webhook settings. Adding a project runs the onboarding flow (section 10) as a guided wizard (built: `/p/:id/setup`).
+Built: a page per project (linked from the board's top bar) with commands (install, build, test, lint, and `start`, which QA runs to start the app), test globs, hotspots, bounce limit, concurrent runs and the ticket budget. Still to come: the rest of the QA settings (ready URL, required services), repo, workflow columns (Later), global concurrency, the daily budget, serious mode, notification and webhook settings. Adding a project runs the onboarding flow (section 10) as a guided wizard (built: `/p/:id/setup`).
 
 ### General
 
@@ -853,7 +853,7 @@ Agents run real commands on the server, so every agent is boxed in by its worktr
 | Control | Default | Behavior when hit |
 | --- | --- | --- |
 | Per-run budget | From agent frontmatter (e.g. $1.50) | Run stops with `budget_exceeded`; ticket to Blocked. |
-| Per-ticket budget | $3 (M6) | No new runs start for that ticket until raised. |
+| Per-ticket budget | $3 default, per project in Settings (M6) | A run starts only while the ticket's earlier runs cost less than it, and its own budget is capped at what is left; otherwise it ends `budget_exceeded` (ticket to Blocked). Raise it in project Settings, then Retry. A per-ticket override isn't built (it needs a column). A cancelled or interrupted run records $0, so the total can undercount. |
 | Daily budget (global) | $5 | Nothing new starts until midnight local time (the worker's clock) or the cap is raised. Today's spend is the cost of runs that ended today plus the budgets of runs still going; a run started late in the day gets only what is left, and ends `budget_exceeded` if it needs more. The SDK checks a run's budget between turns, so the last turn can overshoot it (seen: $0.06 spent on a $0.035 budget), and the cap with it. |
 | Max turns | From frontmatter | Run stops with `failed` and a summary. |
 | Wall-clock timeout | From frontmatter (e.g. 20 min) | Run stops with `timed_out`. |
@@ -903,7 +903,6 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Check rebasing with two real tickets in flight while main moves | §9, FR-51 | Built in M6 phase 1 and tested against local repos and the GitHub stub; not yet tried on a real repo (owner's call, e.g. Neural-Noir-Website). |
 | `blockWritesOutsideWorkingDirectories` | §7, §14 | Moved from M5 on 2026-11-10. Needs Claude Code 2.1.314; the pinned SDK bundles 2.1.304. Writes are fenced by the permission hook and the post-run checks meanwhile. |
 | SDK `sandbox` | §7, §14 | Moved from M5 on 2026-11-10. Linux/macOS only (dev is Windows; Kanbot itself runs on Linux in WSL). |
-| Disk over 90% full: no new runs and a banner | §8 failure handling | Moved from M5 on 2026-11-10. The nightly cleanup exists; the guard itself was never built (found 2026-11-06). |
 | SSE `Last-Event-ID` replay | §12 | Moved from M5 on 2026-11-10. Only if needed: the board refetches on reconnect and the Live tab pages `/api/runs/:id/events?after=seq`. Revisit when running over real networks. Marked with a `shortcut:` comment. |
 | Checking rootless Docker in the owner's `kanbot` WSL distro | §7 | Moved from M5 on 2026-11-10. The files and `docs/deploy.md` (setup A) exist; the stack was checked in WSL on rootful Docker. Needs `sudo`, so the owner sets the distro up; rootless Docker's host network and a real SDK run as container root (paid, ask first) are still unchecked. |
 | A stub-backed GitHub project in the golden-ticket eval, so Ship-It is evaluated | §8 | Moved from M5 on 2026-11-10. The eval's golden tickets use local projects, where Ship stays a gate. One paid run, with the owner's OK. |
@@ -917,7 +916,6 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 | Agents and Costs pages | §13 | |
 | A Merge button in Kanbot, enabled once a human approval exists | §10, FR-47 | Owner's choice (2026-11-07): merging happens on GitHub; Kanbot detects it (M5 phase 5b). |
 | The PR Review "small fix" checkbox: a requested change skips Code Review and QA | §10 | Owner's choice (2026-11-07): requested changes always go back through Code Review and QA for now. |
-| Per-ticket budget ($3): no new runs for a ticket over it | §14 | M4 only shows the ticket's total cost (drawer, Archie's retro). Moved from M4 on 2026-11-05. |
 | Agent config hash on runs | FR-37 | With the Agents page. |
 | Side-by-side diff view | §13 | The Diff tab is unified. |
 | `columns.wip_limit`, `auto_advance`; WIP display and enforcement | FR-20, FR-22 | The only approval gate so far (QA → Ship) stays a gate; the concurrency limits already cap parallel runs. WIP limits matter most with auto-pull (M6). Moved from M4 on 2026-11-03. |

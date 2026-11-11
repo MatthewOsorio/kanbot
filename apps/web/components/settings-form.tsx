@@ -20,6 +20,7 @@ type Settings = {
   hotspots: { name: string; paths: string[] }[];
   bounceLimit: number;
   concurrency: number;
+  ticketBudgetUsd: number;
   env: { name: string; set: boolean }[];
 };
 
@@ -90,6 +91,7 @@ export function SettingsForm({ projectId }: { projectId: string }) {
       hotspots: parseHotspots(hotspots),
       bounceLimit: s.bounceLimit,
       concurrency: s.concurrency,
+      ticketBudgetUsd: s.ticketBudgetUsd,
       env: envBody(env),
     };
     const r = await fetch(`/api/projects/${projectId}`, {
@@ -220,6 +222,18 @@ export function SettingsForm({ projectId }: { projectId: string }) {
                 max={2}
                 value={s.concurrency}
                 onChange={(e) => setS({ ...s, concurrency: Number(e.target.value) })}
+                className="w-28"
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="block">Ticket budget, USD (0.5–100)</span>
+              <Input
+                type="number"
+                min={0.5}
+                max={100}
+                step={0.5}
+                value={s.ticketBudgetUsd}
+                onChange={(e) => setS({ ...s, ticketBudgetUsd: Number(e.target.value) })}
                 className="w-28"
               />
             </label>

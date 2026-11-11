@@ -1,5 +1,13 @@
 import { ANTHROPIC_API_ERROR } from "@kanbot/shared";
-import { appJwt, gh, GitHubError, loadGitHubApp, runEvents, runs } from "@kanbot/shared/server";
+import {
+  appJwt,
+  diskFull,
+  gh,
+  GitHubError,
+  loadGitHubApp,
+  runEvents,
+  runs,
+} from "@kanbot/shared/server";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 
@@ -20,6 +28,7 @@ export async function GET() {
       worker: "unknown",
       anthropic: "unknown",
       github: "unknown",
+      disk: "unknown",
     });
   }
   const github = githubStatus(); // runs alongside the queries below
@@ -53,6 +62,7 @@ export async function GET() {
     worker: workers && workers.n > 0 ? "ok" : "down",
     anthropic,
     github: await github,
+    disk: (await diskFull(db).catch(() => null)) ? "degraded" : "ok",
   } satisfies Record<string, Status>);
 }
 

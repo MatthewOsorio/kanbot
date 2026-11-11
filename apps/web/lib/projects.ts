@@ -171,8 +171,16 @@ export type Card = Board["tickets"][number];
 export async function getProjectSettings(id: string) {
   const [p] = await db.select().from(projects).where(eq(projects.id, id));
   if (!p) throw notFound("Project not found");
-  const { commands, image, dockerfile, testGlobs, hotspots, bounceLimit, concurrency } =
-    await projectConfigOf(db, p);
+  const {
+    commands,
+    image,
+    dockerfile,
+    testGlobs,
+    hotspots,
+    bounceLimit,
+    concurrency,
+    ticketBudgetUsd,
+  } = await projectConfigOf(db, p);
   return {
     id,
     name: p.name,
@@ -185,6 +193,7 @@ export async function getProjectSettings(id: string) {
     hotspots,
     bounceLimit,
     concurrency,
+    ticketBudgetUsd,
     env: envView(p),
   };
 }
@@ -198,7 +207,8 @@ export async function patchProject(id: string, input: z.output<typeof patchProje
   if (!p) throw notFound("Project not found");
   // Seed first so a partial patch (one command) doesn't hide the rest of project.yml behind nulls.
   const cur = await projectConfigOf(db, p);
-  const { bounceLimit, concurrency, commands, image, testGlobs, hotspots, env } = input;
+  const { bounceLimit, concurrency, ticketBudgetUsd, commands, image, testGlobs, hotspots, env } =
+    input;
   const stored = decryptEnv(p.env);
   await db
     .update(projects)
@@ -220,6 +230,7 @@ export async function patchProject(id: string, input: z.output<typeof patchProje
       settings: {
         bounceLimit: bounceLimit ?? cur.bounceLimit,
         concurrency: concurrency ?? cur.concurrency,
+        ticketBudgetUsd: ticketBudgetUsd ?? cur.ticketBudgetUsd,
       },
     })
     .where(eq(projects.id, id));

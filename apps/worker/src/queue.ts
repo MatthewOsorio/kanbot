@@ -5,6 +5,7 @@ import {
   agentActor,
   columns,
   type Db,
+  diskFull,
   getSettings,
   loadAgent,
   runs,
@@ -32,6 +33,7 @@ export async function claimNext(db: Db): Promise<Run | null> {
     const { spent, reserved } = await spendToday(tx);
     const left = s.dailyBudgetUsd - spent - reserved;
     if (s.paused || left < 0.01) return null; // the cap is in cents, spend in hundredths of a cent
+    if (await diskFull(tx)) return null; // §8: no new runs while a disk is over 90% full
     const res = await tx.execute<{ id: string }>(sql`
       update runs set state = 'running', started_at = now()
       where id = (

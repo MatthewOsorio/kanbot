@@ -4,6 +4,7 @@ import {
   acceptanceCriteria,
   artifacts,
   cancelActiveRun,
+  diskFull,
   columns,
   comments,
   getSettings,
@@ -17,8 +18,10 @@ import {
   tickets,
   updateSettings,
 } from "@kanbot/shared/server";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildContext } from "../src/context";
 import {
   afterPrevious,
@@ -30,6 +33,12 @@ import {
 import { executeRun } from "../src/run";
 import type { AgentRuntime } from "../src/runtime/types";
 import { db, runtime, ticketNow, useTestDb } from "./helpers";
+
+// The real diskFull, except where a test makes it report a full disk.
+vi.mock("@kanbot/shared/server", async (orig) => {
+  const m = await orig<typeof import("@kanbot/shared/server")>();
+  return { ...m, diskFull: vi.fn(m.diskFull) };
+});
 
 useTestDb();
 
@@ -455,5 +464,70 @@ describe("Plan B's related tickets (§9, M4)", () => {
         [ticket.id, four!.id, "blocks", false, "agent"],
       ].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     );
+  });
+});
+
+describe("Ticket budget and disk guard (§14, §8)", () => {
+  const spendOn = (ticketId: string, costUsd: number) =>
+    db.insert(runs).values({
+      ticketId,
+      agentSlug: "plan-b",
+      columnSlug: "planning",
+      state: "succeeded",
+      costUsd,
+      endedAt: new Date(),
+    });
+
+  it("ends a run at once, with the cost so far, when the ticket has used its budget", async () => {
+    const { ticket, cols } = await plannedTicket();
+    await spendOn(ticket.id, 3.2);
+    const run = await claimAndRun();
+    expect(run.state).toBe("budget_exceeded");
+    expect(run.error).toMatch(/Ticket budget reached: \$3\.20 of \$3\.00/);
+    expect(columnSlug(cols, (await ticketNow(ticket.id)).columnId)).toBe("blocked");
+  });
+
+  it("caps a run at what the ticket's budget has left", async () => {
+    const { ticket, project } = await plannedTicket("budget");
+    await db
+      .update(projects)
+      .set({ settings: { ticketBudgetUsd: 1 } })
+      .where(eq(projects.id, project.id));
+    await spendOn(ticket.id, 0.97);
+    const run = await claimAndRun();
+    expect(run.state).toBe("budget_exceeded");
+    expect(run.error).toMatch(/could spend only \$0\.03 of the \$1\.00 ticket budget/);
+    const [row] = await db.select().from(runs).where(eq(runs.id, run.id));
+    expect(row!.budgetUsd).toBeCloseTo(0.03, 4); // the day's reserve shrinks with it
+  });
+
+  it("lets Archie's retro run in Done however much the ticket cost", async () => {
+    const { ticket, cols } = await plannedTicket();
+    await db.delete(runs).where(eq(runs.ticketId, ticket.id)); // Plan B's queued run
+    const done = cols.find((c) => c.slug === "done")!;
+    await db.update(tickets).set({ columnId: done.id }).where(eq(tickets.id, ticket.id));
+    await queue(ticket.id);
+    await spendOn(ticket.id, 3.2);
+    expect((await claimAndRun()).state).toBe("succeeded");
+  });
+
+  it("claimNext claims nothing while a disk is full", async () => {
+    await plannedTicket();
+    vi.mocked(diskFull).mockResolvedValueOnce("/full");
+    expect(await claimNext(db)).toBeNull();
+    expect(await claimNext(db)).not.toBeNull(); // the queued run waited
+  });
+
+  it("diskFull names a project path over the limit and skips a missing one", async () => {
+    const { project } = await plannedTicket();
+    await db.update(projects).set({ repoPath: null }); // other tests leave repos behind
+    await db.update(projects).set({ repoPath: tmpdir() }).where(eq(projects.id, project.id));
+    expect(await diskFull(db, 0)).toBe(tmpdir());
+    expect(await diskFull(db, 1)).toBeNull();
+    await db
+      .update(projects)
+      .set({ repoPath: join(tmpdir(), "kanbot-gone") })
+      .where(eq(projects.id, project.id));
+    expect(await diskFull(db, 0)).toBeNull(); // a missing folder is skipped
   });
 });

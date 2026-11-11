@@ -59,6 +59,9 @@ describe("patchProjectBody", () => {
     expect(ok({ bounceLimit: 0 })).toBe(false);
     expect(ok({ bounceLimit: 11 })).toBe(false);
     expect(ok({ concurrency: 3 })).toBe(false); // the worker runs 2 runs at once in all
+    expect(ok({ ticketBudgetUsd: 0.1 })).toBe(false);
+    expect(ok({ ticketBudgetUsd: 101 })).toBe(false);
+    expect(ok({ ticketBudgetUsd: 5 })).toBe(true);
     expect(ok({ hotspots: [{ name: "api", paths: [] }] })).toBe(false);
     expect(ok({})).toBe(false);
   });

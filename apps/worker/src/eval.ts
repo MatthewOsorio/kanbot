@@ -46,6 +46,9 @@ const only = process.argv
   .find((a) => a.startsWith("--only="))
   ?.slice(7)
   .split(",");
+const ticketBudget = Number(
+  process.argv.find((a) => a.startsWith("--ticket-budget="))?.slice(16) || 0,
+);
 if (only && process.argv.includes("--baseline"))
   throw new Error("--baseline needs every golden ticket");
 
@@ -89,6 +92,8 @@ const [project] = await db
     name: "Golden eval",
     keyPrefix: `EV${Date.now().toString(36).toUpperCase().slice(-6)}`,
     repoPath: repo,
+    // --ticket-budget=0.5 checks the per-ticket budget guard against the real SDK.
+    settings: ticketBudget ? { ticketBudgetUsd: ticketBudget } : undefined,
   })
   .returning();
 const cols = await db
