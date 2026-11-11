@@ -29,8 +29,8 @@ import {
 } from "@kanbot/shared/server";
 import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { moveAndStart } from "./finish";
-import { storeArtifact } from "./results";
-import { conflictMarkdown, keepCurrent, pullDefaultBranch } from "./ship";
+import { storeArtifact, storeConflict } from "./results";
+import { keepCurrent, pullDefaultBranch, recordRebase } from "./ship";
 import { redactText } from "./runtime/redact";
 
 const GITHUB = { kind: "agent" as const, name: "GitHub" }; // the timeline shows it as the actor
@@ -329,31 +329,9 @@ async function rebaseOthers(db: Db, w: Watched) {
       const { pushedSha, conflict } = await keepCurrent(db, gh, true, wt, p.defaultBranch);
       await db.transaction(async (tx) => {
         const key = `${p.keyPrefix}-${t.number}`;
-        if (pushedSha) {
-          await tx
-            .update(tickets)
-            .set({ headSha: pushedSha, ciState: "pending", updatedAt: new Date() })
-            .where(eq(tickets.id, t.id));
-          await logActivity(
-            tx,
-            t.id,
-            "pushed",
-            { rebasedOnto: p.defaultBranch, sha: pushedSha },
-            GITHUB,
-          );
-          await publish(tx, p.id, {
-            type: "ticket.updated",
-            ticketId: t.id,
-            fields: ["headSha", "ciState"],
-          });
-        }
+        if (pushedSha) await recordRebase(tx, t, p.defaultBranch, pushedSha, GITHUB);
         if (!conflict) return;
-        await tx.update(tickets).set({ statusFlag: "needs_input" }).where(eq(tickets.id, t.id));
-        await storeArtifact(tx, t, null, {
-          kind: "test_report",
-          title: `Rebase conflict with ${conflict.onto}`,
-          markdown: conflictMarkdown(conflict.onto, conflict),
-        });
+        await storeConflict(tx, t, null, conflict);
         const cols = await tx.select().from(columns).where(eq(columns.projectId, p.id));
         await moveAndStart(
           tx,

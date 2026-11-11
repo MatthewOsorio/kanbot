@@ -1,6 +1,19 @@
 // Ship (requirements §4, FR-43): after Captain Ship-It's run, the worker (never an agent) pushes the
 // ticket branch and opens or updates its PR with the App's installation token.
-import { type Db, git, gitAuth, loadGitHubApp, repoToken, upsertPr } from "@kanbot/shared/server";
+import {
+  type Actor,
+  type Db,
+  git,
+  gitAuth,
+  loadGitHubApp,
+  logActivity,
+  publish,
+  repoToken,
+  tickets,
+  type Tx,
+  upsertPr,
+} from "@kanbot/shared/server";
+import { eq } from "drizzle-orm";
 
 export type ShippedPr = { number: number; url: string; headSha: string };
 
@@ -77,8 +90,10 @@ export async function rebaseBranch(
 ): Promise<{ rebased: boolean; conflict?: Conflict }> {
   if (!wt.branch.startsWith("kanbot/")) throw new Error(`Refusing to rebase ${wt.branch}`);
   if (await isAncestor(wt.path, onto, "HEAD")) return { rebased: false };
-  // shortcut: a worktree with uncommitted work is left behind main (autostash can exit 0 with a conflicted pop); the next clean run rebases it.
-  if ((await git(wt.path, ["status", "--porcelain"])).trim()) return { rebased: false };
+  // shortcut: a worktree with uncommitted changes to tracked files is left behind main (autostash can exit 0 with a
+  // conflicted pop); the next clean run rebases it. Untracked files don't count: build output must not stop rebasing.
+  if ((await git(wt.path, ["status", "--porcelain", "--untracked-files=no"])).trim())
+    return { rebased: false };
   try {
     await git(wt.path, ["rebase", onto], {
       GIT_COMMITTER_NAME: "Kanbot",
@@ -131,9 +146,30 @@ export async function pushRebased(
   return (await git(wt.path, ["rev-parse", "HEAD"])).trim();
 }
 
+/** After a force-push of a rebased branch: the new head, CI starting over, and the timeline entry (FR-51). */
+export async function recordRebase(
+  tx: Tx,
+  t: { id: string; projectId: string },
+  onto: string,
+  sha: string,
+  actor: Actor,
+) {
+  await tx
+    .update(tickets)
+    .set({ headSha: sha, ciState: "pending", updatedAt: new Date() })
+    .where(eq(tickets.id, t.id));
+  await logActivity(tx, t.id, "pushed", { rebasedOnto: onto, sha }, actor);
+  await publish(tx, t.projectId, {
+    type: "ticket.updated",
+    ticketId: t.id,
+    fields: ["headSha", "ciState"],
+  });
+}
+
 /**
  * FR-48 + FR-51: brings a ticket's worktree up to date: the owner's pushes first (when the ticket has a PR), then the
- * default branch. A rebased PR branch is force-pushed with a lease. A conflict leaves the worktree as it was.
+ * default branch. A rebased PR branch is force-pushed with a lease; the rebase gives every commit on the branch, the
+ * owner's included, a new SHA (same content and authors). A conflict leaves the worktree as it was.
  */
 export async function keepCurrent(
   db: Db,
@@ -154,7 +190,8 @@ export async function keepCurrent(
 /**
  * FR-48: before a run on a ticket with a PR, take the commits pushed to its branch on GitHub (the owner's own).
  * Fast-forwards when Kanbot has nothing new; when both have commits, Kanbot's are replayed on top of the owner's, so
- * the owner's commits are never rewritten. Returns GitHub's head (the lease for a later push) and any conflict.
+ * this step never rewrites the owner's commits (a later rebase onto main does, see keepCurrent). Returns GitHub's head
+ * (the lease for a later push) and any conflict.
  */
 export async function pullBranch(
   db: Db,

@@ -79,13 +79,24 @@ describe("rebaseBranch", () => {
     expect(await git(wt.path, ["status", "--porcelain"])).toBe("");
   });
 
-  it("leaves a worktree with uncommitted work alone", async () => {
+  it("leaves a worktree with uncommitted changes to tracked files alone", async () => {
     const { checkout, wt } = await setup();
+    await commit(wt.path, "mine.txt", "mine\n");
     await commit(checkout, "theirs.txt", "theirs\n");
     const { writeFile } = await import("node:fs/promises");
-    await writeFile(join(wt.path, "wip.txt"), "wip\n");
+    await writeFile(join(wt.path, "mine.txt"), "mine, edited\n");
     expect(await rebaseBranch(wt, "main")).toEqual({ rebased: false });
-    expect(await git(wt.path, ["status", "--porcelain"])).toBe("?? wip.txt\n");
+    expect(await git(wt.path, ["status", "--porcelain"])).toBe(" M mine.txt\n");
+  });
+
+  it("rebases past untracked files, such as build output", async () => {
+    const { checkout, wt } = await setup();
+    await commit(wt.path, "mine.txt", "mine\n");
+    await commit(checkout, "theirs.txt", "theirs\n");
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(wt.path, "coverage.txt"), "output\n");
+    expect(await rebaseBranch(wt, "main")).toEqual({ rebased: true });
+    expect(await git(wt.path, ["status", "--porcelain"])).toBe("?? coverage.txt\n");
   });
 
   it("refuses a branch outside kanbot/", async () => {
@@ -122,6 +133,26 @@ describe("keepCurrent", () => {
     expect(await git(wt.path, ["log", "--format=%s", "-3"])).toBe(
       "edit more.txt\nedit owner.txt\nedit mine.txt\n",
     );
+  });
+
+  it("keeps the owner's work and authorship, with new SHAs, when main also moved", async () => {
+    const { checkout, wt } = await setup();
+    await commit(wt.path, "mine.txt", "mine\n");
+    await git(wt.path, ["push", "-q", "origin", `HEAD:refs/heads/${wt.branch}`]);
+    const owner = join(tmp, `owner-${n}`);
+    await git(tmp, ["clone", "-q", "-b", wt.branch, "--", origin, owner]);
+    const theirs = await commit(owner, "owner.txt", "owner\n");
+    await git(owner, ["push", "-q", "origin", `HEAD:refs/heads/${wt.branch}`]);
+    await commit(checkout, "main-moved.txt", "main\n");
+    const r = await keepCurrent(db, gh, true, wt, "main");
+    expect(r.conflict).toBeUndefined();
+    expect(r.pushedSha).toBeDefined();
+    // The same change and author, on top of the new main; the owner's old SHA is no longer in the branch.
+    expect(await git(origin, ["show", `${wt.branch}:owner.txt`])).toBe("owner\n");
+    expect(await git(origin, ["log", "--format=%an|%s", "-3", wt.branch])).toBe(
+      "Test|edit owner.txt\nTest|edit mine.txt\nTest|edit main-moved.txt\n",
+    );
+    await expect(git(origin, ["merge-base", "--is-ancestor", theirs, wt.branch])).rejects.toThrow();
   });
 
   it("reports a conflict with the owner's commits and changes nothing", async () => {

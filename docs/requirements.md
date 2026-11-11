@@ -270,7 +270,7 @@ Requirements marked MVP must ship in the first usable version; Later items are d
 | FR-45 | Project setup verifies branch protection on the default branch (PR required, 1 approval, required checks, no force-push) and offers to apply it; agents stay disabled on unprotected projects unless overridden. | MVP |
 | FR-46 | CI status shown on cards and in the drawer; failing CI bounces the ticket to In Progress with a log excerpt. | MVP |
 | FR-47 | PR Review gate: human review comments are imported, "changes requested" bounces to In Progress, and the Merge button is enabled only after a human approval. | MVP |
-| FR-48 | Commits pushed by the human to a ticket branch are detected and never rewritten; the next run starts from the latest head. | MVP |
+| FR-48 | Commits pushed by the human to a ticket branch are detected and never lost or overwritten by Kanbot's own commits; the next run starts from the latest head. A rebase onto main (FR-51) keeps their content and authorship but gives them new SHAs. | MVP |
 | FR-49 | Remove the worktree when a ticket reaches Done or is deleted (the worker does it, not Archie); keep the branch until merged. | MVP |
 | FR-50 | Touch set per ticket, project hotspot groups, and an overlap check before In Progress (hotspot overlap always serializes); per-project `overlapPolicy` of `serialize` (default) or `parallel`. | MVP |
 | FR-51 | When main moves, rebase overlapping in-flight branches; clean rebases push with `--force-with-lease` on `kanbot/*` branches only. | MVP |
@@ -586,9 +586,11 @@ Nancy catches the overlap that file lists miss: one ticket changing a contract t
 ### Keeping in-flight branches current
 
 - Before every agent run in a worktree column, the worker fast-forwards the clone's default branch from GitHub and, if the ticket branch is behind it, rebases the branch first. Agents never run git rebase themselves. Authors are kept; the committer is Kanbot.
-- A branch with a PR is first brought up to what is on GitHub (FR-48): a fast-forward when Kanbot has nothing new, and when both sides have commits, Kanbot's commits are replayed on top of the owner's, so the owner's commits are never rewritten.
+- A branch with a PR is first brought up to what is on GitHub (FR-48): a fast-forward when Kanbot has nothing new, and when both sides have commits, Kanbot's commits are replayed on top of the owner's, which that step leaves as they are. The rebase onto main that follows rewrites the whole branch, the owner's commits included: same content and authors, new SHAs, so the owner resets their local copy after Kanbot's force-push.
 - When a PR merges into main, the watcher rebases every other ticket in PR Review (or in Ship waiting on CI) with no run in flight whose touch set or hotspot overlaps the merged ticket's. Tickets still before Ship rebase when their next run starts.
 - A rebased branch with a PR is pushed with `--force-with-lease`, leased on the head GitHub had when it was fetched. This is the only force-push in the system, done by the worker and only on `kanbot/*` branches. CI then reruns on GitHub.
+- A worktree with uncommitted changes to tracked files is not rebased (a stash re-apply can fail silently); the branch stays behind main until a run starts on a clean worktree. Untracked files, such as build output, don't count.
+- The watcher rebases once per merge and doesn't retry a failure (it is logged); the next run's own rebase covers that ticket. A run that starts between the watcher's idle check and its rebase can race it.
 - A rebase with conflicts is aborted (the branch is left as it was) and the ticket goes to Blocked with the conflicted files and hunks as a test-report artifact (shown as a diff, not side by side, until the side-by-side diff exists). Until Marge Conflict ships (M6), that is every conflict.
 
 ### Marge Conflict
@@ -654,7 +656,7 @@ Captain Ship-It opens the PR with a description linking the ticket, plan, review
 | --- | --- | --- |
 | Approve and merge | GitHub (a Merge button in Kanbot is on the M6 table) | Ticket to Done; Archie runs. Kanbot never merges without a human click. |
 | Request changes | GitHub review, or comments in Kanbot's Diff tab | Comments imported; ticket bounces to In Progress; Sir Codes-a-Lot pushes fixes to the same PR, which goes back through Code Review and QA. A "small fix" checkbox to skip straight back to PR Review is on the M6 table. |
-| Push their own commits | Locally or on GitHub | Kanbot records the new head; the next agent run starts from it, and human commits are never rewritten. |
+| Push their own commits | Locally or on GitHub | Kanbot records the new head; the next agent run starts from it, and Kanbot's own commits never overwrite them (a rebase onto main later gives them new SHAs, §9). |
 | Close the PR | GitHub | Ticket returns to Backlog; worktree removed, branch kept. |
 
 ### Where the human is in the loop

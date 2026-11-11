@@ -323,3 +323,77 @@ describe("the owner's pushes (FR-48)", () => {
     expect(existsSync(join(t.worktreePath!, "OWNER.md"))).toBe(true);
   });
 });
+
+describe("when main moves (FR-51)", () => {
+  const moveMain = async (file: string, text: string) => {
+    await writeFile(join(origin, file), text);
+    await git(origin, ["add", file]);
+    await git(origin, ["-c", "user.name=o", "-c", "user.email=o@x", "commit", "-qm", "Main moves"]);
+  };
+
+  /** Ticket A (merging on GitHub) and ticket B, both shipped with an open PR; B's touch set is `touchB`. */
+  async function pair(touchB: string[]) {
+    const a = await shipped();
+    const [b0] = await db
+      .insert(tickets)
+      .values({
+        projectId: a.project.id,
+        number: 2,
+        title: "Second ticket",
+        columnId: a.col("ship").id,
+        position: "a1",
+        labels: ["replay:default"],
+      })
+      .returning();
+    await db.transaction((tx) => startColumnAgent(tx, a.project.id, b0!.id, a.col("ship")));
+    expect((await runOne()).state).toBe("succeeded");
+    const b = await ticketNow(b0!.id);
+    await db
+      .update(tickets)
+      .set({ touchPaths: ["src/todo.js"] })
+      .where(eq(tickets.id, a.ticket.id));
+    await db.update(tickets).set({ touchPaths: touchB }).where(eq(tickets.id, b.id));
+    stub.setPr(a.ticket.prNumber!, { merged: true });
+    return { a, b };
+  }
+
+  it("rebases and force-pushes the overlapping PR; CI starts over", async () => {
+    const { b } = await pair(["src/todo.js"]);
+    await moveMain(`MOVED-${n}.md`, "moved\n");
+    await watchGitHub(db);
+    const now = await ticketNow(b.id);
+    expect(now.headSha).not.toBe(b.headSha);
+    expect(now).toMatchObject({ ciState: "pending", statusFlag: "pr_open" });
+    expect(await columnOf(b.id)).toBe("ship");
+    expect((await git(origin, ["rev-parse", b.branchName!])).trim()).toBe(now.headSha);
+    expect(existsSync(join(now.worktreePath!, `MOVED-${n}.md`))).toBe(true);
+    const pushed = (await db.select().from(activity).where(eq(activity.ticketId, b.id))).filter(
+      (x) => x.action === "pushed",
+    );
+    expect(pushed.at(-1)?.data).toMatchObject({ rebasedOnto: "main", sha: now.headSha });
+  });
+
+  it("leaves a PR that touches other files alone", async () => {
+    const { b } = await pair(["docs/other.md"]);
+    await moveMain(`MOVED-${n}.md`, "moved\n");
+    await watchGitHub(db);
+    expect((await ticketNow(b.id)).headSha).toBe(b.headSha);
+    expect((await git(origin, ["rev-parse", b.branchName!])).trim()).toBe(b.headSha);
+  });
+
+  it("sends a conflicting PR to Blocked with the files, leaving the branch as it was", async () => {
+    const { b } = await pair(["src/todo.js"]);
+    await moveMain("CHANGELOG.md", "main rewrote the changelog\n");
+    await watchGitHub(db);
+    expect(await columnOf(b.id)).toBe("blocked");
+    const now = await ticketNow(b.id);
+    // Duckworth is queued to explain it; his run ends in needs_input (the transition table).
+    expect(now).toMatchObject({ statusFlag: "running", headSha: b.headSha });
+    expect(await queued(b.id)).toEqual(["rubber-duckworth"]);
+    const found = await db.select().from(artifacts).where(eq(artifacts.ticketId, b.id));
+    const report = found.find((x) => x.title.startsWith("Rebase conflict with main"));
+    expect(report?.contentMd).toContain("CHANGELOG.md");
+    expect((await git(now.worktreePath!, ["rev-parse", "HEAD"])).trim()).toBe(b.headSha);
+    expect(await git(now.worktreePath!, ["status", "--porcelain"])).toBe("");
+  });
+});

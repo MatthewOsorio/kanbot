@@ -10,7 +10,6 @@ import {
   git,
   loadAgent,
   loadGitHubApp,
-  logActivity,
   type ProjectConfig,
   projectConfigOf,
   projects,
@@ -28,7 +27,7 @@ import { buildContext } from "./context";
 import { redact, redactText } from "./runtime/redact";
 import { record } from "./runtime/replay";
 import type { AgentRuntime, RuntimeEvent, RuntimeResult } from "./runtime/types";
-import { keepCurrent, pullDefaultBranch, pushAndOpenPr } from "./ship";
+import { keepCurrent, pullDefaultBranch, pushAndOpenPr, recordRebase } from "./ship";
 import {
   changedSince,
   checkAfterRun,
@@ -190,19 +189,9 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
         project.defaultBranch,
       );
       if (pushedSha)
-        await db.transaction(async (tx) => {
-          await tx
-            .update(tickets)
-            .set({ headSha: pushedSha, ciState: "pending" })
-            .where(eq(tickets.id, ticket.id));
-          await logActivity(
-            tx,
-            ticket.id,
-            "pushed",
-            { rebasedOnto: project.defaultBranch, sha: pushedSha },
-            agentActor(run.agentSlug),
-          );
-        });
+        await db.transaction((tx) =>
+          recordRebase(tx, ticket, project.defaultBranch, pushedSha, agentActor(run.agentSlug)),
+        );
       if (conflict)
         return finish(db, run.id, {
           state: "awaiting_input",

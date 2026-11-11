@@ -26,8 +26,14 @@ import {
 } from "@kanbot/shared/server";
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { RuntimeResult } from "./runtime/types";
-import { type Conflict, conflictMarkdown, type ShippedPr } from "./ship";
-import { storeResults, storeArtifact, agentComment, type TicketRef } from "./results";
+import { type Conflict, type ShippedPr } from "./ship";
+import {
+  storeResults,
+  storeArtifact,
+  storeConflict,
+  agentComment,
+  type TicketRef,
+} from "./results";
 
 export type Outcome = {
   state: RunOutcome;
@@ -130,12 +136,7 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
         markdown: `Kanbot ran \`${o.checks.command}\` in the worktree after this run, and it failed. Fix it before review.\n\n\`\`\`\n${o.checks.output.replaceAll("```", "'''")}\n\`\`\``,
       });
 
-    if (o.conflict)
-      await storeArtifact(tx, ticket, run, {
-        kind: "test_report",
-        title: `Rebase conflict with ${o.conflict.onto}`,
-        markdown: conflictMarkdown(o.conflict.onto, o.conflict),
-      });
+    if (o.conflict) await storeConflict(tx, ticket, run, o.conflict);
 
     if (o.pr) {
       await tx
