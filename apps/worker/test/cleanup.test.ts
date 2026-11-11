@@ -1,10 +1,11 @@
 // Nightly cleanup (M5) against the replay runtime and a real git repo: no API calls.
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { git, projectConfigOf, runEvents, runs, tickets } from "@kanbot/shared/server";
 import { eq, inArray } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { nightlyCleanup } from "../src/cleanup";
-import { ensureWorktree } from "../src/worktree";
+import { ensureWorktree, worktreesRoot } from "../src/worktree";
 import { db, setup, ticketNow, useTestDb } from "./helpers";
 
 useTestDb();
@@ -48,7 +49,12 @@ describe("nightly cleanup (M5)", () => {
       await projectConfigOf(db, project),
     );
 
+    // Onboarding's baseline runs in `_baseline`, which is no ticket's: cleanup must leave it alone.
+    const baseline = join(worktreesRoot(repo), "_baseline");
+    await git(repo, ["worktree", "add", "--detach", baseline, "main"]);
+
     await nightlyCleanup(db);
+    expect(existsSync(baseline)).toBe(true);
     expect(existsSync(orphan.path)).toBe(false);
     const left = await db
       .select({ runId: runEvents.runId })

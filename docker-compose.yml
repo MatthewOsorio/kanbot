@@ -39,6 +39,7 @@ services:
       DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD:-kanbot}@db:5432/kanbot
       # Sign in with GitHub (§12): the session cookie's key, and the key the GitHub App's credentials are
       # encrypted with. Empty fails at sign-in with a message naming the variable.
+      TZ: ${TZ:-UTC}
       KANBOT_SESSION_SECRET: ${KANBOT_SESSION_SECRET:-}
       KANBOT_ENCRYPTION_KEY: ${KANBOT_ENCRYPTION_KEY:-}
       # The repos belong to the worker's user; web runs as `node` and only reads them (diffs, settings).
@@ -64,6 +65,8 @@ services:
       DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD:-kanbot}@127.0.0.1:${KANBOT_DB_PORT:-5432}/kanbot
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       KANBOT_RUNTIME: ${KANBOT_RUNTIME:-sdk}
+      # The daily cap resets at midnight in this zone (containers default to UTC).
+      TZ: ${TZ:-UTC}
       # Projects with no image of their own run here, never in the worker's container, which holds the
       # Docker socket (§7).
       KANBOT_DEFAULT_IMAGE: ${KANBOT_DEFAULT_IMAGE:-node:24-bookworm}

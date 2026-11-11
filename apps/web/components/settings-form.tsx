@@ -213,11 +213,11 @@ export function SettingsForm({ projectId }: { projectId: string }) {
               />
             </label>
             <label className="space-y-1 text-sm">
-              <span className="block">Concurrent runs (1–4)</span>
+              <span className="block">Concurrent runs (1–2)</span>
               <Input
                 type="number"
                 min={1}
-                max={4}
+                max={2}
                 value={s.concurrency}
                 onChange={(e) => setS({ ...s, concurrency: Number(e.target.value) })}
                 className="w-28"

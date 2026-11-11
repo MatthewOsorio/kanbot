@@ -58,7 +58,7 @@ describe("patchProjectBody", () => {
   it("refuses out-of-range limits, empty groups and an empty body", () => {
     expect(ok({ bounceLimit: 0 })).toBe(false);
     expect(ok({ bounceLimit: 11 })).toBe(false);
-    expect(ok({ concurrency: 5 })).toBe(false);
+    expect(ok({ concurrency: 3 })).toBe(false); // the worker runs 2 runs at once in all
     expect(ok({ hotspots: [{ name: "api", paths: [] }] })).toBe(false);
     expect(ok({})).toBe(false);
   });
