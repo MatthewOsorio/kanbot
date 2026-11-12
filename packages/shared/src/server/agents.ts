@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "yaml";
@@ -55,7 +56,7 @@ export const agentFileExists = (slug: string) => existsSync(resolve(agentsDir(),
  * Returns null when there is no file: that column behaves as a human gate until its agent ships.
  * Throws (with the zod message) when the file is invalid.
  */
-export function loadAgent(slug: string): AgentConfig | null {
+export function loadAgent(slug: string): (AgentConfig & { hash: string; text: string }) | null {
   let text: string;
   try {
     text = readFileSync(resolve(agentsDir(), `${slug}.md`), "utf8");
@@ -65,5 +66,8 @@ export function loadAgent(slug: string): AgentConfig | null {
   }
   const agent = parseAgentFile(text);
   if (agent.slug !== slug) throw new Error(`agents/${slug}.md declares slug "${agent.slug}"`);
-  return agent;
+  return { ...agent, hash: agentHash(text), text };
 }
+
+/** FR-37: the version of an agent file is the sha256 of its exact text. */
+export const agentHash = (text: string) => createHash("sha256").update(text).digest("hex");

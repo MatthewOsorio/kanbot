@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadAgent, parseAgentFile } from "./agents";
+import { agentHash, loadAgent, parseAgentFile } from "./agents";
 import { DEFAULT_COLUMNS } from "../workflow";
 
 const file = (front: string, body = "You plan.") => `---\n${front}\n---\n${body}\n`;
@@ -14,6 +14,13 @@ maxTurns: 30
 timeoutMinutes: 15
 maxBudgetUsd: 1
 verdicts: [success, needs_input, failed]`;
+
+describe("agentHash", () => {
+  it("is the same for the same text and changes with any edit", () => {
+    expect(agentHash(file(valid))).toBe(agentHash(file(valid)));
+    expect(agentHash(file(valid))).not.toBe(agentHash(file(valid, "You plan well.")));
+  });
+});
 
 describe("parseAgentFile", () => {
   it("parses frontmatter and prompt", () => {

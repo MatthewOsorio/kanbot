@@ -237,6 +237,8 @@ export const runs = pgTable(
     // What this run may spend, set when it is claimed: the agent's budget, capped by what's left of the day.
     budgetUsd: numeric("budget_usd", { precision: 10, scale: 4, mode: "number" }),
     error: text("error"),
+    // sha256 of the agent file this run used (FR-37); the text is in agent_versions. Null for runs before M6.
+    configHash: text("config_hash"),
     // Files this run changed in the worktree (committed or not), for "who changed what" in the Diff tab.
     filesChanged: text("files_changed").array().notNull().default([]),
     createdAt: createdAt(),
@@ -253,6 +255,14 @@ export const runs = pgTable(
     index().on(t.endedAt), // today's spend (spendToday), on every claim
   ],
 );
+
+/** Every agent file text a run has used (FR-37), so a past run's prompt stays readable after the file is edited. */
+export const agentVersions = pgTable("agent_versions", {
+  hash: text("hash").primaryKey(),
+  slug: text("slug").notNull(),
+  text: text("text").notNull(),
+  createdAt: createdAt(),
+});
 
 export const runEvents = pgTable(
   "run_events",

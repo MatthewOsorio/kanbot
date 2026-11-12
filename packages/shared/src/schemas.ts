@@ -165,6 +165,15 @@ export const patchSettingsBody = z
   .partial()
   .refine(nonEmpty, "No fields to update");
 
+/** `GET /api/costs`; `from` and `to` are local dates (the range is from..to inclusive), the last 30 days by default. */
+export const costsQuery = z.object({
+  groupBy: z.enum(["day", "agent", "ticket"]).default("day"),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+});
+
+export const putAgentBody = z.object({ text: z.string().min(1).max(100_000) });
+
 /** A Docker image reference (§7). It becomes a `docker run` argument, so it may not start with "-". */
 export const IMAGE_REF = /^[a-z0-9][\w./:@-]*$/i;
 const IMAGE_MESSAGE = "Must be a Docker image name, e.g. node:22-bookworm";

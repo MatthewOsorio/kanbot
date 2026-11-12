@@ -1,6 +1,6 @@
 // Ticket/run operations shared by the web app (manual moves, cancel, retry) and the worker (auto-moves).
 // Each takes the caller's transaction and writes activity + publishes, per the repo convention.
-import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import { agentFileExists } from "../agents";
 import { activeRunStates } from "../../schemas";
@@ -229,6 +229,64 @@ export async function spendToday(tx: Pick<Tx, "select">) {
     // Only today's rows: the claim loop asks every 5 s, and runs only grows.
     .where(or(gte(runs.endedAt, midnight), eq(runs.state, "running")));
   return r!;
+}
+
+/**
+ * Per agent since `since`: runs started, and how many of the runs that finished on their own succeeded
+ * (a bounce back with changes requested counts as a success; cancelled and interrupted runs count for neither).
+ */
+export async function agentStats(tx: Pick<Tx, "select">, since: Date) {
+  const done = sql`${runs.state} in ('succeeded', 'changes_requested', 'failed', 'timed_out', 'budget_exceeded')`;
+  return tx
+    .select({
+      agentSlug: runs.agentSlug,
+      runs: sql<number>`count(*)::int`,
+      finished: sql<number>`(count(*) filter (where ${done}))::int`,
+      succeeded: sql<number>`(count(*) filter (where ${runs.state} in ('succeeded', 'changes_requested')))::int`,
+      avgCostUsd: sql<number>`coalesce(avg(${runs.costUsd}) filter (where ${done}), 0)::float8`,
+    })
+    .from(runs)
+    .where(gte(runs.createdAt, since))
+    .groupBy(runs.agentSlug);
+}
+
+export type CostGroup = "day" | "agent" | "ticket";
+
+/** Spend and tokens of runs that ended in [from, to) (the same clock as spendToday), grouped for the Costs page. */
+export async function costReport(tx: Pick<Tx, "select">, groupBy: CostGroup, from: Date, to: Date) {
+  const sums = {
+    runs: sql<number>`count(*)::int`,
+    costUsd: sql<number>`coalesce(sum(${runs.costUsd}), 0)::float8`,
+    inputTokens: sql<number>`coalesce(sum(${runs.inputTokens}), 0)::float8`,
+    outputTokens: sql<number>`coalesce(sum(${runs.outputTokens}), 0)::float8`,
+  };
+  const inRange = and(gte(runs.endedAt, from), lt(runs.endedAt, to));
+  if (groupBy === "ticket") {
+    const key = sql<string>`${projects.keyPrefix} || '-' || ${tickets.number}`;
+    return tx
+      .select({ label: key, title: tickets.title, ...sums })
+      .from(runs)
+      .innerJoin(tickets, eq(tickets.id, runs.ticketId))
+      .innerJoin(projects, eq(projects.id, tickets.projectId))
+      .where(inRange)
+      .groupBy(tickets.id, projects.keyPrefix, tickets.number, tickets.title)
+      .orderBy(desc(sql`sum(${runs.costUsd})`))
+      .limit(50); // shortcut: the top 50 tickets by cost, no paging; add it if the list is ever long enough to matter
+  }
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const label =
+    groupBy === "day"
+      ? sql<string>`to_char(${runs.endedAt} at time zone ${tz}, 'YYYY-MM-DD')`
+      : sql<string>`${runs.agentSlug}`;
+  return (
+    tx
+      .select({ label, title: sql<string | null>`null`, ...sums })
+      .from(runs)
+      .where(inRange)
+      // By position: the zone above is a bound parameter, so Postgres can't match a repeated expression.
+      .groupBy(sql`1`)
+      .orderBy(groupBy === "day" ? sql`1` : desc(sql`sum(${runs.costUsd})`))
+  );
 }
 
 /** The position key for a new last card in a column. */
