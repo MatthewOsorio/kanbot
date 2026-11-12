@@ -355,7 +355,7 @@ Every ticket move that lands in an agent column becomes a queued `runs` row; the
 
 ### Agent definition file
 
-Each agent is `agents/<slug>.md`: YAML frontmatter for config, markdown body for the system prompt. Frontmatter is validated with zod each time a run starts; a run whose agent file is invalid fails with the validation error (the Agents page shows it once that page exists, M6). A missing file means the column is a gate.
+Each agent is `agents/<slug>.md`: YAML frontmatter for config, markdown body for the system prompt. Frontmatter is validated with zod each time a run starts; a run whose agent file is invalid fails with the validation error (the Agents page shows it, and the drawer's latest-run bar links a run to the version of the file it read: `runs.config_hash`, with the text kept in `agent_versions`, FR-37). A missing file means the column is a gate.
 
 In `tools`, `{install}`, `{build}`, `{test}` and `{lint}` expand to the project's commands from Settings (an entry whose command the project lacks is dropped). `Bash(cmd:*)` and `Bash(cmd *)` allow `cmd` with any arguments; `Bash(cmd)` allows exactly `cmd`. Project commands must each be one plain command (no `&&`), because the permission hook refuses chained commands.
 
@@ -759,8 +759,9 @@ The web app exposes a JSON REST API under `/api` (used by the UI and a future CL
 | GET | `/api/agents/:slug/avatar` | The agent's avatar SVG from `agents/`. | Built |
 | POST | `/api/tickets/:id/accept-proposals` | Body `{refs}`. Creates the named proposals from the epic's latest plan in Backlog as its children (UC-11), with criteria, touch sets and confirmed `blocks` links between accepted tickets; returns `{created: [{ref, id, number}]}`. 409 `not_epic`, `no_proposals` or `already_accepted`; 400 `unknown_ref`. | Built |
 | POST | `/api/runs/:id/resume` | Body `{answer?}`. Resume a blocked run (§8 Resume): cancels Duckworth, moves the ticket back to the run's column and continues the agent's session with the answer. 409 if the run can't be resumed or a later run replaced it. | Built |
-| GET / PUT | `/api/agents`, `/api/agents/:slug` | List agents; read or save an agent definition file. | M6 |
-| GET | `/api/costs?groupBy=day\|agent\|ticket&from&to` | Cost reports. | M6 |
+| GET | `/api/agents` | The roster in board order: name, tagline, column, model, colour, file hash and this week's runs, success rate and average cost; an invalid file comes back as `{slug, error}`. | Built |
+| GET / PUT | `/api/agents/:slug` | GET reads the file text and hash (`?version=<hash>` reads the saved text a past run used; 404 if unknown). PUT body `{text}` saves it after the file parses and keeps its `slug` and `column` (400 `invalid_agent` otherwise); written atomically, and the next run uses it. Only the agents on the default columns. | Built |
+| GET | `/api/costs?groupBy=day\|agent\|ticket&from&to` | Cost, tokens and run count of runs that ended in `from`..`to` (local dates, both included; the last 30 days by default), grouped; `ticket` returns the top 50 by cost. | Built |
 | GET / PATCH | `/api/settings` | Read Pause all, the pause reason, the daily cap and today's spend; body `{paused?, dailyBudgetUsd?}` pauses or resumes all agents and sets the cap. Resuming clears the pause reason. | Built |
 
 GitHub endpoints (all M5): `POST /api/webhooks/github` receives signature-verified webhooks; `POST /api/tickets/:id/merge` merges only when GitHub reports a human approval and green checks. "Start anyway" is the move's `startAnyway` flag rather than its own endpoint. `GET /api/github/setup` starts the two-click GitHub App setup and `GET /api/github/callback` completes it (both built); `/api/auth/login`, `/api/auth/callback` and `POST /api/auth/logout` handle Sign in with GitHub (built).
@@ -913,10 +914,9 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 - the first setup done over an SSH tunnel. |
 | Agent files for Dr. Rabbit Hole and Marge Conflict | §4, §9 | Until Marge ships, every conflicting rebase goes to Blocked. |
 | Onboarding steps 8–9: Plan B suggests hotspot groups; Kanbot drafts CLAUDE.md and `.claude/claude-security-guidance.md` as a PR | §10 | Moved from M5 on 2026-11-06: not needed for M5's done-when, and each is agent work with its own eval spend. Hotspots are edited in Settings meanwhile. |
-| Agents and Costs pages | §13 | |
+| Agents page: add a new agent (or a new column with one) from the UI; a field-by-field editor; the Costs page's chart as a library chart | FR-31, §13, UC-14 | M6 phase 3 built the pages with existing agents only, a plain textarea over the whole file, and CSS bars. Old runs have no config hash. Cost by ticket shows the top 50, and its total covers those. |
 | A Merge button in Kanbot, enabled once a human approval exists | §10, FR-47 | Owner's choice (2026-11-07): merging happens on GitHub; Kanbot detects it (M5 phase 5b). |
 | The PR Review "small fix" checkbox: a requested change skips Code Review and QA | §10 | Owner's choice (2026-11-07): requested changes always go back through Code Review and QA for now. |
-| Agent config hash on runs | FR-37 | With the Agents page. |
 | Side-by-side diff view | §13 | The Diff tab is unified. |
 | `columns.wip_limit`, `auto_advance`; WIP display and enforcement | FR-20, FR-22 | The only approval gate so far (QA → Ship) stays a gate; the concurrency limits already cap parallel runs. WIP limits matter most with auto-pull (M6). Moved from M4 on 2026-11-03. |
 | Running cost while a run works | UC-8, §13 | The SDK reports cost only when a run ends (per-turn messages carry tokens, not dollars), so a live figure needs Kanbot's own price table. The drawer shows elapsed time live and cost at the end; today's spend counts a running run's budget. A cancelled or interrupted run never gets the SDK's final result, so it records $0 for what it spent; the same price table would fix that. Moved from M4 on 2026-11-03. Marked with a `shortcut:` comment. |

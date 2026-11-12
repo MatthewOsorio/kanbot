@@ -90,6 +90,12 @@ export function Home({
       <header className="flex items-center justify-between py-5">
         <Wordmark />
         <div className="flex items-center gap-1">
+          <Link href="/agents" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Agents
+          </Link>
+          <Link href="/costs" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Costs
+          </Link>
           {installUrl && (
             <a
               href={installUrl}

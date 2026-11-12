@@ -4,6 +4,7 @@ import { join, matchesGlob, resolve } from "node:path";
 import {
   agentActor,
   type AgentConfig,
+  agentVersions,
   botIdentity,
   type Db,
   decryptEnv,
@@ -75,7 +76,7 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
   const { ticket, project } = row;
   const key = `${project.keyPrefix}-${ticket.number}`;
 
-  let agent: AgentConfig | null;
+  let agent: (AgentConfig & { hash: string; text: string }) | null;
   try {
     agent = loadAgent(run.agentSlug);
     if (!agent) throw new Error(`agents/${run.agentSlug}.md no longer exists`);
@@ -85,6 +86,12 @@ async function execute(db: Db, runtime: AgentRuntime, run: Run, cancel: AbortSig
       error: `Invalid agent file: ${(e as Error).message}`,
     });
   }
+  // FR-37: the run keeps the hash of the file it read, and the text stays readable by that hash.
+  await db
+    .insert(agentVersions)
+    .values({ hash: agent.hash, slug: agent.slug, text: agent.text })
+    .onConflictDoNothing();
+  await db.update(runs).set({ configHash: agent.hash }).where(eq(runs.id, run.id));
 
   // The ticket's budget (§14): what its earlier runs cost is gone; Retry after raising it in project Settings.
   const ticketCap = project.settings?.ticketBudgetUsd ?? TICKET_BUDGET_USD;

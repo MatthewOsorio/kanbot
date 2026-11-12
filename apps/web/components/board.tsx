@@ -304,6 +304,12 @@ export function Board({ projectId }: { projectId: string }) {
           />
           {settings && <SpendControls settings={settings} onError={setError} />}
           <HealthDot health={health} />
+          <Link href="/agents" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Agents
+          </Link>
+          <Link href="/costs" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Costs
+          </Link>
           <Link
             href={`/p/${projectId}/settings`}
             className={buttonVariants({ variant: "ghost", size: "sm" })}

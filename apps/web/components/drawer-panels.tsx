@@ -227,6 +227,18 @@ export function RunBar({
           {start && ` · ${Math.floor(secs / 60)}m ${secs % 60}s`}
           {/* shortcut: the SDK reports cost only when a run ends, so a running run shows none; a live figure needs a price table (M6). */}
           {!active && ` · $${run.costUsd.toFixed(2)}`}
+          {run.configHash && (
+            <>
+              {" · "}
+              <a
+                href={`/agents?slug=${run.agentSlug}&v=${run.configHash}`}
+                className="font-mono text-xs underline"
+                title="The agent file this run used"
+              >
+                {run.configHash.slice(0, 7)}
+              </a>
+            </>
+          )}
         </span>
         {active && (
           <Button size="sm" variant="outline" onClick={onCancel}>
