@@ -5,6 +5,7 @@ import { generateKeyBetween } from "fractional-indexing";
 import { agentFileExists } from "../agents";
 import { activeRunStates } from "../../schemas";
 import { BOUNCE_LIMIT } from "../../transitions";
+import { RABBIT_HOLE } from "../../workflow";
 import { QA_SETUP_MESSAGE, qaRunnable } from "../../onboarding";
 import { loadProjectConfig, projectConfig } from "../repo";
 import { projects, runs, settings, tickets } from "./schema";
@@ -139,7 +140,13 @@ export async function startColumnAgent(
   /** requestMd: the owner's words the run answers; resumeSessionId: the agent session it continues. */
   { requestMd, resumeSessionId }: { requestMd?: string; resumeSessionId?: string | null } = {},
 ) {
-  if (!column.agentSlug || !agentFileExists(column.agentSlug)) return null;
+  // A spike's research in Planning is Dr. Rabbit Hole's, not Plan B's (UC-10); every start goes through here.
+  const [t] =
+    column.slug === "planning"
+      ? await tx.select({ type: tickets.type }).from(tickets).where(eq(tickets.id, ticketId))
+      : [];
+  const agentSlug = t?.type === "spike" ? RABBIT_HOLE : column.agentSlug;
+  if (!agentSlug || !agentFileExists(agentSlug)) return null;
   // §10 step 10: a GitHub project runs agents once branch protection is applied or overridden.
   const [p] = await tx
     .select({ repo: projects.githubRepo, onboarding: projects.onboarding })
@@ -153,7 +160,7 @@ export async function startColumnAgent(
     .insert(runs)
     .values({
       ticketId,
-      agentSlug: column.agentSlug,
+      agentSlug,
       columnSlug: column.slug,
       requestMd,
       resumeSessionId,

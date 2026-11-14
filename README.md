@@ -78,7 +78,9 @@ Each agent is a file: a model, a tool allowlist, a budget and a prompt. The joke
 | <img src="agents/avatars/archie-the-archivist.svg" width="44" alt="" />  | **Archie the Archivist**<br /><sub>Remembers everything so you don't have to.</sub><br /><sub>Done · Haiku 5.5</sub> | Writes a short retro: what was built, what it cost, what bounced and why.                                                                                         | Reads the repo.                                                                                |
 |   <img src="agents/avatars/rubber-duckworth.svg" width="44" alt="" />    | **Rubber Duckworth**<br /><sub>Quack. Tell me where it hurts.</sub><br /><sub>Blocked · Haiku 5.5</sub>              | Explains why a ticket is stuck and lists the exact questions you need to answer.                                                                                  | Reads the repo.                                                                                |
 
-Not hired yet: Dr. Rabbit Hole (research spikes) and Marge Conflict (merge conflicts).
+**Dr. Rabbit Hole** (Sonnet 5.5) takes a spike ticket in Planning instead of Plan B: he reads the repo and the web, and writes a research report with a recommendation and, if work follows, proposed tickets.
+
+Not hired yet: Marge Conflict (merge conflicts, which go to Blocked for now).
 
 ## Everything lands on the ticket
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentHash, loadAgent, parseAgentFile } from "./agents";
-import { DEFAULT_COLUMNS } from "../workflow";
+import { DEFAULT_COLUMNS, RABBIT_HOLE } from "../workflow";
 
 const file = (front: string, body = "You plan.") => `---\n${front}\n---\n${body}\n`;
 const valid = `slug: plan-b
@@ -60,6 +60,11 @@ describe("loadAgent", () => {
       { name: "ponytail", level: "off" },
       { name: "security-audit" },
     ]);
+  });
+  it("loads Dr. Rabbit Hole, whom no column names: web tools, no shell, no edits", () => {
+    const a = loadAgent(RABBIT_HOLE);
+    expect(a?.tools).toEqual(["Read", "Grep", "Glob", "WebSearch", "WebFetch"]);
+    expect(a?.editScope).toBe("none");
   });
   it("returns null for an agent with no file", () => {
     expect(loadAgent("no-such-agent")).toBeNull();

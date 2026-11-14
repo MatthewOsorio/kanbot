@@ -12,6 +12,11 @@ export const DEFAULT_COLUMNS = [
   { slug: "blocked", name: "Blocked", agentSlug: "rubber-duckworth" },
 ] as const satisfies readonly { slug: string; name: string; agentSlug: string | null }[];
 
+/** Dr. Rabbit Hole answers spike tickets in Planning, in Plan B's place (UC-10). */
+export const RABBIT_HOLE = "dr-rabbit-hole";
+/** Agents that no column names: the Agents page and the drawer list them too. */
+export const EXTRA_AGENTS = [RABBIT_HOLE] as const;
+
 /** How a run's error starts when the Anthropic API failed; automatic resume and the health check look for it. */
 export const ANTHROPIC_API_ERROR = "Anthropic API error";
 

@@ -103,7 +103,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 export async function storeResults(tx: Tx, ticket: TicketRef, run: Run, v: VerdictPayload) {
   const actor = agentActor(run.agentSlug);
-  // An epic's plan carries its proposed tickets, for the owner to accept (UC-11).
+  // An epic's plan, or a spike's research, carries its proposed tickets, for the owner to accept (UC-11, UC-10).
   const split = v.verdict === "success" ? proposedTickets(v.proposedTickets) : [];
   for (const a of v.artifacts)
     await storeArtifact(
@@ -111,7 +111,9 @@ export async function storeResults(tx: Tx, ticket: TicketRef, run: Run, v: Verdi
       ticket,
       run,
       a,
-      a.kind === "plan" && split.length ? { proposedTickets: split, accepted: {} } : {},
+      (a.kind === "plan" || a.kind === "research") && split.length
+        ? { proposedTickets: split, accepted: {} }
+        : {},
     );
 
   if (v.verdict === "success" && v.touchPaths)

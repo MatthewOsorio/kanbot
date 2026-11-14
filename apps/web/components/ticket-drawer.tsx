@@ -166,7 +166,9 @@ export function TicketDrawer(props: {
               )}
 
               {ticket.columnSlug === "planning" &&
-                ticket.artifacts.some((a) => a.kind === "plan") &&
+                ticket.artifacts.some(
+                  (a) => a.kind === (ticket.type === "spike" ? "research" : "plan"),
+                ) &&
                 !isActive(latest) && (
                   // The same as dropping the ticket on Ready (UC-4).
                   <Button
@@ -175,7 +177,7 @@ export function TicketDrawer(props: {
                       run(() => api(`/api/tickets/${ticket.id}/approve-plan`, { method: "POST" }))
                     }
                   >
-                    Approve plan
+                    {ticket.type === "spike" ? "Approve and create tickets" : "Approve plan"}
                   </Button>
                 )}
 
@@ -262,9 +264,9 @@ export function TicketDrawer(props: {
                 </details>
               )}
 
-              {ticket.type === "epic" && (
+              {(ticket.type === "epic" || ticket.type === "spike") && (
                 <EpicPanel
-                  key={ticket.artifacts.find((a) => a.kind === "plan")?.id} // a revised plan resets the picks
+                  key={ticket.artifacts.find((a) => a.kind === "plan" || a.kind === "research")?.id} // a revised plan resets the picks
                   ticket={ticket}
                   onAccept={(refs) =>
                     run(() => api(`/api/tickets/${ticket.id}/accept-proposals`, { body: { refs } }))
@@ -446,8 +448,8 @@ export function TicketDrawer(props: {
                     <p className="text-sm text-muted-foreground">No artifacts yet.</p>
                   )}
                   {ticket.columnSlug === "planning" &&
-                    ticket.artifacts.some((a) => a.kind === "plan") && (
-                      // Separate from comments: this re-runs Plan B at once with the request (UC-3).
+                    ticket.artifacts.some((a) => a.kind === "plan" || a.kind === "research") && (
+                      // Separate from comments: this re-runs Plan B (or Dr. Rabbit Hole) at once with the request (UC-3).
                       <form
                         className="space-y-2"
                         action={(f) =>

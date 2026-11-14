@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { DEFAULT_COLUMNS } from "@kanbot/shared";
+import { DEFAULT_COLUMNS, EXTRA_AGENTS } from "@kanbot/shared";
 import {
   agentHash,
   agentStats,
@@ -17,7 +17,10 @@ import { db } from "./db";
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 /** The agents on the board, in column order; a column without a file (or without an agent) is left out. */
-const slugs = DEFAULT_COLUMNS.flatMap((c) => (c.agentSlug ? [c.agentSlug] : []));
+const slugs = [
+  ...DEFAULT_COLUMNS.flatMap((c) => (c.agentSlug ? [c.agentSlug] : [])),
+  ...EXTRA_AGENTS, // Dr. Rabbit Hole: no column of his own
+];
 
 type Week = { runs: number; successRate: number | null; avgCostUsd: number };
 export type RosterEntry =

@@ -29,7 +29,10 @@ type Proposal = {
   blockedBy: string[];
 };
 
-/** An epic (UC-11): Plan B's proposed tickets from its latest plan to accept, and the children so far. */
+/**
+ * An epic (UC-11) or a spike (UC-10): the proposed tickets from the latest plan (Plan B) or research (Dr. Rabbit Hole)
+ * to accept, and the children so far.
+ */
 export function EpicPanel({
   ticket,
   onAccept,
@@ -37,8 +40,9 @@ export function EpicPanel({
   ticket: TicketDetail;
   onAccept: (refs: string[]) => Promise<void>;
 }) {
+  const spike = ticket.type === "spike";
   // Artifacts are newest first, so the first plan is the latest.
-  const plan = ticket.artifacts.find((a) => a.kind === "plan");
+  const plan = ticket.artifacts.find((a) => a.kind === (spike ? "research" : "plan"));
   const data = (plan?.data ?? {}) as {
     proposedTickets?: Proposal[];
     accepted?: Record<string, string>;
@@ -53,11 +57,14 @@ export function EpicPanel({
   return (
     <section aria-labelledby="epic-h" className="space-y-3 rounded-lg border bg-surface p-4">
       <h3 id="epic-h" className={H}>
-        Epic{ticket.children.length > 0 && ` · ${done} of ${ticket.children.length} done`}
+        {spike ? "Spike" : "Epic"}
+        {ticket.children.length > 0 && ` · ${done} of ${ticket.children.length} done`}
       </h3>
       {!plan && (
         <p className="text-sm text-muted-foreground">
-          Move it to Planning: Plan B splits the description (or the file it names) into tickets.
+          {spike
+            ? "Move it to Planning: Dr. Rabbit Hole researches the question and recommends an answer."
+            : "Move it to Planning: Plan B splits the description (or the file it names) into tickets."}
         </p>
       )}
       {proposals.length > 0 && (

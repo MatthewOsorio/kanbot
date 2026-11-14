@@ -1,4 +1,4 @@
-import { DEFAULT_COLUMNS } from "@kanbot/shared";
+import { DEFAULT_COLUMNS, EXTRA_AGENTS } from "@kanbot/shared";
 import { loadAgent, loadGitHubApp } from "@kanbot/shared/server";
 import { Home } from "@/components/home";
 import { db } from "@/lib/db";
@@ -7,9 +7,9 @@ export const dynamic = "force-dynamic"; // agent files are read per request, lik
 
 /** The agents whose files have shipped, in board order (a column without one is a gate). */
 function shippedAgents() {
-  return DEFAULT_COLUMNS.flatMap((c) => {
+  return [...DEFAULT_COLUMNS.map((c) => c.agentSlug), ...EXTRA_AGENTS].flatMap((slug) => {
     try {
-      const a = c.agentSlug ? loadAgent(c.agentSlug) : null;
+      const a = slug ? loadAgent(slug) : null;
       return a ? [{ slug: a.slug, name: a.name }] : [];
     } catch {
       return []; // an invalid file: the board and its runs report it

@@ -100,27 +100,36 @@ type Proposal = VerdictPayload["proposedTickets"][number];
 type EpicPlanData = { proposedTickets?: Proposal[]; accepted?: Record<string, string> };
 
 /**
- * Creates the accepted proposals of an epic's latest plan (UC-11) in Backlog, as its children, with their
- * criteria, touch sets and confirmed "blocks" links between them. Refs already accepted are refused.
+ * Creates the accepted proposals of an epic's latest plan (UC-11), or of a spike's latest research (UC-10), in
+ * Backlog, as its children, with their criteria, touch sets and confirmed "blocks" links between them. Refs already
+ * accepted are refused.
  */
 export function acceptProposals(epicId: string, { refs }: In<typeof acceptProposalsBody>) {
-  return db.transaction(async (tx) => {
+  return db.transaction((tx) => acceptProposalsIn(tx, epicId, refs));
+}
+
+/** The same inside a transaction. Without `refs` it creates every proposal not yet accepted (approving a spike). */
+export async function acceptProposalsIn(tx: Tx, epicId: string, refs?: string[]) {
+  {
     const [epic] = await tx.select().from(tickets).where(eq(tickets.id, epicId)).for("update");
     if (!epic) throw notFound("Ticket not found");
-    if (epic.type !== "epic")
-      throw new HttpError(409, "not_epic", "Only an epic has proposed tickets");
+    if (epic.type !== "epic" && epic.type !== "spike")
+      throw new HttpError(409, "not_epic", "Only an epic or a spike has proposed tickets");
     const [plan] = await tx
       .select()
       .from(artifacts)
-      .where(and(eq(artifacts.ticketId, epicId), eq(artifacts.kind, "plan")))
+      .where(and(eq(artifacts.ticketId, epicId), inArray(artifacts.kind, ["plan", "research"])))
       .orderBy(desc(artifacts.version))
       .limit(1);
     const data = (plan?.data ?? {}) as EpicPlanData;
     const proposals = data.proposedTickets ?? [];
-    if (!plan || !proposals.length)
-      throw new HttpError(409, "no_proposals", "The epic's plan proposes no tickets");
+    if (!plan || !proposals.length) {
+      if (refs)
+        throw new HttpError(409, "no_proposals", "Its plan or research proposes no tickets");
+      return { created: [] };
+    }
     const accepted = { ...data.accepted };
-    const wanted = new Set(refs);
+    const wanted = new Set(refs ?? proposals.filter((p) => !accepted[p.ref]).map((p) => p.ref));
     for (const ref of wanted) {
       if (!proposals.some((p) => p.ref === ref))
         throw new HttpError(400, "unknown_ref", `The plan proposes no ticket ${ref}`);
@@ -168,7 +177,7 @@ export function acceptProposals(epicId: string, { refs }: In<typeof acceptPropos
       .where(eq(artifacts.id, plan.id));
     await ticketChanged(tx, epic, ["children"], { accepted: [...wanted] });
     return { created };
-  });
+  }
 }
 
 /** A QA screenshot's PNG (§4). */
