@@ -1,0 +1,67 @@
+{
+  "events": [
+    {
+      "type": "assistant",
+      "payload": {
+        "text": "Checking what the project uses, then the options."
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t1",
+        "name": "WebSearch",
+        "input": {
+          "query": "node sqlite libraries comparison"
+        }
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_result",
+      "payload": {
+        "toolUseId": "t1",
+        "isError": false,
+        "content": "(search results)"
+      },
+      "delayMs": 0
+    },
+    {
+      "type": "tool_call",
+      "payload": {
+        "id": "t2",
+        "name": "mcp__kanbot__report_result",
+        "input": {
+          "verdict": "success"
+        }
+      },
+      "delayMs": 0
+    }
+  ],
+  "report": {
+    "verdict": "success",
+    "summary": "Recommendation: use node:sqlite; it needs no dependency.",
+    "artifacts": [
+      {
+        "kind": "research",
+        "title": "Research: Which SQLite library?",
+        "markdown": "## Question\nWhich SQLite library should the todo store use?\n\n## Recommendation\nUse the built-in `node:sqlite`: no dependency, enough for one table.\n\n## Options compared\n| Option | Cost | Gives |\n| --- | --- | --- |\n| `node:sqlite` | none | sync API, built in |\n| `better-sqlite3` | native build | faster, more features |\n\n## Evidence\n- Node docs, `node:sqlite` page (2026).\n\n## Risks and open questions\n- Still marked experimental in some Node versions."
+      }
+    ],
+    "proposedTickets": [
+      {
+        "ref": "t1",
+        "title": "Store todos in SQLite",
+        "descriptionMd": "Replace the in-memory store in `src/todos.js` with `node:sqlite`, as recommended in the research.",
+        "type": "feature",
+        "priority": "P2",
+        "acceptanceCriteria": ["Todos survive a restart"],
+        "touchPaths": ["src/todos.js"]
+      }
+    ]
+  },
+  "costUsd": 0.25,
+  "inputTokens": 8000,
+  "outputTokens": 1200
+}

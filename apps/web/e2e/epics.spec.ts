@@ -75,3 +75,30 @@ test("accepting an epic's proposed tickets creates linked children in Backlog", 
   expect(toBuild.status()).toBe(409);
   expect((await toBuild.json()).error.code).toBe("epic");
 });
+
+// UC-10: Dr. Rabbit Hole's research on a spike proposes tickets; approving the spike creates them all in
+// Backlog and moves the spike to Done.
+test("approving a spike creates its proposed tickets and finishes it", async ({ request }) => {
+  const prefix = `S${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const project = await (
+    await request.post("/api/projects", { data: { name: "Spikes", keyPrefix: prefix } })
+  ).json();
+  const board = async () => (await request.get(`/api/projects/${project.id}/board`)).json();
+  const planning = (await board()).columns.find((c: { slug: string }) => c.slug === "planning").id;
+  const spike = await (
+    await request.post(`/api/projects/${project.id}/tickets`, {
+      data: { title: "How to persist?", type: "spike" },
+    })
+  ).json();
+  const detail = async () => (await request.get(`/api/tickets/${spike.id}`)).json();
+  await request.post(`/api/tickets/${spike.id}/move`, {
+    data: { toColumnId: planning, position: "a0" },
+  });
+  await expect.poll(async () => (await detail()).statusFlag).toBe("plan_ready");
+
+  expect((await request.post(`/api/tickets/${spike.id}/approve-plan`)).status()).toBe(204);
+  const s = await detail();
+  expect(s.columnSlug).toBe("done");
+  expect(s.children.length).toBeGreaterThan(0);
+  expect(s.children.every((c: { columnSlug: string }) => c.columnSlug === "backlog")).toBe(true);
+});

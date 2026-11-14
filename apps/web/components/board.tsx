@@ -386,7 +386,10 @@ export function Board({ projectId }: { projectId: string }) {
         lastEvent={lastEvent}
         onClose={closeDrawer}
         agents={Object.fromEntries(
-          board.columns.flatMap((c) => (c.agent ? [[c.agent.slug, c.agent]] : [])),
+          [...board.columns.flatMap((c) => c.agent ?? []), ...board.extraAgents].map((a) => [
+            a.slug,
+            a,
+          ]),
         )}
       />
     </div>

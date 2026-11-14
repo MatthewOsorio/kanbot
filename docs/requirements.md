@@ -18,7 +18,7 @@ Last updated 2026-11-10 (M5 closed; its unfinished rows moved to M6).
   - Quality gates and epics (M4.5): the worker's checks gate (build, lint and test after every build run, before Code Review); Nancy's security pass with Cloudflare's security-audit skill; epics, where Plan B splits a ticket or a technical doc into proposed tickets the owner accepts into Backlog.
   - The UI revamp (after M4.5): light and dark themes with a toggle, slate and indigo design tokens, Plus Jakarta Sans and JetBrains Mono, and agent colors: each agent file names a color, which marks its column, its cards and its glyph avatar. The ticket drawer is a centered dialog, and its artifacts and diff files name the agent that made them (`runs.files_changed`).
 - **How it runs:** locally only, bound to 127.0.0.1, behind Sign in with GitHub (the owner only). Tested on Windows only. Project commands, image, env vars, test globs, hotspots, bounce limit and concurrency are edited in Settings, seeded once from `.kanbot/project.yml`.
-- **M6 (started 2026-11-10).** Phase 1 is built: branches are kept current (rebase before each run and when main moves, FR-51, FR-48) and `/api/health` reports GitHub. Next are the leftovers in §16.
+- **M6 (started 2026-11-10).** Phase 1 is built: branches are kept current (rebase before each run and when main moves, FR-51, FR-48) and `/api/health` reports GitHub. Phase 4 is built: Dr. Rabbit Hole (UC-10). Marge Conflict was dropped from it (§16). Next are the leftovers in §16.
 
 The rest of this document is the target design. Anything not built yet is listed in §16 "Still to build", with the milestone that builds it.
 
@@ -131,7 +131,7 @@ Nine agents ship in v1: one per working column, plus a researcher, an unblocker 
 | Agent | Column | Job | Tool access | Produces |
 | --- | --- | --- | --- | --- |
 | **Plan B** — "Always has a backup plan." | Planning | Turns a rough idea into a spec: problem statement, acceptance criteria, implementation plan, files likely touched (the touch set), risks, size estimate. Flags related or dependent tickets. Splits epics into child tickets. | Read-only repo (read, search, list). No edits, no shell. | Plan artifact (markdown), acceptance-criteria checklist, touch set, proposed links and child tickets |
-| **Dr. Rabbit Hole** — "Went looking for one answer, came back with twelve." | Planning (spike tickets only) | Researches a question: compares libraries, reads docs, prototypes in a scratch dir. Answers with a recommendation. | Read-only repo, web search/fetch, write only inside a scratch folder. | Research report with recommendation and sources |
+| **Dr. Rabbit Hole** — "Went looking for one answer, came back with twelve." | Planning (spike tickets only) | Researches a question: compares libraries, reads docs, prototypes in a scratch dir (not built yet, §16). Answers with a recommendation. | Read-only repo, web search/fetch, write only inside a scratch folder (not built yet, §16). | Research report with recommendation and sources |
 | **Sir Codes-a-Lot** — "Knighted for services to the keyboard." | In Progress | Implements the approved plan in the ticket's worktree; writes unit tests; runs build, lint and tests; commits in small steps. On bounce-back, addresses review comments, bug reports, CI failures or the human's PR review. | Full edit in worktree, shell (allowlisted commands), git commit (no push). | Commits on the ticket branch, implementation notes |
 | **Nitpick Nancy** — "Has opinions about your semicolons." | Code Review | Reviews the branch diff against the plan and acceptance criteria: correctness, readability, security (with the security-audit skill, section 8), missing tests, scope creep, and changes that would break other in-flight tickets (section 9). | Read-only repo, git diff/log, can run linters. No edits. | Review artifact with line comments; verdict approve or changes requested |
 | **Testy McTestface** — "Breaks things professionally." | QA / Testing | Checks that the branch meets each acceptance criterion, with evidence: exercises the app the worker started, writes a test per criterion when the project has a test setup; cites code only for criteria about the code itself. Leaves regressions to the checks gate and CI. | Edit test files only (enforced by path globs), the project's test command, HTTP and a headless browser to the running app only. | Test report: pass/fail per criterion, bug reports with repro steps |
@@ -274,7 +274,7 @@ Requirements marked MVP must ship in the first usable version; Later items are d
 | FR-49 | Remove the worktree when a ticket reaches Done or is deleted (the worker does it, not Archie); keep the branch until merged. | MVP |
 | FR-50 | Touch set per ticket, project hotspot groups, and an overlap check before In Progress (hotspot overlap always serializes); per-project `overlapPolicy` of `serialize` (default) or `parallel`. | MVP |
 | FR-51 | When main moves, rebase overlapping in-flight branches; clean rebases push with `--force-with-lease` on `kanbot/*` branches only. | MVP |
-| FR-52 | Marge Conflict resolves rebase conflicts; resolved branches go back through Code Review and QA. | Later |
+| FR-52 | Marge Conflict resolves rebase conflicts; resolved branches go back through Code Review and QA. | Later (dropped from M6, §16) |
 | FR-53 | Stacked branches for dependent tickets, with automatic PR retargeting when the parent merges. | Later |
 
 ### Notifications and costs
@@ -591,7 +591,7 @@ Nancy catches the overlap that file lists miss: one ticket changing a contract t
 - A rebased branch with a PR is pushed with `--force-with-lease`, leased on the head GitHub had when it was fetched. This is the only force-push in the system, done by the worker and only on `kanbot/*` branches. CI then reruns on GitHub.
 - A worktree with uncommitted changes to tracked files is not rebased (a stash re-apply can fail silently); the branch stays behind main until a run starts on a clean worktree. Untracked files, such as build output, don't count.
 - The watcher rebases once per merge and doesn't retry a failure (it is logged); the next run's own rebase covers that ticket. A run that starts between the watcher's idle check and its rebase can race it.
-- A rebase with conflicts is aborted (the branch is left as it was) and the ticket goes to Blocked with the conflicted files and hunks as a test-report artifact (shown as a diff, not side by side, until the side-by-side diff exists). Until Marge Conflict ships (M6), that is every conflict.
+- A rebase with conflicts is aborted (the branch is left as it was) and the ticket goes to Blocked with the conflicted files and hunks as a test-report artifact (shown as a diff, not side by side, until the side-by-side diff exists). Marge Conflict is deferred (§16), so that is every conflict.
 
 ### Marge Conflict
 
@@ -600,7 +600,7 @@ Nancy catches the overlap that file lists miss: one ticket changing a contract t
 - Context: the conflicting hunks, both tickets' plans and acceptance criteria, and the merged PR's description.
 - Tools: edit only the conflicted files in the worktree, run build and tests, commit. No push.
 - On `success`, the resolved branch goes back through Code Review and QA, because resolved code is new code.
-- On `needs_input` (she can't tell which intent should win), the ticket goes to Blocked with the conflict hunks shown side by side for the human. Until Marge ships (M6), every conflicting rebase goes straight to Blocked this way.
+- On `needs_input` (she can't tell which intent should win), the ticket goes to Blocked with the conflict hunks shown side by side for the human. Marge is deferred (§16): every conflicting rebase goes straight to Blocked this way.
 
 ## 10. GitHub, CI and human review
 
@@ -912,7 +912,9 @@ Everything the spec describes that isn't built yet, with the milestone that buil
 - `X-Forwarded-Proto` trusted from Caddy, for the cookie and the App's URLs;
 - the App's webhook and events added, with its callback URLs for the domain;
 - the first setup done over an SSH tunnel. |
-| Agent files for Dr. Rabbit Hole and Marge Conflict | §4, §9 | Until Marge ships, every conflicting rebase goes to Blocked. |
+| Marge Conflict (FR-52) | §4, §9 | Owner's call (2026-11-12): dropped from M6 phase 4. Conflicts are rare (the overlap check keeps overlapping tickets apart; concurrency is 1 per project) and Blocked already handles them. Revisit if they turn out common. A cheaper route than a new agent: merge main into the branch instead of rebasing (no force-push, the owner's commits keep their SHAs, one conflict instead of one per commit) and let Sir Codes-a-Lot resolve it with the tools he has; that reworks FR-51's rebase. |
+| Dr. Rabbit Hole: prototyping in a scratch folder, and Context7 | §4, §8 | Built in M6 phase 4 without them: he reads the repo and uses WebSearch and WebFetch only, with no shell or edits. A scratch scope needs its own fence rule and folder. His `level: off` ponytail and $1.50 budget are guesses until an eval run. |
+| Spikes: wording of the approve step | UC-10, §13 | A finished spike waits in Planning with its research and the epic-style "create these tickets" panel. "Approve and create tickets" creates every proposed ticket in Backlog and moves the spike to Done; the panel still lets the owner pick some. The spike is the created tickets' parent. The "Revise plan" box and the drag-back prompt still say "plan". Choosing a ticket's type at creation is still only in the drawer. |
 | Onboarding steps 8–9: Plan B suggests hotspot groups; Kanbot drafts CLAUDE.md and `.claude/claude-security-guidance.md` as a PR | §10 | Moved from M5 on 2026-11-06: not needed for M5's done-when, and each is agent work with its own eval spend. Hotspots are edited in Settings meanwhile. |
 | Agents page: add a new agent (or a new column with one) from the UI; a field-by-field editor; the Costs page's chart as a library chart | FR-31, §13, UC-14 | M6 phase 3 built the pages with existing agents only, a plain textarea over the whole file, and CSS bars. Old runs have no config hash. Cost by ticket shows the top 50, and its total covers those. |
 | A Merge button in Kanbot, enabled once a human approval exists | §10, FR-47 | Owner's choice (2026-11-07): merging happens on GitHub; Kanbot detects it (M5 phase 5b). |

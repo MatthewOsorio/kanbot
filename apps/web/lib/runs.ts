@@ -14,8 +14,9 @@ import {
   ticketChanged,
   tickets,
 } from "@kanbot/shared/server";
-import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { HttpError, notFound } from "./api";
+import { acceptProposalsIn } from "./tickets";
 import { db } from "./db";
 import type { Tx } from "./events";
 
@@ -70,10 +71,17 @@ export function revisePlan(ticketId: string, requestMd: string) {
   });
 }
 
-/** "Approve plan" in the drawer: the same as dropping the ticket at the bottom of Ready. */
+/**
+ * "Approve plan" in the drawer: the same as dropping the ticket at the bottom of Ready. For a spike it creates
+ * the research's proposed tickets in Backlog and moves the spike to Done: nothing gets built on it.
+ */
 export function approvePlan(ticketId: string) {
   return db.transaction(async (tx) => {
-    await approveInto(tx, await plannedTicket(tx, ticketId, "approved"), "ready", "Ready");
+    const row = await plannedTicket(tx, ticketId, "approved");
+    if (row.ticket.type === "spike") {
+      await acceptProposalsIn(tx, ticketId);
+      await approveInto(tx, row, "done", "Done");
+    } else await approveInto(tx, row, "ready", "Ready");
   });
 }
 
@@ -90,11 +98,12 @@ export function approveShip(ticketId: string) {
   });
 }
 
+/** A plan, or for a spike Dr. Rabbit Hole's research: what Planning leaves for the owner to act on. */
 export async function planExists(tx: Tx, ticketId: string) {
   const [plan] = await tx
     .select({ id: artifacts.id })
     .from(artifacts)
-    .where(and(eq(artifacts.ticketId, ticketId), eq(artifacts.kind, "plan")))
+    .where(and(eq(artifacts.ticketId, ticketId), inArray(artifacts.kind, ["plan", "research"])))
     .limit(1);
   return !!plan;
 }

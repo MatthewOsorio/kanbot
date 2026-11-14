@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import {
   createProjectBody,
   DEFAULT_COLUMNS,
+  EXTRA_AGENTS,
   IN_FLIGHT_COLUMNS,
   type patchProjectBody,
 } from "@kanbot/shared";
@@ -113,6 +114,8 @@ export async function getBoard(projectId: string) {
   return {
     project,
     columns: cols.map((c) => ({ ...c, agent: columnAgent(c.agentSlug) })),
+    // Agents no column names (Dr. Rabbit Hole): the drawer names and colors their work too.
+    extraAgents: EXTRA_AGENTS.flatMap((s) => columnAgent(s) ?? []),
     tickets: cards.map((card) => {
       // An epic's progress: its children, and how many of them are Done (UC-11).
       const kids = card.type === "epic" ? cards.filter((k) => k.parentId === card.id) : [];
