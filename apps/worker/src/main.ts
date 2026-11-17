@@ -5,6 +5,7 @@ import { nightlyCleanup } from "./cleanup";
 import { onboardNext, requeueOnboarding } from "./onboard";
 import {
   afterPrevious,
+  autoPull,
   claimNext,
   LIMITS,
   PAUSED_ERROR,
@@ -45,6 +46,7 @@ async function pump() {
   try {
     do {
       again = false as boolean; // a pump() during the awaits below sets it
+      await autoPull(db); // FR-25: a freed In Progress slot is filled here, within one 5 s tick
       while (active.size < LIMITS.global) {
         const run = await claimNext(db);
         if (!run) break;

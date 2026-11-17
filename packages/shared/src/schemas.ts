@@ -150,6 +150,8 @@ export const moveTicketBody = z.object({
   // §3: into Ship before QA passed (409 `skip_gates`), and into Done with an open PR, which closes it (409 `pr_open`).
   confirmSkip: z.boolean().optional(),
   confirmClose: z.boolean().optional(),
+  // FR-20: into a column that is at its WIP limit (409 `wip_limit`).
+  overLimit: z.boolean().optional(),
 });
 
 export const createCommentBody = z.object({ bodyMd: z.string().trim().min(1).max(20_000) });
@@ -230,6 +232,18 @@ export const patchProjectBody = z
     bounceLimit: z.number().int().min(1).max(10),
     concurrency: z.number().int().min(1).max(2),
     ticketBudgetUsd: z.number().min(0.5).max(100),
+    // FR-25: start the top Ready ticket whenever In Progress has a free slot.
+    autoPull: z.boolean(),
+    // FR-20, FR-22: per-column WIP limit (null clears it) and whether a passing run moves the ticket on.
+    columns: z
+      .array(
+        z.object({
+          id: z.uuid(),
+          wipLimit: z.number().int().min(1).max(20).nullable(),
+          autoAdvance: z.boolean(),
+        }),
+      )
+      .max(20),
     // The project's env vars (§10), the whole set: a string sets the value, null keeps the stored one,
     // a name left out is removed. Values are write-only: reads return names only.
     env: z

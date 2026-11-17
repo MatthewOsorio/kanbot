@@ -21,6 +21,14 @@ type Settings = {
   bounceLimit: number;
   concurrency: number;
   ticketBudgetUsd: number;
+  autoPull: boolean;
+  columns: {
+    id: string;
+    name: string;
+    slug: string;
+    wipLimit: number | null;
+    autoAdvance: boolean;
+  }[];
   env: { name: string; set: boolean }[];
 };
 
@@ -92,6 +100,8 @@ export function SettingsForm({ projectId }: { projectId: string }) {
       bounceLimit: s.bounceLimit,
       concurrency: s.concurrency,
       ticketBudgetUsd: s.ticketBudgetUsd,
+      autoPull: s.autoPull,
+      columns: s.columns.map(({ id, wipLimit, autoAdvance }) => ({ id, wipLimit, autoAdvance })),
       env: envBody(env),
     };
     const r = await fetch(`/api/projects/${projectId}`, {
@@ -238,6 +248,59 @@ export function SettingsForm({ projectId }: { projectId: string }) {
               />
             </label>
           </div>
+          <fieldset className={CARD}>
+            <legend className="float-left mb-1 w-full font-semibold">Flow</legend>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={s.autoPull}
+                onChange={(e) => setS({ ...s, autoPull: e.target.checked })}
+              />
+              Auto-pull: start the top Ready ticket whenever In Progress has a free slot
+            </label>
+            <p className="text-xs text-muted-foreground">
+              A slot is In Progress&apos;s WIP limit, or Concurrent runs when it has none. Blocked,
+              overlapping and epic tickets stay in Ready.
+            </p>
+            <ul className="space-y-2">
+              {s.columns.map((c, i) => {
+                const set = (patch: Partial<Settings["columns"][number]>) =>
+                  setS({
+                    ...s,
+                    columns: s.columns.map((x, j) => (j === i ? { ...x, ...patch } : x)),
+                  });
+                return (
+                  <li key={c.id} className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+                    <span className="w-28 font-medium">{c.name}</span>
+                    <label className="flex items-center gap-2">
+                      WIP limit
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        placeholder="none"
+                        value={c.wipLimit ?? ""}
+                        onChange={(e) =>
+                          set({ wipLimit: e.target.value === "" ? null : Number(e.target.value) })
+                        }
+                        className="w-20"
+                      />
+                    </label>
+                    {(c.slug === "in_progress" || c.slug === "code_review") && (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={c.autoAdvance}
+                          onChange={(e) => set({ autoAdvance: e.target.checked })}
+                        />
+                        Move on automatically
+                      </label>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </fieldset>
           <div className="flex items-center gap-3">
             <Button type="submit">Save</Button>
             {msg && (

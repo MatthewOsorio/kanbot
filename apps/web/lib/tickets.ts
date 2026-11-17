@@ -21,9 +21,8 @@ import {
   gh,
   git,
   logActivity,
-  overlap,
+  overlapping,
   OWNER,
-  projectConfigOf,
   projects,
   type PullRequest,
   removeWorktree,
@@ -35,8 +34,9 @@ import {
   ticketSpend,
   ticketLinks,
   tickets,
+  unfinishedBlockers,
 } from "@kanbot/shared/server";
-import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, max, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import type { z } from "zod";
 import { HttpError, notFound } from "./api";
@@ -335,58 +335,6 @@ export async function getDiff(id: string) {
 }
 const DIFF_CAP = 1_000_000;
 
-/** Confirmed blockers that aren't Done yet, as keys (§9 "blocked by"). */
-async function unfinishedBlockers(tx: Tx, ticketId: string) {
-  const rows = await tx
-    .select({ number: tickets.number, keyPrefix: projects.keyPrefix })
-    .from(ticketLinks)
-    .innerJoin(tickets, eq(tickets.id, ticketLinks.fromTicketId))
-    .innerJoin(columns, eq(columns.id, tickets.columnId))
-    .innerJoin(projects, eq(projects.id, tickets.projectId))
-    .where(
-      and(
-        eq(ticketLinks.toTicketId, ticketId),
-        eq(ticketLinks.kind, "blocks"),
-        eq(ticketLinks.confirmed, true),
-        ne(columns.slug, "done"),
-      ),
-    )
-    .orderBy(asc(tickets.number));
-  return rows.map((r) => `${r.keyPrefix}-${r.number}`);
-}
-
-/**
- * The §9 overlap check before In Progress: tickets in flight whose touch set or hotspot groups overlap
- * this one's. Advisory: the owner can start anyway. A ticket with no touch set yet overlaps nothing.
- */
-async function overlapping(
-  tx: Tx,
-  ticket: { id: string; projectId: string; touchPaths: string[] },
-) {
-  if (!ticket.touchPaths.length) return [];
-  const [p] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
-  const { hotspots } = await projectConfigOf(tx, p!);
-  const others = await tx
-    .select({ number: tickets.number, touchPaths: tickets.touchPaths })
-    .from(tickets)
-    .innerJoin(columns, eq(columns.id, tickets.columnId))
-    .where(
-      and(
-        eq(tickets.projectId, ticket.projectId),
-        ne(tickets.id, ticket.id),
-        inArray(columns.slug, IN_FLIGHT_COLUMNS),
-      ),
-    );
-  return others.flatMap((o) => {
-    const { files, hotspots: groups } = overlap(ticket.touchPaths, o.touchPaths, hotspots);
-    const what = [
-      ...(files.length ? [`${files.length} file${files.length > 1 ? "s" : ""}`] : []),
-      ...groups.map((g) => `hotspot ${g}`),
-    ];
-    return what.length ? [`${p!.keyPrefix}-${o.number} (${what.join(", ")})`] : [];
-  });
-}
-
 /**
  * Manual move (requirements §3 "Manual moves"): any column to any column. Moving to another column
  * cancels the active run (only with confirmCancel, FR-24), clears the status flag (dropping on Ready
@@ -396,6 +344,7 @@ async function overlapping(
  * keepPlan keeps it (Plan ready, no run), requestMd has Plan B revise it.
  * Into Ship before QA passed asks first (409 `skip_gates`); into PR Review needs a PR (409 `no_pr`);
  * into Done with an open PR asks first (409 `pr_open`), then closes the PR on GitHub (the branch stays).
+ * Into a column at its WIP limit asks first (409 `wip_limit`, FR-20); only drags ask, automatic moves don't.
  */
 export async function moveTicket(
   id: string,
@@ -408,6 +357,7 @@ export async function moveTicket(
     requestMd,
     confirmSkip,
     confirmClose,
+    overLimit,
   }: In<typeof moveTicketBody>,
 ) {
   try {
@@ -454,6 +404,18 @@ export async function moveTicket(
           ]
             .filter(Boolean)
             .join(". "),
+        );
+    }
+    if (changesColumn && to.wipLimit != null && !overLimit) {
+      const [{ n }] = (await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(tickets)
+        .where(eq(tickets.columnId, to.id))) as [{ n: number }];
+      if (n >= to.wipLimit)
+        throw new HttpError(
+          409,
+          "wip_limit",
+          `${to.name} is at its WIP limit (${n} of ${to.wipLimit})`,
         );
     }
     // §3: Ship normally follows QA's pass (or a re-ship from PR Review); anything else skips a gate.

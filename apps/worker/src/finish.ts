@@ -164,6 +164,9 @@ export async function finish(db: Db, runId: string, o: Outcome, usage?: RuntimeR
     // §4: QA without the app running would only read the code, so the ticket waits here for a start command.
     const noQa = rule.to === "qa" && !!project!.repoPath && !qaRunnable(config);
     if (noQa) rule = { to: null, flag: "needs_input", bounce: false };
+    // FR-22: a column switched to "wait for approval" keeps a passing ticket; bounces and Blocked still move.
+    else if (rule.to && !rule.bounce && rule.to !== "blocked" && !from.autoAdvance)
+      rule = { to: null, flag: "awaiting_approval", bounce: false };
     // Re-read: storeResults may have replaced the touch set (Plan B).
     const [{ touchPaths }] = (await tx
       .select({ touchPaths: tickets.touchPaths })

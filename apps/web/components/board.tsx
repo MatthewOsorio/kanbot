@@ -178,6 +178,7 @@ export function Board({ projectId }: { projectId: string }) {
       requestMd?: string;
       confirmSkip?: boolean;
       confirmClose?: boolean;
+      overLimit?: boolean;
     };
     // Each of these 409s asks once; yes sets its flag and the move is tried again.
     const asks: Record<string, [Exclude<keyof Flags, "requestMd">, (m: string) => string]> = {
@@ -192,6 +193,8 @@ export function Board({ projectId }: { projectId: string }) {
       skip_gates: ["confirmSkip", (m) => `${key(card)}: ${m}. Ship it anyway?`],
       // §3: Done without a merge closes the PR on GitHub (the branch stays).
       pr_open: ["confirmClose", (m) => `${key(card)}: ${m}. Close the PR without merging?`],
+      // FR-20: a full column; only a drag asks, the agents' own moves ignore the limit.
+      wip_limit: ["overLimit", (m) => `${m}. Move ${key(card)} there anyway?`],
     };
     const move = (flags: Flags) =>
       api(`/api/tickets/${card.id}/move`, { body: { toColumnId, position, ...flags } });

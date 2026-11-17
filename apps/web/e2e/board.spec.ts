@@ -93,6 +93,55 @@ test("refuses foreign hosts and cross-site writes", async ({ baseURL }) => {
   ).toBe(403);
 });
 
+// FR-20, FR-25: the flow settings round-trip, and a drag into a full column asks first (409 wip_limit).
+test("WIP limit: a move into a full column needs overLimit; auto-pull and limits are saved", async ({
+  request,
+}) => {
+  const key = `W${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+  const p = await (
+    await request.post("/api/projects", { data: { name: "WIP", keyPrefix: key } })
+  ).json();
+  const url = `/api/projects/${p.id}`;
+  const settings = await (await request.get(url)).json();
+  expect(settings.autoPull).toBe(false);
+  const ready = settings.columns.find((c: { slug: string }) => c.slug === "ready");
+  const review = settings.columns.find((c: { slug: string }) => c.slug === "code_review");
+  expect(ready).toMatchObject({ wipLimit: null, autoAdvance: true });
+
+  const saved = await (
+    await request.patch(url, {
+      data: {
+        autoPull: true,
+        columns: [
+          { id: ready.id, wipLimit: 1, autoAdvance: true },
+          { id: review.id, wipLimit: null, autoAdvance: false },
+        ],
+      },
+    })
+  ).json();
+  expect(saved.autoPull).toBe(true);
+  expect(saved.columns.find((c: { id: string }) => c.id === ready.id).wipLimit).toBe(1);
+  expect(saved.columns.find((c: { id: string }) => c.id === review.id).autoAdvance).toBe(false);
+  expect(
+    (
+      await request.patch(url, {
+        data: { columns: [{ id: ready.id, wipLimit: 0, autoAdvance: true }] },
+      })
+    ).status(),
+  ).toBe(400);
+
+  const add = async (title: string) =>
+    (await (await request.post(`${url}/tickets`, { data: { title } })).json()) as { id: string };
+  const [one, two] = [await add("One"), await add("Two")];
+  const move = (id: string, position: string, extra: object = {}) =>
+    request.post(`/api/tickets/${id}/move`, { data: { toColumnId: ready.id, position, ...extra } });
+  expect((await move(one.id, "a1")).status()).toBe(204);
+  const full = await move(two.id, "a2");
+  expect(full.status()).toBe(409);
+  expect((await full.json()).error.code).toBe("wip_limit");
+  expect((await move(two.id, "a2", { overLimit: true })).status()).toBe(204);
+});
+
 test("project settings: seeded as empty, an empty command clears, a chained one is refused", async ({
   request,
 }) => {

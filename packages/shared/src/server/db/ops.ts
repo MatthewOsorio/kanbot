@@ -1,14 +1,14 @@
 // Ticket/run operations shared by the web app (manual moves, cancel, retry) and the worker (auto-moves).
 // Each takes the caller's transaction and writes activity + publishes, per the repo convention.
-import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { generateKeyBetween } from "fractional-indexing";
 import { agentFileExists } from "../agents";
 import { activeRunStates } from "../../schemas";
 import { BOUNCE_LIMIT } from "../../transitions";
-import { RABBIT_HOLE } from "../../workflow";
+import { IN_FLIGHT_COLUMNS, RABBIT_HOLE } from "../../workflow";
 import { QA_SETUP_MESSAGE, qaRunnable } from "../../onboarding";
-import { loadProjectConfig, projectConfig } from "../repo";
-import { projects, runs, settings, tickets } from "./schema";
+import { loadProjectConfig, overlap, projectConfig } from "../repo";
+import { columns, projects, runs, settings, ticketLinks, tickets } from "./schema";
 import { logActivity, OWNER, publish, type Actor, type Tx } from "./write";
 
 /**
@@ -52,7 +52,60 @@ export async function projectConfigOf(
     bounceLimit: p.settings?.bounceLimit ?? BOUNCE_LIMIT,
     concurrency: p.settings?.concurrency ?? 1,
     ticketBudgetUsd: p.settings?.ticketBudgetUsd ?? TICKET_BUDGET_USD,
+    autoPull: p.settings?.autoPull ?? false,
   };
+}
+
+/** Confirmed blockers that aren't Done yet, as keys (§9 "blocked by"). */
+export async function unfinishedBlockers(tx: Pick<Tx, "select">, ticketId: string) {
+  const rows = await tx
+    .select({ number: tickets.number, keyPrefix: projects.keyPrefix })
+    .from(ticketLinks)
+    .innerJoin(tickets, eq(tickets.id, ticketLinks.fromTicketId))
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .innerJoin(projects, eq(projects.id, tickets.projectId))
+    .where(
+      and(
+        eq(ticketLinks.toTicketId, ticketId),
+        eq(ticketLinks.kind, "blocks"),
+        eq(ticketLinks.confirmed, true),
+        ne(columns.slug, "done"),
+      ),
+    )
+    .orderBy(asc(tickets.number));
+  return rows.map((r) => `${r.keyPrefix}-${r.number}`);
+}
+
+/**
+ * The §9 overlap check before In Progress: tickets in flight whose touch set or hotspot groups overlap
+ * this one's. Advisory: the owner can start anyway. A ticket with no touch set yet overlaps nothing.
+ */
+export async function overlapping(
+  tx: Pick<Tx, "select" | "update">,
+  ticket: { id: string; projectId: string; touchPaths: string[] },
+) {
+  if (!ticket.touchPaths.length) return [];
+  const [p] = await tx.select().from(projects).where(eq(projects.id, ticket.projectId));
+  const { hotspots } = await projectConfigOf(tx, p!);
+  const others = await tx
+    .select({ number: tickets.number, touchPaths: tickets.touchPaths })
+    .from(tickets)
+    .innerJoin(columns, eq(columns.id, tickets.columnId))
+    .where(
+      and(
+        eq(tickets.projectId, ticket.projectId),
+        ne(tickets.id, ticket.id),
+        inArray(columns.slug, IN_FLIGHT_COLUMNS),
+      ),
+    );
+  return others.flatMap((o) => {
+    const { files, hotspots: groups } = overlap(ticket.touchPaths, o.touchPaths, hotspots);
+    const what = [
+      ...(files.length ? [`${files.length} file${files.length > 1 ? "s" : ""}`] : []),
+      ...groups.map((g) => `hotspot ${g}`),
+    ];
+    return what.length ? [`${p!.keyPrefix}-${o.number} (${what.join(", ")})`] : [];
+  });
 }
 
 /** Default per-ticket budget (§14); a project's Settings override it. */

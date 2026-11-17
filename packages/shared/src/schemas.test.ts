@@ -67,6 +67,22 @@ describe("patchProjectBody", () => {
   });
 });
 
+describe("patchProjectBody flow settings (FR-20, FR-22, FR-25)", () => {
+  const ok = (b: unknown) => patchProjectBody.safeParse(b).success;
+  const id = "0190a000-0000-7000-8000-000000000001";
+  it("takes auto-pull and per-column limits, null clearing a limit", () => {
+    expect(ok({ autoPull: true })).toBe(true);
+    expect(ok({ columns: [{ id, wipLimit: null, autoAdvance: false }] })).toBe(true);
+    expect(ok({ columns: [{ id, wipLimit: 20, autoAdvance: true }] })).toBe(true);
+  });
+  it("refuses a limit outside 1-20, a non-integer one, and a column without an id", () => {
+    for (const wipLimit of [0, 21, 1.5])
+      expect(ok({ columns: [{ id, wipLimit, autoAdvance: true }] })).toBe(false);
+    expect(ok({ columns: [{ id: "x", wipLimit: 1, autoAdvance: true }] })).toBe(false);
+    expect(ok({ autoPull: "yes" })).toBe(false);
+  });
+});
+
 describe("patchProjectBody.env", () => {
   const env = (e: unknown) => patchProjectBody.safeParse({ env: e }).success;
   it("takes names with values, or null to keep the stored value", () => {
