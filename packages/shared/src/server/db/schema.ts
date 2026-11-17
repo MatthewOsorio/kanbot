@@ -80,6 +80,7 @@ export const projects = pgTable("projects", {
     bounceLimit?: number;
     concurrency?: number;
     ticketBudgetUsd?: number;
+    autoPull?: boolean;
   }>(),
   ticketSeq: integer("ticket_seq").notNull().default(0),
   createdAt: createdAt(),
@@ -96,6 +97,10 @@ export const columns = pgTable(
     name: text("name").notNull(),
     position: integer("position").notNull(),
     agentSlug: text("agent_slug"),
+    // FR-20: null = no limit. Only drags and auto-pull respect it; automatic moves ignore it.
+    wipLimit: integer("wip_limit"),
+    // FR-22: false = a passing run leaves the ticket here, awaiting the owner's approval.
+    autoAdvance: boolean("auto_advance").notNull().default(true),
   },
   (t) => [unique().on(t.projectId, t.slug)],
 );

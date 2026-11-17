@@ -59,6 +59,42 @@ test("the build loop runs to QA with one bounce, and the Diff tab shows the bran
   await expect(column(page, "Ship").getByText(title)).toBeVisible();
 });
 
+// FR-22: with "Move on automatically" off for Code Review, a passing review holds the ticket there until the
+// owner approves; the approval then sends it on to QA.
+test("a column that waits for approval holds the ticket, and approving moves it on", async ({
+  request,
+}) => {
+  const repo = await prepareSampleRepo(join(mkdtempSync(join(tmpdir(), "kanbot-e2e-")), "repo"));
+  const key = `H${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const p = await (
+    await request.post("/api/projects", { data: { name: "Held", keyPrefix: key, repoPath: repo } })
+  ).json();
+  const settings = await (await request.get(`/api/projects/${p.id}`)).json();
+  const col = (slug: string) => settings.columns.find((c: { slug: string }) => c.slug === slug);
+  await request.patch(`/api/projects/${p.id}`, {
+    data: { columns: [{ id: col("code_review").id, wipLimit: null, autoAdvance: false }] },
+  });
+  const t = await (
+    await request.post(`/api/projects/${p.id}/tickets`, {
+      data: { title: "Held in review", type: "bug", labels: ["replay:bounce"] },
+    })
+  ).json();
+  const where = async () => {
+    const board = await (await request.get(`/api/projects/${p.id}/board`)).json();
+    const now = board.tickets.find((x: { id: string }) => x.id === t.id);
+    const slug = board.columns.find((c: { id: string }) => c.id === now.columnId).slug;
+    return `${slug}:${now.statusFlag}`;
+  };
+  const start = await request.post(`/api/tickets/${t.id}/move`, {
+    data: { toColumnId: col("in_progress").id, position: "a1" },
+  });
+  expect(start.status()).toBe(204);
+  await expect.poll(where, { timeout: 45_000 }).toBe("code_review:awaiting_approval");
+
+  expect((await request.post(`/api/tickets/${t.id}/approve-ship`)).status()).toBe(204);
+  await expect.poll(where, { timeout: 45_000 }).toBe("qa:awaiting_approval");
+});
+
 // §9 overlap check: entering In Progress while an in-flight ticket touches the same files is a 409
 // until the owner starts anyway.
 test("moving an overlapping ticket to In Progress asks to start anyway", async ({ page }) => {

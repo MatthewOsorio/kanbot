@@ -29,6 +29,7 @@ export function Column(props: { column: ColumnData; count: number; children: Rea
   const { column } = props;
   const { agent } = column;
   const { setNodeRef } = useDroppable({ id: column.id });
+  const full = column.wipLimit != null && props.count >= column.wipLimit;
   return (
     <section
       ref={setNodeRef}
@@ -52,10 +53,16 @@ export function Column(props: { column: ColumnData; count: number; children: Rea
           </span>
         </span>
         <span
-          className="rounded-full bg-background px-2 py-0.5 font-mono text-xs text-muted-foreground tabular-nums"
-          aria-label={`${props.count} tickets`}
+          className={`rounded-full px-2 py-0.5 font-mono text-xs tabular-nums ${
+            full ? "bg-needs text-needs-fg" : "bg-background text-muted-foreground"
+          }`}
+          aria-label={
+            column.wipLimit == null
+              ? `${props.count} tickets`
+              : `${props.count} of ${column.wipLimit} tickets`
+          }
         >
-          {props.count}
+          {column.wipLimit == null ? props.count : `${props.count} / ${column.wipLimit}`}
         </span>
       </h2>
       <div className="flex min-h-16 flex-1 flex-col gap-2">{props.children}</div>

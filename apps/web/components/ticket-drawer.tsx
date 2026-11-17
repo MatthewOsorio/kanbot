@@ -188,19 +188,20 @@ export function TicketDrawer(props: {
                 </p>
               )}
 
-              {ticket.columnSlug === "qa" &&
-                ticket.statusFlag === "awaiting_approval" &&
-                !isActive(latest) && (
-                  // The same as dropping the ticket on Ship (§3: QA's approval gate).
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      run(() => api(`/api/tickets/${ticket.id}/approve-ship`, { method: "POST" }))
-                    }
-                  >
-                    Approve and ship
-                  </Button>
-                )}
+              {ticket.statusFlag === "awaiting_approval" && !isActive(latest) && (
+                // QA's gate (§3), or a column held by "Move on automatically" off (FR-22): the same as
+                // dropping the ticket on the next column.
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    run(() => api(`/api/tickets/${ticket.id}/approve-ship`, { method: "POST" }))
+                  }
+                >
+                  {ticket.columnSlug === "qa"
+                    ? "Approve and ship"
+                    : `Approve and move to ${ticket.columnSlug === "in_progress" ? "Code Review" : "QA"}`}
+                </Button>
+              )}
 
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <label className="flex items-center gap-2 text-muted-foreground">

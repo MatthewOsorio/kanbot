@@ -1,4 +1,4 @@
-import { activeRunStates, resumableRunStates } from "@kanbot/shared";
+import { activeRunStates, afterRun, resumableRunStates } from "@kanbot/shared";
 import {
   activeRun,
   artifacts,
@@ -85,16 +85,21 @@ export function approvePlan(ticketId: string) {
   });
 }
 
-/** "Approve and ship" in the drawer: QA passed, so the same as dropping the ticket at the bottom of Ship. */
+/**
+ * "Approve" in the drawer on a ticket held with `awaiting_approval`: QA passed (the same as dropping the ticket
+ * at the bottom of Ship), or a column switched off auto-advance (FR-22) kept a passing ticket, which then moves
+ * on to where its passing run would have sent it.
+ */
 export function approveShip(ticketId: string) {
   return db.transaction(async (tx) => {
     const row = await lockedTicket(tx, ticketId);
     const { ticket, column } = row;
-    if (column.slug !== "qa" || ticket.statusFlag !== "awaiting_approval")
-      throw new HttpError(409, "not_approvable", "Only a ticket that passed QA can be approved");
-    const ship = await approveInto(tx, row, "ship", "Ship");
+    const next = column.slug === "qa" ? "ship" : afterRun(column.slug, "succeeded").to;
+    if (ticket.statusFlag !== "awaiting_approval" || !next)
+      throw new HttpError(409, "not_approvable", "This ticket isn't waiting for approval");
+    const to = await approveInto(tx, row, next, next);
     // Captain Ship-It writes the PR description; the worker then pushes and opens the PR (FR-43).
-    await startColumnAgent(tx, ticket.projectId, ticketId, ship, OWNER);
+    await startColumnAgent(tx, ticket.projectId, ticketId, to, OWNER);
   });
 }
 

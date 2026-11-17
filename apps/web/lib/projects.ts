@@ -19,7 +19,7 @@ import {
   ticketLinks,
   tickets,
 } from "@kanbot/shared/server";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { HttpError, isUniqueViolation, notFound } from "./api";
 import { db } from "./db";
@@ -183,7 +183,20 @@ export async function getProjectSettings(id: string) {
     bounceLimit,
     concurrency,
     ticketBudgetUsd,
+    autoPull,
   } = await projectConfigOf(db, p);
+  const cols = await db
+    .select({
+      id: columns.id,
+      name: columns.name,
+      slug: columns.slug,
+      agentSlug: columns.agentSlug,
+      wipLimit: columns.wipLimit,
+      autoAdvance: columns.autoAdvance,
+    })
+    .from(columns)
+    .where(eq(columns.projectId, id))
+    .orderBy(asc(columns.position));
   return {
     id,
     name: p.name,
@@ -197,6 +210,8 @@ export async function getProjectSettings(id: string) {
     bounceLimit,
     concurrency,
     ticketBudgetUsd,
+    autoPull,
+    columns: cols,
     env: envView(p),
   };
 }
@@ -210,9 +225,24 @@ export async function patchProject(id: string, input: z.output<typeof patchProje
   if (!p) throw notFound("Project not found");
   // Seed first so a partial patch (one command) doesn't hide the rest of project.yml behind nulls.
   const cur = await projectConfigOf(db, p);
-  const { bounceLimit, concurrency, ticketBudgetUsd, commands, image, testGlobs, hotspots, env } =
-    input;
+  const {
+    bounceLimit,
+    concurrency,
+    ticketBudgetUsd,
+    autoPull,
+    commands,
+    image,
+    testGlobs,
+    hotspots,
+    env,
+  } = input;
   const stored = decryptEnv(p.env);
+  // Only this project's own columns: an id from another board changes nothing.
+  for (const c of input.columns ?? [])
+    await db
+      .update(columns)
+      .set({ wipLimit: c.wipLimit, autoAdvance: c.autoAdvance })
+      .where(and(eq(columns.id, c.id), eq(columns.projectId, id)));
   await db
     .update(projects)
     .set({
@@ -234,6 +264,7 @@ export async function patchProject(id: string, input: z.output<typeof patchProje
         bounceLimit: bounceLimit ?? cur.bounceLimit,
         concurrency: concurrency ?? cur.concurrency,
         ticketBudgetUsd: ticketBudgetUsd ?? cur.ticketBudgetUsd,
+        autoPull: autoPull ?? cur.autoPull,
       },
     })
     .where(eq(projects.id, id));

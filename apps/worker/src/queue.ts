@@ -8,12 +8,17 @@ import {
   diskFull,
   getSettings,
   loadAgent,
+  moveToColumnEnd,
+  overlapping,
+  projectConfigOf,
+  projects,
   runs,
   spendToday,
   startColumnAgent,
   tickets,
+  unfinishedBlockers,
 } from "@kanbot/shared/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { finish } from "./finish";
 import type { Run } from "./results";
 
@@ -62,6 +67,60 @@ export async function claimNext(db: Db): Promise<Run | null> {
       .returning();
     return run!;
   });
+}
+
+const AUTO_PULL = { kind: "user", name: "auto-pull" } as const;
+
+/**
+ * Auto-pull (FR-25, off per project by default): while In Progress has a free slot, the top Ready ticket starts.
+ * Slots are In Progress's WIP limit, else the project's concurrency, minus what is there. Order is priority, then
+ * position. Epics, tickets waiting on a blocker and tickets that overlap work in flight stay in Ready (a manual
+ * drag can still start them anyway). Nothing is pulled while paused or the disk is full. Returns how many started.
+ */
+export async function autoPull(db: Db) {
+  if ((await getSettings(db)).paused || (await diskFull(db))) return 0;
+  const ps = await db.select().from(projects);
+  let n = 0;
+  for (const { id } of ps.filter((p) => p.settings?.autoPull))
+    try {
+      n += await db.transaction(async (tx) => {
+        // The project row serialises pulls; its settings are re-read under the lock.
+        const [p] = await tx.select().from(projects).where(eq(projects.id, id)).for("update");
+        if (!p?.settings?.autoPull) return 0;
+        const cols = await tx.select().from(columns).where(eq(columns.projectId, id));
+        const ready = cols.find((c) => c.slug === "ready");
+        const building = cols.find((c) => c.slug === "in_progress");
+        if (!ready || !building) return 0;
+        const [{ inside }] = (await tx
+          .select({ inside: sql<number>`count(*)::int` })
+          .from(tickets)
+          .where(eq(tickets.columnId, building.id))) as [{ inside: number }];
+        const { concurrency } = await projectConfigOf(tx, p);
+        let free = (building.wipLimit ?? concurrency) - inside;
+        if (free <= 0) return 0;
+        const waiting = await tx
+          .select()
+          .from(tickets)
+          .where(and(eq(tickets.columnId, ready.id), ne(tickets.type, "epic")))
+          .orderBy(asc(tickets.priority), sql`${tickets.position} collate "C"`);
+        let pulled = 0;
+        for (const t of waiting) {
+          if (free <= 0) break;
+          // Checked in turn: a ticket pulled a moment ago counts as in flight for the next one.
+          if ((await unfinishedBlockers(tx, t.id)).length || (await overlapping(tx, t)).length)
+            continue;
+          await moveToColumnEnd(tx, t, ready, building, AUTO_PULL);
+          await startColumnAgent(tx, id, t.id, building, AUTO_PULL);
+          free--;
+          pulled++;
+        }
+        return pulled;
+      });
+    } catch (e) {
+      // e.g. a project still onboarding (AgentsDisabledError): that project's pulls roll back, the rest go on.
+      console.error(`auto-pull failed for project ${id}`, e);
+    }
+  return n;
 }
 
 /** Error of a run stopped by Pause all; such runs, like outage ones, restart on their own (§8). */
