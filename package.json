@@ -21,7 +21,7 @@
     "eval:agents": "pnpm --filter @kanbot/worker eval"
   },
   "devDependencies": {
-    "@eslint/js": "9.39.5",
+    "@eslint/js": "10.0.1",
     "eslint": "^10.15.0",
     "knip": "^6.46.1",
     "prettier": "^3.10.1",
