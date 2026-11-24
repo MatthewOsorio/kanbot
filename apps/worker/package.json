@@ -11,8 +11,8 @@
     "eval": "tsx src/eval.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.325",
-    "@anthropic-ai/sdk": "1.8.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.328",
+    "@anthropic-ai/sdk": "1.10.0",
     "@kanbot/shared": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "pg": "^8.23.1",
@@ -22,9 +22,9 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
-    "@vitest/coverage-v8": "5.1.0",
+    "@vitest/coverage-v8": "5.1.1",
     "tsx": "4.23.15",
     "typescript": "~6.0.3",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
