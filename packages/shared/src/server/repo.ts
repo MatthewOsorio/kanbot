@@ -24,7 +24,7 @@ export async function git(
     return stdout;
   } catch (e) {
     const err = e as { stderr?: string; message: string };
-    throw new Error(`git ${args[0]} failed: ${(err.stderr || err.message).trim()}`);
+    throw new Error(`git ${args[0]} failed: ${(err.stderr || err.message).trim()}`, { cause: e });
   }
 }
 
